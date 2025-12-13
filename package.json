@@ -244,11 +244,12 @@
         }
     },
     "scripts": {
-        "vscode:prepublish": "webpack --mode production",
+        "vscode:prepublish": "npm run build-three && webpack --mode production",
         "compile": "tsc -p ./",
         "watch": "tsc -watch -p ./",
         "webpack": "webpack --mode development",
         "webpack-dev": "webpack --mode development --watch",
+        "build-three": "webpack --config webpack.three.config.js --mode production",
         "pretest": "npm run compile",
         "test": "node ./out/test/run_tests.js",
         "deploy": "vsce publish",
@@ -272,6 +273,7 @@
         "eslint": "^8.40.0",
         "glob": "^11.0.3",
         "mocha": "^11.7.1",
+        "three": "0.182.0",
         "ts-loader": "^9.5.4",
         "typescript": "^5.9.2",
         "webpack": "^5.101.3",

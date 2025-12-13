@@ -14,7 +14,7 @@ export class KeyboardInitExtension implements WebviewExtension {
 const numKeys = 256;
 const numStates = 4;
 let keyBoardData = new Uint8Array(numKeys * numStates);
-let keyBoardTexture = new THREE.DataTexture(keyBoardData, numKeys, numStates, THREE.LuminanceFormat, THREE.UnsignedByteType);
+let keyBoardTexture = new THREE.DataTexture(keyBoardData, numKeys, numStates, (THREE.LuminanceFormat || THREE.RedFormat), THREE.UnsignedByteType);
 keyBoardTexture.magFilter = THREE.NearestFilter;
 keyBoardTexture.needsUpdate = true;
 let pressedKeys = [];

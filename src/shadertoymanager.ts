@@ -94,6 +94,29 @@ export class ShaderToyManager {
             const htmlContent = webviewContentProvider.generateWebviewContent(undefined, this.startingData);
             const originalFileExt = path.extname(document.fileName);
             const previewFilePath = document.fileName.replace(originalFileExt, '.html');
+            const previewDir = path.dirname(previewFilePath);
+
+            // Copy required JS deps for the standalone HTML next to the preview file.
+            // (The generated standalone HTML references these by relative path.)
+            const resourceFiles = [
+                'three.min.js',
+                'jquery.min.js',
+                'stats.min.js',
+                'dat.gui.min.js',
+                'CCapture.all.min.js'
+            ];
+            await Promise.all(resourceFiles.map(async (file) => {
+                const src = path.join(this.context.getVscodeExtensionContext().extensionPath, 'resources', file);
+                const dst = path.join(previewDir, file);
+                try {
+                    await fs.promises.copyFile(src, dst);
+                }
+                catch (reason: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+                    // Optional dependency: ignore if missing.
+                    console.error(reason?.message ?? String(reason));
+                }
+            }));
+
             fs.promises.writeFile(previewFilePath, await htmlContent)
                 .catch((reason: { message: string }) => {
                     console.error(reason.message);

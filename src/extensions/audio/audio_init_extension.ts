@@ -55,7 +55,7 @@ export class AudioInitExtension implements WebviewExtension, TextureExtensionExt
                                     const dataSize = Math.max(analyser.fftSize, analyser.frequencyBinCount);
                                     const dataArray = new Uint8Array(dataSize * 2);
 
-                                    let texture = new THREE.DataTexture(dataArray, dataSize, 2, THREE.LuminanceFormat, THREE.UnsignedByteType);
+                                    let texture = new THREE.DataTexture(dataArray, dataSize, 2, (THREE.LuminanceFormat || THREE.RedFormat), THREE.UnsignedByteType);
                                     texture.magFilter = THREE.LinearFilter;
                                     texture.needsUpdate = true;
 

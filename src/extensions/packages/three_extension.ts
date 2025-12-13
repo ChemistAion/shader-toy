@@ -13,7 +13,7 @@ export class ThreeExtension implements WebviewExtension {
 
     public generateContent(): string {
         if (this.generateStandalone) {
-            return 'https://cdnjs.cloudflare.com/ajax/libs/three.js/110/three.min.js';
+            return 'three.min.js';
         }
         return this.getWebviewResourcePath('three.min.js');
     }
