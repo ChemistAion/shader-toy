@@ -220,14 +220,26 @@
     });
 
     let canvas = document.getElementById('canvas');
-    let gl = canvas.getContext('webgl2');
+    let gl = canvas.getContext('webgl2', { antialias: true, preserveDrawingBuffer: true });
     let isWebGL2 = gl != null;
-    if (gl == null) gl = canvas.getContext('webgl');
+    if (gl == null) gl = canvas.getContext('webgl', { antialias: true, preserveDrawingBuffer: true });
+    if (gl == null) {
+        const msg = 'WebGL is not available in this WebView (cannot create webgl2/webgl context).';
+        console.error(msg);
+        const messageEl = document.getElementById('message');
+        if (messageEl) {
+            messageEl.innerText = msg;
+        }
+        throw new Error(msg);
+    }
     let supportsFloatFramebuffer = (gl.getExtension('EXT_color_buffer_float') != null) || (gl.getExtension('WEBGL_color_buffer_float') != null);
     let supportsHalfFloatFramebuffer = (gl.getExtension('EXT_color_buffer_half_float') != null);
+    // For WebGL1 we also need the corresponding texture type extensions.
+    let supportsFloatTextures = isWebGL2 || (gl.getExtension('OES_texture_float') != null);
+    let supportsHalfFloatTextures = isWebGL2 || (gl.getExtension('OES_texture_half_float') != null);
     let framebufferType = THREE.UnsignedByteType;
-    if (supportsFloatFramebuffer) framebufferType = THREE.FloatType;
-    else if (supportsHalfFloatFramebuffer) framebufferType = THREE.HalfFloatType;
+    if (supportsFloatFramebuffer && supportsFloatTextures) framebufferType = THREE.FloatType;
+    else if (supportsHalfFloatFramebuffer && supportsHalfFloatTextures) framebufferType = THREE.HalfFloatType;
 
     let renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, context: gl, preserveDrawingBuffer: true });
     let resolution = forceAspectRatio(window.innerWidth, window.innerHeight);

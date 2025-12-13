@@ -224,6 +224,14 @@ function _stoy_loadDdsRgbaFloat32Texture(url, onLoad, onError) {
     const placeholder = new THREE.DataTexture(new Float32Array([0, 0, 0, 1]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
     placeholder.generateMipmaps = false;
     placeholder.flipY = false;
+    // Float textures require OES_texture_float_linear for linear filtering (WebGL1 and WebGL2).
+    // Fall back to nearest when the extension is unavailable.
+    try {
+        const floatLinear = gl.getExtension('OES_texture_float_linear') != null;
+        const filter = floatLinear ? THREE.LinearFilter : THREE.NearestFilter;
+        placeholder.magFilter = filter;
+        placeholder.minFilter = filter;
+    } catch { /* ignore */ }
     placeholder.needsUpdate = true;
 
     // Try to request the correct internal format when running on a newer THREE/WebGL2.
