@@ -19,6 +19,12 @@ export class TexturesInitExtension implements WebviewExtension {
     }
 
     private async processBuffers(buffers: Types.BufferDefinition[], context: Context, makeAvailableResource: (localUri: string) => string) {
+        const isDdsPath = (path: string | undefined) => {
+            return path !== undefined && path.toLowerCase().endsWith('.dds');
+        };
+
+        let usesDdsTextureLoader = false;
+
         const convertMagFilter = (mag: Types.TextureMagFilter | undefined) => {
             switch(mag) {
             case Types.TextureMagFilter.Nearest:
@@ -123,6 +129,167 @@ function(err) {
 }`;
         };
 
+        const ddsFloatTextureLoaderScript = () => {
+            return `\
+function _stoy_isDdsMagic(buffer) {
+    // 'DDS '
+    return (new DataView(buffer)).getUint32(0, true) === 0x20534444;
+}
+
+function _stoy_parseDdsRgbaFloat32(buffer) {
+    const dv = new DataView(buffer);
+
+    if (dv.getUint32(0, true) !== 0x20534444) {
+        throw new Error('Invalid DDS magic');
+    }
+
+    // DDS_HEADER starts right after magic
+    const headerStart = 4;
+    const headerSize = dv.getUint32(headerStart + 0, true);
+    if (headerSize !== 124) {
+        throw new Error('Invalid DDS header size');
+    }
+
+    const height = dv.getUint32(headerStart + 8, true);
+    const width = dv.getUint32(headerStart + 12, true);
+
+    // DDS_PIXELFORMAT starts at offset 72 in DDS_HEADER
+    const pfStart = headerStart + 72;
+    const pfSize = dv.getUint32(pfStart + 0, true);
+    if (pfSize !== 32) {
+        throw new Error('Invalid DDS pixel format size');
+    }
+
+    const pfFourCC = dv.getUint32(pfStart + 8, true);
+    const hasDx10Header = pfFourCC === 0x30315844; // 'DX10'
+
+    let dataOffset = headerStart + 124;
+    let bytesPerPixel = 0;
+    let channelCount = 0;
+
+    if (hasDx10Header) {
+        // DDS_HEADER_DXT10 (20 bytes)
+        const dx10Start = dataOffset;
+        const dxgiFormat = dv.getUint32(dx10Start + 0, true);
+        const resourceDimension = dv.getUint32(dx10Start + 4, true);
+        const arraySize = dv.getUint32(dx10Start + 12, true);
+
+        // Only support 2D textures, non-array
+        if (resourceDimension !== 3 /* D3D10_RESOURCE_DIMENSION_TEXTURE2D */) {
+            throw new Error('Unsupported DDS DX10 resource dimension');
+        }
+        if (arraySize !== 1) {
+            throw new Error('Unsupported DDS DX10 arraySize');
+        }
+
+        // DXGI_FORMAT_R32G32B32A32_FLOAT = 2
+        // DXGI_FORMAT_R32G32B32_FLOAT = 6
+        if (dxgiFormat === 2) {
+            bytesPerPixel = 16;
+            channelCount = 4;
+        }
+        else if (dxgiFormat === 6) {
+            bytesPerPixel = 12;
+            channelCount = 3;
+        }
+        else {
+            throw new Error('Unsupported DDS DX10 format (only RGB32F / RGBA32F supported)');
+        }
+
+        dataOffset += 20;
+    }
+    else {
+        // Legacy FourCC float formats used by some tools
+        // D3DFMT_A32B32G32R32F = 116
+        // D3DFMT_A16B16G16R16F = 113 (not supported in this minimal loader)
+        if (pfFourCC !== 116) {
+            throw new Error('Unsupported DDS format (expected DX10 RGB32F/RGBA32F or FourCC 116)');
+        }
+        bytesPerPixel = 16;
+        channelCount = 4;
+    }
+
+    const expectedByteSize = width * height * bytesPerPixel;
+    if (dataOffset + expectedByteSize > buffer.byteLength) {
+        throw new Error('DDS data truncated');
+    }
+
+    const floatCount = width * height * channelCount;
+    const data = new Float32Array(buffer, dataOffset, floatCount);
+    return { width, height, data, channelCount };
+}
+
+function _stoy_loadDdsRgbaFloat32Texture(url, onLoad, onError) {
+    // Placeholder texture; updated in-place after async fetch.
+    const placeholder = new THREE.DataTexture(new Float32Array([0, 0, 0, 1]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
+    placeholder.generateMipmaps = false;
+    placeholder.flipY = true;
+    placeholder.needsUpdate = true;
+
+    // Try to request the correct internal format when running on a newer THREE/WebGL2.
+    try {
+        if (placeholder.internalFormat !== undefined) {
+            placeholder.internalFormat = 'RGBA32F';
+        }
+    } catch { /* ignore */ }
+
+    (async () => {
+        try {
+            // Float textures are always supported for sampling in WebGL2; WebGL1 needs OES_texture_float.
+            if (!isWebGL2) {
+                const floatExt = gl.getExtension('OES_texture_float');
+                if (floatExt == null) {
+                    throw new Error('OES_texture_float not supported (required for DDS RGBA32F in WebGL1)');
+                }
+            }
+
+            const res = await fetch(url);
+            if (!res.ok) {
+                throw new Error('HTTP ' + res.status + ' while fetching ' + url);
+            }
+            const buffer = await res.arrayBuffer();
+            if (!_stoy_isDdsMagic(buffer)) {
+                throw new Error('Not a DDS file');
+            }
+
+            const parsed = _stoy_parseDdsRgbaFloat32(buffer);
+
+            // Switch texture format if the DDS is RGB32F.
+            if (parsed.channelCount === 3) {
+                placeholder.format = THREE.RGBFormat;
+                try {
+                    if (placeholder.internalFormat !== undefined) {
+                        placeholder.internalFormat = 'RGB32F';
+                    }
+                } catch { /* ignore */ }
+            }
+            else {
+                placeholder.format = THREE.RGBAFormat;
+                try {
+                    if (placeholder.internalFormat !== undefined) {
+                        placeholder.internalFormat = 'RGBA32F';
+                    }
+                } catch { /* ignore */ }
+            }
+
+            placeholder.image = { data: parsed.data, width: parsed.width, height: parsed.height };
+            placeholder.needsUpdate = true;
+            if (typeof onLoad === 'function') {
+                onLoad(placeholder);
+            }
+        }
+        catch (err) {
+            console.log(err);
+            if (typeof onError === 'function') {
+                onError(err);
+            }
+        }
+    })();
+
+    return placeholder;
+}`;
+        };
+
         for (const i in buffers) {
             const buffer = buffers[i];
             const textures =  buffer.TextureInputs;
@@ -215,10 +382,22 @@ buffers[${i}].Shader.uniforms.iChannel${channel} = { type: 't', value: ${texture
                     }
                     else if (localPath !== undefined && texture.Mag !== undefined && texture.Min !== undefined && texture.Wrap !== undefined) {
                         const resolvedPath = makeAvailableResource(localPath);
-                        textureLoadScript = `texLoader.load('${resolvedPath}', ${textureOnLoadScript(texture, Number(i), channel)}, undefined, ${makeTextureLoadErrorScript(resolvedPath)})`;
+                        if (isDdsPath(localPath) || isDdsPath(resolvedPath)) {
+                            usesDdsTextureLoader = true;
+                            textureLoadScript = `_stoy_loadDdsRgbaFloat32Texture('${resolvedPath}', ${textureOnLoadScript(texture, Number(i), channel)}, ${makeTextureLoadErrorScript(resolvedPath)})`;
+                        }
+                        else {
+                            textureLoadScript = `texLoader.load('${resolvedPath}', ${textureOnLoadScript(texture, Number(i), channel)}, undefined, ${makeTextureLoadErrorScript(resolvedPath)})`;
+                        }
                     }
                     else if (remotePath !== undefined && texture.Mag !== undefined && texture.Min !== undefined && texture.Wrap !== undefined) {
-                        textureLoadScript = `texLoader.load('${remotePath}', ${textureOnLoadScript(texture, Number(i), channel)}, undefined, ${makeTextureLoadErrorScript(remotePath)})`;
+                        if (isDdsPath(remotePath)) {
+                            usesDdsTextureLoader = true;
+                            textureLoadScript = `_stoy_loadDdsRgbaFloat32Texture('${remotePath}', ${textureOnLoadScript(texture, Number(i), channel)}, ${makeTextureLoadErrorScript(remotePath)})`;
+                        }
+                        else {
+                            textureLoadScript = `texLoader.load('${remotePath}', ${textureOnLoadScript(texture, Number(i), channel)}, undefined, ${makeTextureLoadErrorScript(remotePath)})`;
+                        }
                     }
 
                     if (textureLoadScript !== undefined) {
@@ -239,6 +418,10 @@ buffers[${i}].Shader.uniforms.iChannel${buffer.SelfChannel} = { type: 't', value
                 this.content += `
 buffers[${i}].Shader.uniforms.iKeyboard = { type: 't', value: keyBoardTexture };\n`;
             }
+        }
+
+        if (usesDdsTextureLoader) {
+            this.content = `${ddsFloatTextureLoaderScript()}\n\n${this.content}`;
         }
     }
 
