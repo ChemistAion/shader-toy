@@ -223,7 +223,7 @@ function _stoy_loadDdsRgbaFloat32Texture(url, onLoad, onError) {
     // Placeholder texture; updated in-place after async fetch.
     const placeholder = new THREE.DataTexture(new Float32Array([0, 0, 0, 1]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
     placeholder.generateMipmaps = false;
-    placeholder.flipY = true;
+    placeholder.flipY = false;
     placeholder.needsUpdate = true;
 
     // Try to request the correct internal format when running on a newer THREE/WebGL2.
