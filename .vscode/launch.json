@@ -9,6 +9,9 @@
 			"type": "extensionHost",
 			"request": "launch",
 			"runtimeExecutable": "${execPath}",
+			"env": {
+				"VSCODE_NODE_OPTIONS": "--disable-warning=DEP0040 --disable-warning=ExperimentalWarning"
+			},
 			"args": [
 				"--extensionDevelopmentPath=${workspaceFolder}"
 			],
@@ -22,6 +25,9 @@
 			"type": "extensionHost",
 			"request": "launch",
 			"runtimeExecutable": "${execPath}",
+			"env": {
+				"VSCODE_NODE_OPTIONS": "--disable-warning=DEP0040 --disable-warning=ExperimentalWarning"
+			},
 			"args": [
 				"--extensionDevelopmentPath=${workspaceFolder}",
 				"--extensionTestsPath=${workspaceFolder}/out/test"

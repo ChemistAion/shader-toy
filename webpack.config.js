@@ -16,7 +16,10 @@ const config = {
   },
   devtool: 'source-map',
   externals: {
-    vscode: 'commonjs vscode'
+    vscode: 'commonjs vscode',
+    // glslify uses dynamic requires that webpack can't statically analyze.
+    // This extension runs on Node.js, so keep glslify as a runtime dependency.
+    glslify: 'commonjs glslify'
   },
   resolve: {
     extensions: ['.ts', '.js', '.json']
