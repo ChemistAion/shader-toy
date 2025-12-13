@@ -219,7 +219,7 @@ function _stoy_parseDdsRgbaFloat32(buffer) {
     return { width, height, data, channelCount };
 }
 
-function _stoy_loadDdsRgbaFloat32Texture(url, onLoad, onError) {
+function _stoy_loadDdsRgbaFloat32Texture(url, bufferIndex, channelIndex, onLoad, onError) {
     // Placeholder texture; updated in-place after async fetch.
     const placeholder = new THREE.DataTexture(new Float32Array([0, 0, 0, 1]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
     placeholder.generateMipmaps = false;
@@ -262,28 +262,40 @@ function _stoy_loadDdsRgbaFloat32Texture(url, onLoad, onError) {
 
             const parsed = _stoy_parseDdsRgbaFloat32(buffer);
 
-            // Switch texture format if the DDS is RGB32F.
-            if (parsed.channelCount === 3) {
-                placeholder.format = THREE.RGBFormat;
-                try {
-                    if (placeholder.internalFormat !== undefined) {
-                        placeholder.internalFormat = 'RGB32F';
-                    }
-                } catch { /* ignore */ }
-            }
-            else {
-                placeholder.format = THREE.RGBAFormat;
-                try {
-                    if (placeholder.internalFormat !== undefined) {
-                        placeholder.internalFormat = 'RGBA32F';
-                    }
-                } catch { /* ignore */ }
-            }
+            // IMPORTANT (Three r182 / WebGL2): avoid resizing an already-uploaded DataTexture in-place.
+            // WebGL2 uses texStorage2D, and later texSubImage2D uploads will fail if dimensions change.
+            const format = (parsed.channelCount === 3) ? THREE.RGBFormat : THREE.RGBAFormat;
+            const loaded = new THREE.DataTexture(parsed.data, parsed.width, parsed.height, format, THREE.FloatType);
+            loaded.generateMipmaps = false;
+            loaded.flipY = false;
 
-            placeholder.image = { data: parsed.data, width: parsed.width, height: parsed.height };
-            placeholder.needsUpdate = true;
+            try {
+                if (loaded.internalFormat !== undefined) {
+                    loaded.internalFormat = (parsed.channelCount === 3) ? 'RGB32F' : 'RGBA32F';
+                }
+            } catch { /* ignore */ }
+
+            // Keep float filtering safe across WebGL1/WebGL2.
+            try {
+                const floatLinear = gl.getExtension('OES_texture_float_linear') != null;
+                if (!floatLinear) {
+                    loaded.magFilter = THREE.NearestFilter;
+                    loaded.minFilter = THREE.NearestFilter;
+                }
+            } catch { /* ignore */ }
+
+            loaded.needsUpdate = true;
+
+            // Swap the loaded texture into the uniform while keeping the uniform object stable.
+            try {
+                const uniformName = 'iChannel' + channelIndex;
+                if (buffers && buffers[bufferIndex] && buffers[bufferIndex].Shader && buffers[bufferIndex].Shader.uniforms && buffers[bufferIndex].Shader.uniforms[uniformName]) {
+                    buffers[bufferIndex].Shader.uniforms[uniformName].value = loaded;
+                }
+            } catch { /* ignore */ }
+
             if (typeof onLoad === 'function') {
-                onLoad(placeholder);
+                onLoad(loaded);
             }
         }
         catch (err) {
@@ -392,7 +404,7 @@ buffers[${i}].Shader.uniforms.iChannel${channel} = { type: 't', value: ${texture
                         const resolvedPath = makeAvailableResource(localPath);
                         if (isDdsPath(localPath) || isDdsPath(resolvedPath)) {
                             usesDdsTextureLoader = true;
-                            textureLoadScript = `_stoy_loadDdsRgbaFloat32Texture('${resolvedPath}', ${textureOnLoadScript(texture, Number(i), channel)}, ${makeTextureLoadErrorScript(resolvedPath)})`;
+                            textureLoadScript = `_stoy_loadDdsRgbaFloat32Texture('${resolvedPath}', ${Number(i)}, ${channel}, ${textureOnLoadScript(texture, Number(i), channel)}, ${makeTextureLoadErrorScript(resolvedPath)})`;
                         }
                         else {
                             textureLoadScript = `texLoader.load('${resolvedPath}', ${textureOnLoadScript(texture, Number(i), channel)}, undefined, ${makeTextureLoadErrorScript(resolvedPath)})`;
@@ -401,7 +413,7 @@ buffers[${i}].Shader.uniforms.iChannel${channel} = { type: 't', value: ${texture
                     else if (remotePath !== undefined && texture.Mag !== undefined && texture.Min !== undefined && texture.Wrap !== undefined) {
                         if (isDdsPath(remotePath)) {
                             usesDdsTextureLoader = true;
-                            textureLoadScript = `_stoy_loadDdsRgbaFloat32Texture('${remotePath}', ${textureOnLoadScript(texture, Number(i), channel)}, ${makeTextureLoadErrorScript(remotePath)})`;
+                            textureLoadScript = `_stoy_loadDdsRgbaFloat32Texture('${remotePath}', ${Number(i)}, ${channel}, ${textureOnLoadScript(texture, Number(i), channel)}, ${makeTextureLoadErrorScript(remotePath)})`;
                         }
                         else {
                             textureLoadScript = `texLoader.load('${remotePath}', ${textureOnLoadScript(texture, Number(i), channel)}, undefined, ${makeTextureLoadErrorScript(remotePath)})`;

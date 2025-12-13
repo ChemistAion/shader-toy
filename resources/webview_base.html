@@ -241,6 +241,37 @@
     if (supportsFloatFramebuffer && supportsFloatTextures) framebufferType = THREE.FloatType;
     else if (supportsHalfFloatFramebuffer && supportsHalfFloatTextures) framebufferType = THREE.HalfFloatType;
 
+    // Minimal audit log for debugging WebGL capabilities.
+    try {
+        function _stoy_typeName(t) {
+            if (t === THREE.UnsignedByteType) return 'UnsignedByteType';
+            if (t === THREE.HalfFloatType) return 'HalfFloatType';
+            if (t === THREE.FloatType) return 'FloatType';
+            return String(t);
+        }
+        const supportsFloatLinear = (gl.getExtension('OES_texture_float_linear') != null);
+        const supportsHalfFloatLinear = (gl.getExtension('OES_texture_half_float_linear') != null);
+        console.log('[shader-toy] WebGL audit', {
+            isWebGL2: isWebGL2,
+            glVersion: gl.getParameter(gl.VERSION),
+            glslVersion: gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
+            renderer: gl.getParameter(gl.RENDERER),
+            vendor: gl.getParameter(gl.VENDOR),
+            extensions: {
+                EXT_color_buffer_float: supportsFloatFramebuffer,
+                WEBGL_color_buffer_float: supportsFloatFramebuffer,
+                EXT_color_buffer_half_float: supportsHalfFloatFramebuffer,
+                OES_texture_float: !isWebGL2 && supportsFloatTextures,
+                OES_texture_half_float: !isWebGL2 && supportsHalfFloatTextures,
+                OES_texture_float_linear: supportsFloatLinear,
+                OES_texture_half_float_linear: supportsHalfFloatLinear
+            },
+            chosenFramebufferType: _stoy_typeName(framebufferType)
+        });
+    } catch (e) {
+        console.warn('[shader-toy] WebGL audit failed', e);
+    }
+
     let renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, context: gl, preserveDrawingBuffer: true });
     let resolution = forceAspectRatio(window.innerWidth, window.innerHeight);
     let mouse = new THREE.Vector4(<!-- Start Mouse -->);
