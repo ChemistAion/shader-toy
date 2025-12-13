@@ -45,6 +45,19 @@
             position: absolute;
         }
 
+        #glsl-version {
+            font-family: Consolas;
+            font-size: 0.95em;
+            color: #ccc;
+            background-color: black;
+            z-index: 2;
+            position: absolute;
+            top: 0px;
+            left: 0px;
+            padding: 2px 6px;
+            pointer-events: none;
+        }
+
         #dat_gui_container {
             position: absolute;
             left: 0px;   /* position inside relatively positioned parent */
@@ -80,6 +93,7 @@
 </head>
 <body>
     <div id="message"></div>
+    <div id="glsl-version"></div>
     <div id="dat_gui_container"></div>
     <div id="container">
         <!-- Pause Element -->
@@ -247,15 +261,32 @@
         throw new Error(msg);
     }
 
+    // Small on-screen indicator for which GLSL mode is actually active.
+    try {
+        const glslBadge = document.getElementById('glsl-version');
+        if (glslBadge) {
+            glslBadge.innerText = shaderToyUseGlsl3 ? 'GLSL 300 ES' : 'GLSL 100';
+        }
+    } catch (e) {
+        // Ignore UI badge failures.
+    }
+
     function stoy_prepareFragmentShader(source) {
         // This function is called before handing the shader source to THREE.
         // THREE will still inject its own #version/precision/defines depending on glslVersion.
         if (shaderToyUseGlsl3) {
             return (
-                // In THREE (GLSL3), WebGLProgram declares `pc_fragColor` at location 0 and aliases
-                // `gl_FragColor` to it. If we declare our own `out` without an explicit location,
-                // it may get assigned to a different color attachment and render black.
+                // GLSL 300 ES has no built-in `gl_FragColor`.
+                // Three.js *may* provide `gl_FragColor` as a macro alias to its own output.
+                // If it doesn't, declare our own output at location 0 and alias both `gl_FragColor`
+                // and `STOY_FRAGCOLOR` to it.
+                '#ifdef gl_FragColor\n' +
                 '#define STOY_FRAGCOLOR gl_FragColor\n' +
+                '#else\n' +
+                'layout(location = 0) out vec4 stoy_fragColor;\n' +
+                '#define gl_FragColor stoy_fragColor\n' +
+                '#define STOY_FRAGCOLOR stoy_fragColor\n' +
+                '#endif\n' +
                 '#define texture2D texture\n' +
                 '#define textureCube texture\n' +
                 '\n' + source
