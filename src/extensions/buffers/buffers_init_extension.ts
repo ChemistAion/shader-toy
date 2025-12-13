@@ -34,7 +34,8 @@ buffers.push({
     PingPongChannel: ${buffer.SelfChannel},
     Dependents: ${JSON.stringify(buffer.Dependents)},
     Shader: new THREE.ShaderMaterial({
-        fragmentShader: document.getElementById('${buffer.Name}').textContent,
+        glslVersion: shaderToyUseGlsl3 ? THREE.GLSL3 : THREE.GLSL1,
+        fragmentShader: stoy_prepareFragmentShader(document.getElementById('${buffer.Name}').textContent),
         depthWrite: false,
         depthTest: false,
         uniforms: {

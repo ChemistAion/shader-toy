@@ -198,6 +198,17 @@
                     "type": "boolean",
                     "default": false,
                     "description": "This setting will assume your shaders follow the standards set on the online version of ShaderToy, e.g. you have a mainImage function defined. Use this if you have issues with shaders from shadertoy.com in the VSCode extension, but not if you regularly use shaders defining a regular main function."
+                },
+
+                "shader-toy.glslVersion": {
+                    "type": "string",
+                    "enum": [
+                        "auto",
+                        "100",
+                        "300"
+                    ],
+                    "default": "auto",
+                    "description": "Select GLSL version for fragment shaders. 'auto' prefers GLSL 300 ES when WebGL2 is available, otherwise GLSL 100."
                 }
             }
         },

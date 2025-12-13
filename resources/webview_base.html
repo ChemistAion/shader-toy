@@ -232,6 +232,36 @@
         }
         throw new Error(msg);
     }
+
+    // GLSL version selection
+    // Values: 'auto' | '100' | '300'
+    let shaderToyGlslVersionSetting = '<!-- GLSL Version -->';
+    let shaderToyUseGlsl3 = (shaderToyGlslVersionSetting === '300') || (shaderToyGlslVersionSetting === 'auto' && isWebGL2);
+    if (shaderToyGlslVersionSetting === '300' && !isWebGL2) {
+        const msg = 'GLSL 300 ES requires WebGL2, but only WebGL1 is available.';
+        console.error(msg);
+        const messageEl = document.getElementById('message');
+        if (messageEl) {
+            messageEl.innerText = msg;
+        }
+        throw new Error(msg);
+    }
+
+    function stoy_prepareFragmentShader(source) {
+        // This function is called before handing the shader source to THREE.
+        // THREE will still inject its own #version/precision/defines depending on glslVersion.
+        if (shaderToyUseGlsl3) {
+            return `\
+out vec4 stoy_fragColor;
+#define STOY_FRAGCOLOR stoy_fragColor
+#define texture2D texture
+#define textureCube texture
+\n${source}`;
+        }
+        return `\
+#define STOY_FRAGCOLOR gl_FragColor
+\n${source}`;
+    }
     let supportsFloatFramebuffer = (gl.getExtension('EXT_color_buffer_float') != null) || (gl.getExtension('WEBGL_color_buffer_float') != null);
     let supportsHalfFloatFramebuffer = (gl.getExtension('EXT_color_buffer_half_float') != null);
     // For WebGL1 we also need the corresponding texture type extensions.
@@ -290,6 +320,9 @@
     let commonIncludes = [];
     // Includes
 
+    // Include-only compilation wrapper line count: precision line (always) + optional #version.
+    let stoy_includeHeaderLines = shaderToyUseGlsl3 ? 2 : 1;
+
     // WebGL2 inserts more lines into the shader
     if (isWebGL2) {
         for (let buffer of buffers) {
@@ -337,8 +370,8 @@
         currentShader = {
             Name: include.Name,
             File: include.File,
-            // add two for version and precision lines
-            LineOffset: <!-- Preamble Line Numbers --> + 2
+            // add for wrapper lines inserted by compileFragShader
+            LineOffset: <!-- Preamble Line Numbers --> + stoy_includeHeaderLines
         };
         // Test Compile Included Files
     }
@@ -375,7 +408,13 @@
 
     function compileFragShader(gl, fsSource) {
         const fs = gl.createShader(gl.FRAGMENT_SHADER);
-        gl.shaderSource(fs, fsSource);
+        // Includes are snippets; compile them by wrapping in a minimal fragment shader.
+        // IMPORTANT: #version must be the first statement when used.
+        const header = shaderToyUseGlsl3
+            ? '#version 300 es\nprecision highp float;\n'
+            : 'precision highp float;\n';
+        const wrapped = `${header}${fsSource}\nvoid main() {}\n`;
+        gl.shaderSource(fs, wrapped);
         gl.compileShader(fs);
         if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
             const fragmentLog = gl.getShaderInfoLog(fs);

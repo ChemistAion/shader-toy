@@ -272,7 +272,7 @@ export class BufferProvider {
                 code += `
 void main() {
     vec2 fragCoord = gl_FragCoord.xy;
-    mainImage(gl_FragColor, fragCoord);
+    mainImage(STOY_FRAGCOLOR, fragCoord);
 }`;
             };
 
