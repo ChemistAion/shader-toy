@@ -255,7 +255,9 @@ export class WebviewContentProvider {
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Shader Preamble
         const preambleExtension = new ShaderPreambleExtension();
-        this.webviewAssembler.addReplaceModule(preambleExtension, 'LineOffset: <!-- Preamble Line Numbers --> + 2', '<!-- Preamble Line Numbers -->');
+        // NOTE: This exact line must match the one in resources/webview_base.html.
+        // The base now uses `stoy_includeHeaderLines` because the include compile wrapper differs between GLSL100/300.
+        this.webviewAssembler.addReplaceModule(preambleExtension, 'LineOffset: <!-- Preamble Line Numbers --> + stoy_includeHeaderLines', '<!-- Preamble Line Numbers -->');
 
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Custom Uniforms

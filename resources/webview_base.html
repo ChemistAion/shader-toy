@@ -251,16 +251,20 @@
         // This function is called before handing the shader source to THREE.
         // THREE will still inject its own #version/precision/defines depending on glslVersion.
         if (shaderToyUseGlsl3) {
-            return `\
-out vec4 stoy_fragColor;
-#define STOY_FRAGCOLOR stoy_fragColor
-#define texture2D texture
-#define textureCube texture
-\n${source}`;
+            return (
+                // In THREE (GLSL3), WebGLProgram declares `pc_fragColor` at location 0 and aliases
+                // `gl_FragColor` to it. If we declare our own `out` without an explicit location,
+                // it may get assigned to a different color attachment and render black.
+                '#define STOY_FRAGCOLOR gl_FragColor\n' +
+                '#define texture2D texture\n' +
+                '#define textureCube texture\n' +
+                '\n' + source
+            );
         }
-        return `\
-#define STOY_FRAGCOLOR gl_FragColor
-\n${source}`;
+        return (
+            '#define STOY_FRAGCOLOR gl_FragColor\n' +
+            '\n' + source
+        );
     }
     let supportsFloatFramebuffer = (gl.getExtension('EXT_color_buffer_float') != null) || (gl.getExtension('WEBGL_color_buffer_float') != null);
     let supportsHalfFloatFramebuffer = (gl.getExtension('EXT_color_buffer_half_float') != null);
