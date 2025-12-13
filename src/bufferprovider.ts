@@ -281,8 +281,16 @@ void main() {
             }
             else {
                 // If there is no void main() in the shader we assume it is a shader-toy style shader
-                const mainPos = code.search(/void\s+main\s*\(\s*\)\s*\{/g);
-                const mainImagePos = code.search(/void\s+mainImage\s*\(\s*out\s+vec4\s+\w+,\s*(in\s)?\s*vec2\s+\w+\s*\)\s*\{/g);
+                // IMPORTANT: avoid matching commented-out code like `// void main() {}`.
+                // This check only determines whether we should inject a wrapper `main()`.
+                const codeForSearch = code
+                    // block comments
+                    .replace(/\/\*[\s\S]*?\*\//g, '')
+                    // line comments
+                    .replace(/\/\/.*$/gm, '');
+
+                const mainPos = codeForSearch.search(/void\s+main\s*\(\s*\)\s*\{/g);
+                const mainImagePos = codeForSearch.search(/void\s+mainImage\s*\(\s*out\s+vec4\s+\w+,\s*(in\s)?\s*vec2\s+\w+\s*\)\s*\{/g);
                 if (mainPos === -1 && mainImagePos >= 0) {
                     insertMainImageCode();
                 }
