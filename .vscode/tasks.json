@@ -5,6 +5,22 @@
 	"tasks": [
 		{
 			"type": "npm",
+			"script": "webpack",
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "never"
+			}
+		},
+		{
+			"type": "npm",
+			"script": "webpack-dev",
+			"isBackground": true,
+			"presentation": {
+				"reveal": "never"
+			}
+		},
+		{
+			"type": "npm",
 			"script": "watch",
 			"problemMatcher": "$tsc-watch",
 			"isBackground": true,
@@ -15,6 +31,14 @@
 				"kind": "build",
 				"isDefault": true
 			}
+		},
+		{
+			"label": "watch-all",
+			"dependsOn": [
+				"npm: webpack-dev",
+				"npm: watch"
+			],
+			"dependsOrder": "parallel"
 		}
 	]
 }
