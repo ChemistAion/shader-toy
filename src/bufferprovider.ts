@@ -335,7 +335,25 @@ void main() {
                 code = glsl.compile(code, {basedir: baseDir});
             }
             catch (e) {
-                vscode.window.showErrorMessage((e as Error).message);
+                const rawMessage = (e as Error).message || String(e);
+                // Make the most common failure mode actionable: missing dependency modules.
+                // Example: "Cannot find module 'glsl-noise/simplex/2d'".
+                const missingModuleMatch = rawMessage.match(/Cannot find module ['"]([^'"]+)['"]/i);
+                if (missingModuleMatch) {
+                    const requested = missingModuleMatch[1];
+                    // Suggest installing the top-level package name (best-effort heuristic).
+                    const packageName = requested.startsWith('@')
+                        ? requested.split('/').slice(0, 2).join('/')
+                        : requested.split('/')[0];
+                    vscode.window.showErrorMessage(
+                        `glslify could not resolve '${requested}'. ` +
+                        `Install the dependency in your workspace (e.g. 'npm i ${packageName}') ` +
+                        `or adjust the require() path. (basedir: ${baseDir})`
+                    );
+                }
+                else {
+                    vscode.window.showErrorMessage(`glslify failed: ${rawMessage}`);
+                }
             }
         }
 
