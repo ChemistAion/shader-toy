@@ -118,6 +118,7 @@
     };
 
     let currentShader = {};
+    var sourceIdToFile = {};
     // Error Callback
 
     // Development feature: Output warnings from third-party libraries
@@ -320,6 +321,13 @@
     // Include-only compilation wrapper line count: precision line (always) + optional #version.
     let includeHeaderLines = glslUseVersion3 ? 2 : 1;
 
+    // Map GLSL #line "source string numbers" to include file paths.
+    // Source id 0 is the current shader file; include sources are 1..N.
+    sourceIdToFile = {};
+    for (let i = 0; i < commonIncludes.length; i++) {
+        sourceIdToFile[i + 1] = commonIncludes[i].File;
+    }
+
     // WebGL2 inserts more lines into the shader
     if (isWebGL2) {
         for (let buffer of buffers) {
@@ -405,7 +413,7 @@
         currentShader = {
             Name: buffer.Name,
             File: buffer.File,
-            LineOffset: buffer.LineOffset
+            LineOffset: 0
         };
 
         quad.material = buffer.Shader;
