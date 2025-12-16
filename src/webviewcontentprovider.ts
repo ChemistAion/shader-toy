@@ -15,6 +15,7 @@ import { InitialFlyControlPositionExtension } from './extensions/initial_fly_con
 import { InitialFlyControlRotationExtension } from './extensions/initial_fly_control_rotation_extension';
 
 import { ForcedAspectExtension } from './extensions/forced_aspect_extension';
+import { GlslVersionExtension, type GlslVersionSetting } from './extensions/glsl_version_extension';
 import { ForcedScreenshotResolutionExtension } from './extensions/forced_screenshot_resolution_extension';
 
 import { ShaderPreambleExtension } from './extensions/preamble_extension';
@@ -120,7 +121,7 @@ export class WebviewContentProvider {
                     this.buffers.push({
                         Name: 'final-blit',
                         File: 'final-blit',
-                        Code: 'void main() { gl_FragColor = texture2D(iChannel0, gl_FragCoord.xy / iResolution.xy); }',
+                        Code: 'void main() { GLSL_FRAGCOLOR = texture2D(iChannel0, gl_FragCoord.xy / iResolution.xy); }',
                         TextureInputs: [{
                             Channel: 0,
                             File: '',
@@ -226,6 +227,17 @@ export class WebviewContentProvider {
         this.webviewAssembler.addReplaceModule(forcedAspectExtension, 'let forcedAspects = [<!-- Forced Aspect -->];', '<!-- Forced Aspect -->');
 
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        // GLSL Version
+        // Normalize setting values to keep the WebView logic simple.
+        // Accept legacy values '100'/'300' for backward compatibility.
+        const glslVersionConfig = this.context.getConfig<string>('glslVersion');
+        const glslVersionSetting: GlslVersionSetting = (glslVersionConfig === 'WebGL2' || glslVersionConfig === '300')
+            ? 'WebGL2'
+            : 'Default';
+        const glslVersionExtension = new GlslVersionExtension(glslVersionSetting);
+        this.webviewAssembler.addReplaceModule(glslVersionExtension, "let glslVersionSetting = '<!-- GLSL Version -->';", '<!-- GLSL Version -->');
+
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Keyboard
         let keyboardShaderExtension: KeyboardShaderExtension | undefined;
         if (useKeyboard) {
@@ -244,7 +256,9 @@ export class WebviewContentProvider {
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Shader Preamble
         const preambleExtension = new ShaderPreambleExtension();
-        this.webviewAssembler.addReplaceModule(preambleExtension, 'LineOffset: <!-- Preamble Line Numbers --> + 2', '<!-- Preamble Line Numbers -->');
+        // NOTE: This exact line must match the one in resources/webview_base.html.
+        // The base now uses `includeHeaderLines` because the include compile wrapper differs between Default/WebGL2 modes.
+        this.webviewAssembler.addReplaceModule(preambleExtension, 'LineOffset: <!-- Preamble Line Numbers --> + includeHeaderLines', '<!-- Preamble Line Numbers -->');
 
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Custom Uniforms

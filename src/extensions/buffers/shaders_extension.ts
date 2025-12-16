@@ -27,6 +27,15 @@ ${preamble}
 ${keyboardShaderExtension !== undefined ? keyboardShaderExtension.getShaderPreamble() : ''}
 ${buffer.Code}
 </script>`;
+
+            if (buffer.VertexCode !== undefined) {
+                this.content += `\
+<script id='${buffer.Name}_vertex' type='x-shader/x-vertex'>
+${preamble}
+${keyboardShaderExtension !== undefined ? keyboardShaderExtension.getShaderPreamble() : ''}
+${buffer.VertexCode}
+</script>`;
+            }
         }
     }
 

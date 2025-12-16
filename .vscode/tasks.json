@@ -5,6 +5,26 @@
 	"tasks": [
 		{
 			"type": "npm",
+			"script": "webpack-dev",
+			"problemMatcher": {
+				"owner": "webpack",
+				"pattern": {
+					"regexp": "^(.*)$",
+					"message": 1
+				},
+				"background": {
+					"activeOnStart": true,
+					"beginsPattern": ".*webpack.*",
+					"endsPattern": "^webpack\\s+\\d+\\..*compiled.*$"
+				}
+			},
+			"isBackground": true,
+			"presentation": {
+				"reveal": "never"
+			}
+		},
+		{
+			"type": "npm",
 			"script": "watch",
 			"problemMatcher": "$tsc-watch",
 			"isBackground": true,
@@ -15,6 +35,15 @@
 				"kind": "build",
 				"isDefault": true
 			}
+		},
+		{
+			"label": "watch-all",
+			"dependsOn": [
+				"npm: webpack-dev",
+				"npm: watch"
+			],
+			"dependsOrder": "parallel",
+			"problemMatcher": []
 		}
 	]
 }
