@@ -36,7 +36,7 @@ export class DiagnosticsErrorsExtension implements WebviewExtension {
 
                     if (typeof error === 'string' && error.indexOf('ERROR_IVERTEX_SOURCE') >= 0) {
                         lineNumber = 1;
-                        error = 'This file is an iVertex source and cannot be previewed standalone. Open a fragment shader and reference it via: #iVertex "file://..."';
+                        error = 'This is a vertex-shader source and cannot be previewed on its own; it must be referenced using #iVertex.';
                     }
 
                     if (diagnosticsByFile[file] === undefined) {
