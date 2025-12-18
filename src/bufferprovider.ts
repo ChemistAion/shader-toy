@@ -149,13 +149,13 @@ export class BufferProvider {
                 1
             );
 
-            // Replace with a minimal fragment stub that fails with a descriptive identifier,
+            // Replace with a minimal fragment stub that fails with a descriptive preprocessor error,
             // so the webview error panel is not silently empty.
+            // NOTE: Three.js injects its own #version/precision/defines before our source; this #error
+            // will still be hit and should surface as a clear compile message.
             code = [
-                'void mainImage(out vec4 fragColor, in vec2 fragCoord) {',
-                '    ERROR_USE_IVERTEX;',
-                '    fragColor = vec4(0.0);',
-                '}'
+                '#error ERROR_IVERTEX_SOURCE This file is an iVertex source and cannot be previewed standalone. Open a fragment shader and reference this file via: #iVertex "file://..."',
+                'void mainImage(out vec4 fragColor, in vec2 fragCoord) { fragColor = vec4(0.0); }'
             ].join('\n');
         }
 
