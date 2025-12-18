@@ -35,6 +35,19 @@ export class BufferProvider {
         this.visitedFiles = [];
     }
 
+    private looksLikeStandaloneVertexShader(code: string): boolean {
+        // Heuristic only: we only want to catch the common case of a vertex shader being
+        // opened directly for preview (where the extension assumes fragment-stage by default).
+        // Keep this conservative to avoid false positives.
+        const withoutBlockComments = code.replace(/\/\*[\s\S]*?\*\//g, '');
+        const withoutLineComments = withoutBlockComments.replace(/\/\/.*$/gm, '');
+        const stripped = withoutLineComments;
+
+        const hasVertexBuiltins = /\bgl_Position\b|\bgl_VertexID\b|\bgl_InstanceID\b|\bgl_PointSize\b/.test(stripped);
+        const hasFragmentSignals = /\bmainImage\b|\bgl_FragCoord\b|\bgl_FragColor\b|\bGLSL_FRAGCOLOR\b/.test(stripped);
+        return hasVertexBuiltins && !hasFragmentSignals;
+    }
+
     public async parseShaderCode(file: string, code: string, buffers: Types.BufferDefinition[], commonIncludes: Types.IncludeDefinition[], generateStandalone: boolean) {
         await this.parseShaderCodeInternal(file, file, code, buffers, commonIncludes, generateStandalone);
 
@@ -126,6 +139,20 @@ export class BufferProvider {
             return;
         }
         this.visitedFiles.push(file);
+
+        // If the entry shader looks like a vertex shader but is being previewed standalone,
+        // show a clear diagnostic instead of letting it compile as a fragment shader.
+        if (rootFile === file && this.looksLikeStandaloneVertexShader(code)) {
+            this.showErrorAtLine(
+                file,
+                'This file looks like a vertex shader. Standalone preview assumes a fragment shader; use #iVertex from a fragment pass to reference this file.',
+                1
+            );
+
+            // Replace with a minimal fragment stub so the preview stays stable and does not
+            // spam confusing stage-specific compile errors.
+            code = 'void mainImage(out vec4 fragColor, in vec2 fragCoord) { fragColor = vec4(0.0); }';
+        }
 
         const boxedLineOffset: Types.BoxedValue<number> = { Value: 0 };
         const boxedVertexShaderFile: Types.BoxedValue<string | undefined> = { Value: undefined };
