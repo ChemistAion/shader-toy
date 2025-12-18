@@ -28,11 +28,16 @@ export class DiagnosticsErrorsExtension implements WebviewExtension {
                 while (match = errorRegex.exec(rawErrors)) {
                     const sid = Number(match[1]);
                     const rawLine = Number(match[2]);
-                    const error = match[3];
+                    let error = match[3];
                     const file = (sid === 0)
                         ? currentShader.File
                         : ((Array.isArray(commonIncludes) && commonIncludes[sid - 1] && commonIncludes[sid - 1].File) ? commonIncludes[sid - 1].File : currentShader.File);
-                    const lineNumber = rawLine;
+                    let lineNumber = rawLine;
+
+                    if (typeof error === 'string' && error.indexOf('ERROR_IVERTEX_SOURCE') >= 0) {
+                        lineNumber = 1;
+                        error = 'This file is an iVertex source and cannot be previewed standalone. Open a fragment shader and reference it via: #iVertex "file://..."';
+                    }
 
                     if (diagnosticsByFile[file] === undefined) {
                         diagnosticsByFile[file] = [];

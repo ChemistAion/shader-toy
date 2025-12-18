@@ -24,10 +24,15 @@ export class DefaultErrorsExtension implements WebviewExtension {
                 //   ERROR: <sourceId>:<line>: <message>
                     let message = rawErrors.replace(/ERROR:\s*(\d+):(\d+):\W(.*?)(?:\n|$)/g, function(match, sourceId, line, error) {
                         const sid = Number(sourceId);
-                        const lineNumber = Number(line);
+                        let lineNumber = Number(line);
                         const file = (sid === 0)
                             ? currentShader.File
                             : ((Array.isArray(commonIncludes) && commonIncludes[sid - 1] && commonIncludes[sid - 1].File) ? commonIncludes[sid - 1].File : currentShader.File);
+
+                        if (typeof error === 'string' && error.indexOf('ERROR_IVERTEX_SOURCE') >= 0) {
+                            lineNumber = 1;
+                            error = 'This file is an iVertex source and cannot be previewed standalone. Open a fragment shader and reference it via: #iVertex "file://..."';
+                        }
                     let lineHighlight = "<a class='error' unselectable onclick='revealError(" + lineNumber + ", " + JSON.stringify(file) + ")'>Line " + lineNumber + "</a>";
                     return '<li>' + lineHighlight + ': ' + error + ' <span>(' + file + ')</span></li>';
                 });
