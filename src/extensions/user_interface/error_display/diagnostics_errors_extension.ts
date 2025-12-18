@@ -6,7 +6,7 @@ export class DiagnosticsErrorsExtension implements WebviewExtension {
     public generateContent(): string {
         return `\
 (() => {
-    // Optional hook for feature extensions (e.g. WebGL2/iVertex) to rewrite
+    // Optional hook for feature branches (e.g. WebGL2/iVertex) to rewrite
     // compiler errors without forking the core diagnostics/error display logic.
     // Expected signature:
     //   window.shaderToyRewriteGlslError({ sid, lineNumber, file, error, currentShader })
@@ -38,7 +38,7 @@ export class DiagnosticsErrorsExtension implements WebviewExtension {
                     const sid = Number(match[1]);
                     const rawLine = Number(match[2]);
                     let error = match[3];
-                    const file = (sid === 0)
+                    let file = (sid === 0)
                         ? currentShader.File
                         : ((Array.isArray(commonIncludes) && commonIncludes[sid - 1] && commonIncludes[sid - 1].File) ? commonIncludes[sid - 1].File : currentShader.File);
                     let lineNumber = rawLine;
