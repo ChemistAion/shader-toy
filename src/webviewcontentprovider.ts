@@ -43,6 +43,7 @@ import { ReloadButtonExtension } from './extensions/user_interface/reload_button
 
 import { DefaultErrorsExtension } from './extensions/user_interface/error_display/default_errors_extension';
 import { DiagnosticsErrorsExtension } from './extensions/user_interface/error_display/diagnostics_errors_extension';
+import { IvertexErrorRewriteExtension } from './extensions/user_interface/error_display/ivertex_error_rewrite_extension';
 import { GlslifyErrorsExtension } from './extensions/user_interface/error_display/glslify_errors_extension';
 
 import { PauseWholeRenderExtension } from './extensions/pause_whole_render_extension';
@@ -452,6 +453,13 @@ export class WebviewContentProvider {
 
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Error Handling
+        // WebGL2/iVertex add-on: translate controlled compile markers (e.g. standalone vertex preview) into a friendly message.
+        // Insert before the error callback module so the hook is available when the error display IIFE runs.
+        if (glslVersionSetting === 'WebGL2') {
+            const ivertexErrorRewriteExtension = new IvertexErrorRewriteExtension();
+            this.webviewAssembler.addWebviewModule(ivertexErrorRewriteExtension, 'let currentShader = {};');
+        }
+
         let errorsExtension: WebviewExtension;
         if (this.context.getConfig<boolean>('enableGlslifySupport')) {
             errorsExtension = new GlslifyErrorsExtension();

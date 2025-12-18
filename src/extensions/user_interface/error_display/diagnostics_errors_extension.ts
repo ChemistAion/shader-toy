@@ -6,6 +6,15 @@ export class DiagnosticsErrorsExtension implements WebviewExtension {
     public generateContent(): string {
         return `\
 (() => {
+    // Optional hook for feature extensions (e.g. WebGL2/iVertex) to rewrite
+    // compiler errors without forking the core diagnostics/error display logic.
+    // Expected signature:
+    //   window.shaderToyRewriteGlslError({ sid, lineNumber, file, error, currentShader })
+    // and return: { lineNumber?: number, file?: string, error?: string } | undefined
+    const rewriteGlslError = (typeof window !== 'undefined' && window.shaderToyRewriteGlslError)
+        ? window.shaderToyRewriteGlslError
+        : undefined;
+
     const consoleError = console.error ? console.error.bind(console) : undefined;
     console.error = function () {
         try {
@@ -34,9 +43,13 @@ export class DiagnosticsErrorsExtension implements WebviewExtension {
                         : ((Array.isArray(commonIncludes) && commonIncludes[sid - 1] && commonIncludes[sid - 1].File) ? commonIncludes[sid - 1].File : currentShader.File);
                     let lineNumber = rawLine;
 
-                    if (typeof error === 'string' && error.indexOf('ERROR_IVERTEX_SOURCE') >= 0) {
-                        lineNumber = 1;
-                        error = 'This is a vertex-shader source and cannot be previewed on its own; it must be referenced using #iVertex.';
+                    if (typeof rewriteGlslError === 'function') {
+                        const rewritten = rewriteGlslError({ sid, lineNumber, file, error, currentShader });
+                        if (rewritten && typeof rewritten === 'object') {
+                            if (rewritten.lineNumber !== undefined) lineNumber = rewritten.lineNumber;
+                            if (rewritten.file !== undefined) file = rewritten.file;
+                            if (rewritten.error !== undefined) error = rewritten.error;
+                        }
                     }
 
                     if (diagnosticsByFile[file] === undefined) {
