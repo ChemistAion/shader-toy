@@ -440,6 +440,20 @@
         gl.compileShader(fs);
         if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
             const fragmentLog = gl.getShaderInfoLog(fs);
+            if (fragmentLog && fragmentLog.indexOf('ERROR_IVERTEX_SOURCE') >= 0) {
+                const savedLineOffset = (currentShader && typeof currentShader.LineOffset === 'number')
+                    ? currentShader.LineOffset
+                    : undefined;
+                if (currentShader) {
+                    currentShader.LineOffset = 0;
+                }
+                const friendly = 'ERROR: 0:1: This is a vertex-shader source and cannot be previewed on its own; it must be referenced using #iVertex.\n';
+                console.error('THREE.WebGLProgram: shader error: ', gl.getError(), 'gl.COMPILE_STATUS', null, null, null, null, friendly);
+                if (currentShader && savedLineOffset !== undefined) {
+                    currentShader.LineOffset = savedLineOffset;
+                }
+                return false;
+            }
             console.error( 'THREE.WebGLProgram: shader error: ', gl.getError(), 'gl.COMPILE_STATUS', null, null, null, null, fragmentLog );
             return false;
         }
@@ -457,6 +471,20 @@
         gl.compileShader(vs);
         if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
             const vertexLog = gl.getShaderInfoLog(vs);
+            if (vertexLog && vertexLog.indexOf('ERROR_IVERTEX_SOURCE') >= 0) {
+                const savedLineOffset = (currentShader && typeof currentShader.LineOffset === 'number')
+                    ? currentShader.LineOffset
+                    : undefined;
+                if (currentShader) {
+                    currentShader.LineOffset = 0;
+                }
+                const friendly = 'ERROR: 0:1: This is a vertex-shader source and cannot be previewed on its own; it must be referenced using #iVertex.\n';
+                console.error('THREE.WebGLProgram: shader error: ', gl.getError(), 'gl.COMPILE_STATUS', null, null, null, null, friendly);
+                if (currentShader && savedLineOffset !== undefined) {
+                    currentShader.LineOffset = savedLineOffset;
+                }
+                return false;
+            }
             console.error('THREE.WebGLProgram: shader error: ', gl.getError(), 'gl.COMPILE_STATUS', null, null, null, null, vertexLog);
             return false;
         }
