@@ -18,7 +18,7 @@ export class DiagnosticsErrorsExtension implements WebviewExtension {
                 }
             }
 
-            if (rawErrors !== undefined && currentShader && currentShader.LineOffset !== undefined) {
+            if (rawErrors !== undefined && currentShader) {
                 let errorRegex = /ERROR:\\s*(\\d+):(\\d+):\\W(.*?)(?:\\n|$)/g;
                 let match;
 
@@ -31,8 +31,8 @@ export class DiagnosticsErrorsExtension implements WebviewExtension {
                     const error = match[3];
                     const file = (sid === 0)
                         ? currentShader.File
-                        : ((typeof sourceIdToFile === 'object' && sourceIdToFile[sid]) ? sourceIdToFile[sid] : currentShader.File);
-                    const lineNumber = rawLine - (currentShader.LineOffset || 0);
+                        : ((Array.isArray(commonIncludes) && commonIncludes[sid - 1] && commonIncludes[sid - 1].File) ? commonIncludes[sid - 1].File : currentShader.File);
+                    const lineNumber = rawLine;
 
                     if (diagnosticsByFile[file] === undefined) {
                         diagnosticsByFile[file] = [];
