@@ -386,19 +386,14 @@
             };
 
             const vertexSource = prepareVertexShader(document.getElementById(buffer.VertexShaderElementId).textContent);
-            const trivialFragment = prepareFragmentShader('void main() { GLSL_FRAGCOLOR = vec4(0.0); }');
-            const vertexCompileMaterial = new THREE.ShaderMaterial({
-                glslVersion: glslUseVersion3 ? THREE.GLSL3 : THREE.GLSL1,
-                vertexShader: vertexSource,
-                fragmentShader: trivialFragment,
-                depthWrite: false,
-                depthTest: false,
-                uniforms: buffer.Shader.uniforms
-            });
 
-            quad.material = vertexCompileMaterial;
-            renderer.setRenderTarget(buffer.Target);
-            renderer.render(scene, camera);
+            // Compile the vertex shader directly so we can reliably detect failure.
+            // If it fails, skip compiling the buffer's fragment shader to avoid a duplicate
+            // error report attributed to the fragment file.
+            if (!compileVertShader(gl, vertexSource)) {
+                failed++;
+                continue;
+            }
         }
 
         currentShader = {
@@ -444,6 +439,23 @@
         if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
             const fragmentLog = gl.getShaderInfoLog(fs);
             console.error( 'THREE.WebGLProgram: shader error: ', gl.getError(), 'gl.COMPILE_STATUS', null, null, null, null, fragmentLog );
+            return false;
+        }
+        return true;
+    }
+
+    function compileVertShader(gl, vsSource) {
+        const vs = gl.createShader(gl.VERTEX_SHADER);
+        // IMPORTANT: #version must be the first statement when used.
+        const header = glslUseVersion3
+            ? '#version 300 es\nprecision highp float;\n'
+            : 'precision highp float;\n';
+        const wrapped = `${header}${vsSource}`;
+        gl.shaderSource(vs, wrapped);
+        gl.compileShader(vs);
+        if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
+            const vertexLog = gl.getShaderInfoLog(vs);
+            console.error('THREE.WebGLProgram: shader error: ', gl.getError(), 'gl.COMPILE_STATUS', null, null, null, null, vertexLog);
             return false;
         }
         return true;

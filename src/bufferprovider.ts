@@ -149,9 +149,14 @@ export class BufferProvider {
                 1
             );
 
-            // Replace with a minimal fragment stub so the preview stays stable and does not
-            // spam confusing stage-specific compile errors.
-            code = 'void mainImage(out vec4 fragColor, in vec2 fragCoord) { fragColor = vec4(0.0); }';
+            // Replace with a minimal fragment stub that fails with a descriptive identifier,
+            // so the webview error panel is not silently empty.
+            code = [
+                'void mainImage(out vec4 fragColor, in vec2 fragCoord) {',
+                '    STOY_STANDALONE_VERTEX_SHADER_PREVIEW_NOT_SUPPORTED_USE_IVERTEX;',
+                '    fragColor = vec4(0.0);',
+                '}'
+            ].join('\n');
         }
 
         const boxedLineOffset: Types.BoxedValue<number> = { Value: 0 };
