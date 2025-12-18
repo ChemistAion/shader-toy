@@ -19,15 +19,15 @@ export class DefaultErrorsExtension implements WebviewExtension {
                 }
             }
 
-            if (rawErrors !== undefined && currentShader && currentShader.LineOffset !== undefined) {
+                if (rawErrors !== undefined && currentShader) {
                 // Typical WebGL log format:
                 //   ERROR: <sourceId>:<line>: <message>
-                let message = rawErrors.replace(/ERROR:\\s*(\\d+):(\\d+):\\W(.*?)(?:\\n|$)/g, function(match, sourceId, line, error) {
-                    const sid = Number(sourceId);
-                    let lineNumber = Number(line) - (currentShader.LineOffset || 0);
-                    const file = (sid === 0)
-                        ? currentShader.File
-                        : ((typeof sourceIdToFile === 'object' && sourceIdToFile[sid]) ? sourceIdToFile[sid] : currentShader.File);
+                    let message = rawErrors.replace(/ERROR:\s*(\d+):(\d+):\W(.*?)(?:\n|$)/g, function(match, sourceId, line, error) {
+                        const sid = Number(sourceId);
+                        const lineNumber = Number(line);
+                        const file = (sid === 0)
+                            ? currentShader.File
+                            : ((Array.isArray(commonIncludes) && commonIncludes[sid - 1] && commonIncludes[sid - 1].File) ? commonIncludes[sid - 1].File : currentShader.File);
                     let lineHighlight = "<a class='error' unselectable onclick='revealError(" + lineNumber + ", " + JSON.stringify(file) + ")'>Line " + lineNumber + "</a>";
                     return '<li>' + lineHighlight + ': ' + error + ' <span>(' + file + ')</span></li>';
                 });
