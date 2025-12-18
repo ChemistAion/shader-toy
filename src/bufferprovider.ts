@@ -192,6 +192,42 @@ export class BufferProvider {
                     vertexCode = vertexCode.replace(versionDirective, '');
                     this.showInformationAtLine(vertexFile, `Version directive '${versionDirective}' ignored by shader-toy extension`, 0);
                 }
+
+                // Apply the same include / #line mapping pipeline as fragment shaders so that
+                // vertex-stage compile errors point at the right file/line.
+                // (We intentionally do not propagate textures/uniforms/etc from vertex files.)
+                const vertexLineOffsetBox: Types.BoxedValue<number> = { Value: 0 };
+                const vertexVertexShaderFile: Types.BoxedValue<string | undefined> = { Value: undefined };
+                const vertexVertexShaderLine: Types.BoxedValue<number | undefined> = { Value: undefined };
+                const vertexPendingTextures: InputTexture[] = [];
+                const vertexPendingTextureSettings = new Map<ChannelId, InputTextureSettings>();
+                const vertexPendingUniforms: Types.UniformDefinition[] = [];
+                const vertexIncludes: Types.IncludeDefinition[] = [];
+                const vertexUsesKeyboard: Types.BoxedValue<boolean> = { Value: false };
+                const vertexUsesFirstPersonControls: Types.BoxedValue<boolean> = { Value: false };
+                const vertexStrictComp: Types.BoxedValue<boolean> = { Value: false };
+
+                vertexCode = await this.transformCode(
+                    rootFile,
+                    vertexFile,
+                    vertexCode,
+                    vertexLineOffsetBox,
+                    vertexVertexShaderFile,
+                    vertexVertexShaderLine,
+                    vertexPendingTextures,
+                    vertexPendingTextureSettings,
+                    vertexPendingUniforms,
+                    vertexIncludes,
+                    commonIncludes,
+                    vertexUsesKeyboard,
+                    vertexUsesFirstPersonControls,
+                    vertexStrictComp,
+                    generateStandalone
+                );
+
+                if (!vertexCode.startsWith('#line')) {
+                    vertexCode = `#line 1 0\n${vertexCode}`;
+                }
             }
         }
         const textures: Types.TextureDefinition[] = [];
