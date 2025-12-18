@@ -153,7 +153,7 @@ export class BufferProvider {
             // so the webview error panel is not silently empty.
             code = [
                 'void mainImage(out vec4 fragColor, in vec2 fragCoord) {',
-                '    STOY_STANDALONE_VERTEX_SHADER_PREVIEW_NOT_SUPPORTED_USE_IVERTEX;',
+                '    ERROR_USE_IVERTEX;',
                 '    fragColor = vec4(0.0);',
                 '}'
             ].join('\n');

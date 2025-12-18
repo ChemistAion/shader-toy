@@ -365,6 +365,7 @@
     // Run every shader once to check for compile errors
     let compileTimeStart = performance.now();
     let failed=0;
+    const failedBufferNames = new Set();
     for (let include of commonIncludes) {
         currentShader = {
             Name: include.Name,
@@ -392,6 +393,7 @@
             // error report attributed to the fragment file.
             if (!compileVertShader(gl, vertexSource)) {
                 failed++;
+                failedBufferNames.add(buffer.Name);
                 continue;
             }
         }
@@ -479,6 +481,9 @@
         // Audio Update
 
         for (let buffer of buffers) {
+            if (failedBufferNames.has(buffer.Name)) {
+                continue;
+            }
             buffer.Shader.uniforms['iResolution'].value = resolution;
             buffer.Shader.uniforms['iTimeDelta'].value = deltaTime;
             buffer.Shader.uniforms['iTime'].value = time;
