@@ -27,6 +27,10 @@ type InputTextureSettings = {
     TypeLine?: number,
 };
 
+// GLSL `#line` supports a "source string number". We use a sentinel for "this current file"
+// so nested includes can be re-mapped correctly when an included file is inlined into a parent.
+const SELF_SOURCE_ID = 65535;
+
 export class BufferProvider {
     private context: Context;
     private visitedFiles: string[];
@@ -137,6 +141,10 @@ export class BufferProvider {
         const strictComp: Types.BoxedValue<boolean> = { Value: false };
 
         code = await this.transformCode(rootFile, file, code, boxedLineOffset, pendingTextures, pendingTextureSettings, pendingUniforms, includes, commonIncludes, boxedUsesKeyboard, boxedFirstPersonControls, strictComp, generateStandalone);
+
+        // Normalize any "self" source-id sentinel to 0 for top-level compilation units.
+        // (Includes are compiled separately; those are normalized in the webview compile helper.)
+        code = code.replace(/#line\s+(\d+)\s+65535/g, '#line $1 0');
 
         const lineOffset = boxedLineOffset.Value;
         const textures: Types.TextureDefinition[] = [];
@@ -265,12 +273,6 @@ export class BufferProvider {
 
                 this.showInformationAtLine(file, `Version directive '${versionDirective}' ignored by shader-toy extension`, 0);
             }
-        }
-
-        // Make WebGL error line numbers stable regardless of any engine-injected preamble.
-        // Source id 0 is always the current buffer file; includes use 1..N.
-        if (!code.startsWith('#line')) {
-            code = `#line 1 0\n${code}`;
         }
 
         {
@@ -510,17 +512,21 @@ void main() {
                     // - Includes are 1..N following sharedIncludes order.
                     const includeSourceId = sharedIncludeIndex + 1;
 
-                    // Re-map this include unit's "self" markers (source-id 0) to this include's source id.
-                    // This is required for nested includes so errors in intermediate includes are not
-                    // attributed to the outermost shader.
+                    // Re-map any "self" markers inside the included file to this include's source id.
+                    // This is required for nested includes, so that errors in intermediate includes
+                    // are not attributed to the outermost shader.
                     const includeCodeForInline = include.Code.replace(
-                        /#line\s+(\d+)\s+0/g,
+                        /#line\s+(\d+)\s+65535/g,
                         `#line $1 ${includeSourceId}`
                     );
 
-                    // After the include: resume numbering at the line after the include directive
-                    // in the current file.
-                    const injected = `${includeCodeForInline}\n#line ${includeDirectiveLine + 1} 0`;
+                    // Expand includes while keeping compile error line numbers meaningful:
+                    // - Inside the included file content: start at line 1 for that file.
+                    // - After the include: resume numbering at the line after the include directive
+                    //   in the current file (using the self sentinel).
+                    // Note: do NOT end with an extra newline; the original '\n' after the include
+                    // directive remains in the source.
+                    const injected = `#line 1 ${includeSourceId}\n${includeCodeForInline}\n#line ${includeDirectiveLine + 1} ${SELF_SOURCE_ID}`;
                     replaceLastObject(injected);
                 }
 
