@@ -332,6 +332,8 @@
 
     function compileFragShader(gl, fsSource) {
         const fs = gl.createShader(gl.FRAGMENT_SHADER);
+        // Normalize our "self" sentinel source-id (65535) for standalone compiles.
+        fsSource = (fsSource || '').replace(/#line\s+(\d+)\s+65535/g, '#line $1 0');
         gl.shaderSource(fs, fsSource);
         gl.compileShader(fs);
         if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
