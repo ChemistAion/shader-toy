@@ -267,6 +267,12 @@ export class BufferProvider {
             }
         }
 
+        // Make WebGL error line numbers stable regardless of any engine-injected preamble.
+        // Source id 0 is always the current buffer file; includes use 1..N.
+        if (!code.startsWith('#line')) {
+            code = `#line 1 0\n${code}`;
+        }
+
         {
             const insertMainImageCode = () => {
                 code += `
@@ -463,6 +469,10 @@ void main() {
             case ObjectType.Include: {
                 const includeFile = (await this.context.mapUserPath(nextObject.Path, file)).file;
 
+                // Capture the include directive line number in the original (pre-mutation) file.
+                // ShaderStream.originalLine() is 1-based.
+                const includeDirectiveLine = parser.line();
+
                 let sharedIncludeIndex = sharedIncludes.findIndex((value: Types.IncludeDefinition) => {
                     if (value.File === includeFile) {
                         return true;
@@ -493,8 +503,25 @@ void main() {
                 if (sharedIncludeIndex >= 0) {
                     const include = sharedIncludes[sharedIncludeIndex];
                     includes.push(include);
-                    lineOffset.Value += include.LineCount - 1;
-                    replaceLastObject(include.Code);
+
+                    // Assign a "source string number" so WebGL error logs can be mapped back to
+                    // the correct include file.
+                    // - Source 0 is the current (top-level) buffer file.
+                    // - Includes are 1..N following sharedIncludes order.
+                    const includeSourceId = sharedIncludeIndex + 1;
+
+                    // Re-map this include unit's "self" markers (source-id 0) to this include's source id.
+                    // This is required for nested includes so errors in intermediate includes are not
+                    // attributed to the outermost shader.
+                    const includeCodeForInline = include.Code.replace(
+                        /#line\s+(\d+)\s+0/g,
+                        `#line $1 ${includeSourceId}`
+                    );
+
+                    // After the include: resume numbering at the line after the include directive
+                    // in the current file.
+                    const injected = `${includeCodeForInline}\n#line ${includeDirectiveLine + 1} 0`;
+                    replaceLastObject(injected);
                 }
 
                 break;
