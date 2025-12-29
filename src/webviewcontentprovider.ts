@@ -25,6 +25,7 @@ import { KeyboardCallbacksExtension } from './extensions/keyboard/keyboard_callb
 import { KeyboardShaderExtension } from './extensions/keyboard/keyboard_shader_extension';
 
 import { JQueryExtension } from './extensions/packages/jquery_extension';
+import { AnimationTimelineJsExtension } from './extensions/packages/animation_timeline_js_extension';
 import { ThreeExtension } from './extensions/packages/three_extension';
 import { ThreeFlyControlsExtension } from './extensions/packages/three_flycontrols';
 import { StatsExtension } from './extensions/packages/stats_extension';
@@ -335,6 +336,9 @@ export class WebviewContentProvider {
         {
             const jqueryExtension = new JQueryExtension(getWebviewResourcePath, generateStandalone);
             this.webviewAssembler.addReplaceModule(jqueryExtension, '<script src="<!-- JQuery.js -->"></script>', '<!-- JQuery.js -->');
+
+            const animationTimelineExtension = new AnimationTimelineJsExtension(getWebviewResourcePath, generateStandalone);
+            this.webviewAssembler.addReplaceModule(animationTimelineExtension, '<script src="<!-- AnimationTimeline.js -->"></script>', '<!-- AnimationTimeline.js -->');
 
             const threeExtension = new ThreeExtension(getWebviewResourcePath, generateStandalone);
             this.webviewAssembler.addReplaceModule(threeExtension, '<script src="<!-- Three.js -->"></script>', '<!-- Three.js -->');
