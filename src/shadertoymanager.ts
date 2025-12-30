@@ -491,7 +491,11 @@ export class ShaderToyManager {
         return sequencer;
     };
 
-    private createWebview = (title: string, localResourceRoots: vscode.Uri[] | undefined) => {
+    private createWebview = (
+        title: string,
+        localResourceRoots: vscode.Uri[] | undefined,
+        showOptions?: vscode.ViewColumn | { viewColumn: vscode.ViewColumn, preserveFocus?: boolean }
+    ) => {
         if (localResourceRoots !== undefined) {
             const extensionRoot = vscode.Uri.file(this.context.getVscodeExtensionContext().extensionPath);
             localResourceRoots.push(extensionRoot);
@@ -500,10 +504,12 @@ export class ShaderToyManager {
             enableScripts: true,
             localResourceRoots: localResourceRoots
         };
+
+        const resolvedShowOptions = showOptions ?? { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true };
         const newWebviewPanel = vscode.window.createWebviewPanel(
             'shadertoy',
             title,
-            { viewColumn: vscode.ViewColumn.Two, preserveFocus: true },
+            resolvedShowOptions,
             options
         );
         newWebviewPanel.iconPath = this.context.getResourceUri('thumb.png');
@@ -678,7 +684,15 @@ export class ShaderToyManager {
         const previousHadAllLocalResourceRoots = localResourceRoots.every(localResourceRoot => previousHadLocalResourceRoot(vscode.Uri.file(localResourceRoot).toString()));
         if (!previousHadAllLocalResourceRoots) {
             const localResourceRootsUri = localResourceRoots.map(localResourceRoot => vscode.Uri.file(localResourceRoot));
-            const newWebviewPanel = this.createWebview(webviewPanel.Panel.title, localResourceRootsUri);
+            const currentViewColumn = webviewPanel.Panel.viewColumn;
+            const newWebviewPanel = this.createWebview(
+                webviewPanel.Panel.title,
+                localResourceRootsUri,
+                {
+                    viewColumn: currentViewColumn ?? vscode.ViewColumn.Beside,
+                    preserveFocus: true
+                }
+            );
             const oldPanel = webviewPanel.Panel;
             webviewPanel.Panel = newWebviewPanel;
             if ((webviewPanel as StaticWebview).Document !== undefined) {
