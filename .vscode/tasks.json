@@ -4,6 +4,46 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "dev",
+			"dependsOn": [
+				"npm: watch",
+				"npm: webpack-dev"
+			],
+			"dependsOrder": "parallel",
+			"problemMatcher": [],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		},
+		{
+			"label": "prelaunch",
+			"dependsOn": [
+				"npm: compile",
+				"npm: webpack"
+			],
+			"dependsOrder": "sequence",
+			"problemMatcher": []
+		},
+		{
+			"type": "npm",
+			"script": "compile",
+			"problemMatcher": "$tsc",
+			"presentation": {
+				"reveal": "never"
+			},
+			"group": "build"
+		},
+		{
+			"type": "npm",
+			"script": "webpack",
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "never"
+			},
+			"group": "build"
+		},
+		{
 			"type": "npm",
 			"script": "watch",
 			"problemMatcher": "$tsc-watch",
@@ -11,10 +51,17 @@
 			"presentation": {
 				"reveal": "never"
 			},
-			"group": {
-				"kind": "build",
-				"isDefault": true
-			}
+			"group": "build"
+		},
+		{
+			"type": "npm",
+			"script": "webpack-dev",
+			"isBackground": true,
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "never"
+			},
+			"group": "build"
 		}
 	]
 }
