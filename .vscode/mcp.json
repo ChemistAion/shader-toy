@@ -1,5 +1,20 @@
-﻿{
+{
   "servers": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {
+        "X-MCP-Toolsets": "context,repos,issues,users"
+      }
+    },
+    "glslang": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/mcp/glslang/index.js"],
+      "env": {
+        "GLSLANG_VALIDATOR_PATH": "glslangValidator"
+      }
+    },
     "hello": {
       "type": "stdio",
       "command": "node",

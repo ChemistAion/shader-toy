@@ -1,0 +1,14 @@
+{
+  "name": "shadertoy-mcp-glslang",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.24.0"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "smoke": "node smoke-test.js"
+  }
+}
