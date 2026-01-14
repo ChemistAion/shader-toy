@@ -1,0 +1,13 @@
+{
+  "name": "shadertoy-mcp-hello",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node ./index.js",
+    "smoke": "node ./smoke-test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "latest",
+    "zod": "latest"
+  }
+}

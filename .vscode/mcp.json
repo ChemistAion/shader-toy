@@ -1,0 +1,9 @@
+﻿{
+  "servers": {
+    "hello": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/mcp/hello/index.js"]
+    }
+  }
+}

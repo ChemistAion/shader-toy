@@ -7,5 +7,23 @@
         "out": true // set this to false to include "out" folder in search results
     },
     // Turn off tsc task auto detection since we have the necessary tasks as npm scripts
-    "typescript.tsc.autoDetect": "off"
+    "typescript.tsc.autoDetect": "off",
+
+    // MCP (Model Context Protocol): enable MCP UI and allow workspace-configured servers.
+    // Values observed in VS Code 1.108+: chat.mcp.access = "none" | "registry" | "any".
+    "chat.mcp.enabled": true,
+    "chat.mcp.access": "any",
+    "chat.mcp.discovery.enabled": true,
+    "chat.mcp.gallery.enabled": true
+
+    // MCP (Model Context Protocol)
+    // Allow MCP servers configured in this workspace (.vscode/mcp.json)
+    "chat.mcp.access": "all",
+    "chat.mcp.discovery.enabled": {
+        "claude-desktop": true,
+        "windsurf": true,
+        "cursor-global": true,
+        "cursor-workspace": true
+    },
+    "chat.mcp.autostart": true
 }
