@@ -39,6 +39,14 @@
         ? global.document.getElementById('sequencer_import')
         : undefined;
 
+    const autosaveButton = global.document && global.document.getElementById
+        ? global.document.getElementById('sequencer_autosave')
+        : undefined;
+
+    const projectPathLabel = global.document && global.document.getElementById
+        ? global.document.getElementById('sequencer_project_path')
+        : undefined;
+
     const timeLabel = global.document && global.document.getElementById
         ? global.document.getElementById('sequencer_time_label')
         : undefined;
@@ -360,6 +368,37 @@
     };
 
     let project = undefined;
+    let autosaveEnabled = true;
+    let projectFilePath = '';
+
+    const setProjectPathLabel = (path) => {
+        projectFilePath = typeof path === 'string' ? path : '';
+        if (!projectPathLabel) {
+            return;
+        }
+        const text = projectFilePath || '';
+        projectPathLabel.textContent = text;
+        try {
+            projectPathLabel.title = text;
+        } catch {
+            // ignore
+        }
+    };
+
+    const setAutosaveUi = (enabled) => {
+        autosaveEnabled = !!enabled;
+        if (!autosaveButton) {
+            return;
+        }
+        autosaveButton.textContent = autosaveEnabled ? 'Autosave: On' : 'Autosave: Off';
+        try {
+            autosaveButton.classList.toggle('on', autosaveEnabled);
+        } catch {
+            // ignore
+        }
+    };
+
+    setAutosaveUi(autosaveEnabled);
 
     // Outline list (implemented separately from the widget, per upstream README guidance).
     // We keep outline scrolling in sync with the timeline's vertical scroll.
@@ -2166,6 +2205,20 @@
         });
     }
 
+    if (autosaveButton) {
+        autosaveButton.addEventListener('click', () => {
+            if (!vscode) {
+                return;
+            }
+            setAutosaveUi(!autosaveEnabled);
+            try {
+                vscode.postMessage({ command: 'sequencerSetAutosave', enabled: autosaveEnabled });
+            } catch {
+                // ignore
+            }
+        });
+    }
+
     timeline.onTimeChanged((event) => {
         if (!event || syncingTime) {
             return;
@@ -2324,6 +2377,13 @@
             scheduleScopeOverlayUpdate();
             return;
         }
+        case 'sequencerProjectMeta': {
+            setProjectPathLabel(message.filePath || '');
+            if (typeof message.autosave === 'boolean') {
+                setAutosaveUi(message.autosave);
+            }
+            return;
+        }
         case 'sequencerTrackValues': {
             valuesByTrackId = message.values || {};
             refreshValueUiFromCurrentTrack();
@@ -2331,6 +2391,15 @@
         }
         }
     });
+
+    // Notify host when the panel is ready so it can resend the project.
+    try {
+        if (vscode) {
+            vscode.postMessage({ command: 'sequencerReady' });
+        }
+    } catch {
+        // ignore
+    }
 
     if (trackSelect) {
         trackSelect.addEventListener('change', () => {

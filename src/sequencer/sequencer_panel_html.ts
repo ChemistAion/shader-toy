@@ -20,6 +20,7 @@ export const getSequencerPanelHtml = (timelineSrc: string, panelScriptSrc: strin
     #toolbar select, #toolbar input { background: #252526; color: #ddd; border: 1px solid #333; padding: 2px 4px; }
     #toolbar #sequencer_time_label { display: inline-block; min-width: 72px; color: #9cdcfe; }
     #toolbar #sequencer_key_id { color: #c586c0; }
+    #toolbar #sequencer_project_path { color: #c586c0; opacity: 0.9; display: inline-block; max-width: 480px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #content { flex: 1 1 auto; min-height: 0; display: flex; }
     #sequencer_outline { flex: 0 0 220px; min-width: 160px; max-width: 360px; overflow: auto; background: #1e1e1e; border-right: 1px solid #333; font-family: Consolas, monospace; font-size: 12px; color: #ddd; }
     #sequencer_outline .outline-header-spacer { height: 48px; border-bottom: 1px solid #333; }
@@ -38,6 +39,8 @@ export const getSequencerPanelHtml = (timelineSrc: string, panelScriptSrc: strin
     <div class="toolbar-row">
       <button id="sequencer_export" type="button">Export JSON</button>
       <button id="sequencer_import" type="button">Import JSON</button>
+      <button id="sequencer_autosave" type="button">Autosave: On</button>
+      <span id="sequencer_project_path"></span>
     </div>
 
     <div class="toolbar-row">

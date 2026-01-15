@@ -44,9 +44,52 @@ export class ShaderToyManager {
     private lastSequencerTimeSynced = Number.NaN;
 
     private sequencerProject: SequencerProject | undefined;
+    private sequencerProjectUri: vscode.Uri | undefined;
+    private sequencerProjectUriUserOverride = false;
+    private sequencerProjectDocumentKey: string | undefined;
+    private sequencerAutosaveEnabled = true;
 
     private getSequencerStorageKey = (doc: vscode.TextDocument): string => {
         return `sequencerProject:${doc.uri.toString()}`;
+    };
+
+    private getDefaultSequencerProjectUri = (doc: vscode.TextDocument): vscode.Uri => {
+        return vscode.Uri.file(`${doc.fileName}.sequencer.json`);
+    };
+
+    private loadSequencerProjectFromFile = async (uri: vscode.Uri): Promise<SequencerProject | undefined> => {
+        try {
+            await vscode.workspace.fs.stat(uri);
+        } catch {
+            return undefined;
+        }
+        try {
+            const bytes = await vscode.workspace.fs.readFile(uri);
+            const text = Buffer.from(bytes).toString('utf8');
+            const raw = JSON.parse(text);
+            return migrateSequencerProject(raw);
+        } catch {
+            return undefined;
+        }
+    };
+
+    private saveSequencerProjectToFile = async (uri: vscode.Uri, project: SequencerProject | undefined): Promise<void> => {
+        if (!project) {
+            return;
+        }
+        try {
+            const json = JSON.stringify(project, null, 2);
+            await vscode.workspace.fs.writeFile(uri, Buffer.from(json, 'utf8'));
+        } catch {
+            // ignore
+        }
+    };
+
+    private saveSequencerProjectToCurrentFile = async (): Promise<void> => {
+        if (!this.sequencerAutosaveEnabled || !this.sequencerProjectUri || !this.sequencerProject) {
+            return;
+        }
+        await this.saveSequencerProjectToFile(this.sequencerProjectUri, this.sequencerProject);
     };
 
     private getDocumentForPanel = (panel: vscode.WebviewPanel): vscode.TextDocument | undefined => {
@@ -86,6 +129,7 @@ export class ShaderToyManager {
             return;
         }
         await this.saveSequencerProjectForDocument(doc, this.sequencerProject);
+        await this.saveSequencerProjectToCurrentFile();
     };
 
     private lastSequencerAppliedAtMs = 0;
@@ -237,6 +281,10 @@ export class ShaderToyManager {
         }
 
         const carriedSequencer = this.sequencerWebview;
+        if (carriedSequencer && this.webviewPanel && carriedSequencer.Parent === this.webviewPanel.Panel) {
+            // Detach before disposing the preview so the sequencer isn't closed.
+            carriedSequencer.Parent = carriedSequencer.Panel;
+        }
         if (this.webviewPanel) {
             this.webviewPanel.Panel.dispose();
         }
@@ -510,6 +558,11 @@ export class ShaderToyManager {
                     command: 'sequencerProject',
                     project: this.sequencerProject,
                 });
+                this.sequencerWebview.Panel.webview.postMessage({
+                    command: 'sequencerProjectMeta',
+                    filePath: this.sequencerProjectUri?.fsPath ?? '',
+                    autosave: this.sequencerAutosaveEnabled,
+                });
             } catch {
                 // ignore
             }
@@ -701,8 +754,8 @@ export class ShaderToyManager {
         );
         panel.iconPath = this.context.getResourceUri('thumb.png');
 
-        // If we still ended up in the top row, attempt a move-below fallback.
-        if (forceUX && (panel.viewColumn === vscode.ViewColumn.One || panel.viewColumn === vscode.ViewColumn.Two)) {
+        // Best-effort: attempt a move-below fallback regardless of column.
+        if (forceUX) {
             tryMovePanelBelowGroup(panel);
         }
 
@@ -739,6 +792,13 @@ export class ShaderToyManager {
                     this.staticWebviews.forEach((w) => w.Panel.webview.postMessage({ command: 'setTime', time: newTime }));
 
                     this.applySequencerAtTime(newTime);
+                    return;
+                }
+
+                if (message.command === 'sequencerReady') {
+                    // Webview is ready: re-post the project and metadata.
+                    this.postSequencerProject();
+                    this.applySequencerAtTime(this.startingData.Time);
                     return;
                 }
 
@@ -809,6 +869,15 @@ export class ShaderToyManager {
                         panel.webview.postMessage({ command: 'syncPause', paused });
                     } catch {
                         // ignore
+                    }
+                    return;
+                }
+
+                if (message.command === 'sequencerSetAutosave') {
+                    this.sequencerAutosaveEnabled = !!message.enabled;
+                    this.postSequencerProject();
+                    if (this.sequencerAutosaveEnabled) {
+                        void this.saveSequencerProjectToCurrentFile();
                     }
                     return;
                 }
@@ -1011,7 +1080,7 @@ export class ShaderToyManager {
                         return;
                     }
                     try {
-                        const defaultUri = vscode.Uri.file(doc.fileName + '.sequencer.json');
+                        const defaultUri = this.getDefaultSequencerProjectUri(doc);
                         const uri = await vscode.window.showSaveDialog({
                             defaultUri,
                             filters: { 'JSON': ['json'] }
@@ -1021,6 +1090,10 @@ export class ShaderToyManager {
                         }
                         const json = JSON.stringify(this.sequencerProject, null, 2);
                         await vscode.workspace.fs.writeFile(uri, Buffer.from(json, 'utf8'));
+
+                        this.sequencerProjectUri = uri;
+                        this.sequencerProjectUriUserOverride = true;
+                        this.postSequencerProject();
                     } catch (err: unknown) {
                         const detail = (err && typeof err === 'object' && 'message' in err)
                             ? String((err as { message?: unknown }).message)
@@ -1052,6 +1125,9 @@ export class ShaderToyManager {
                             vscode.window.showErrorMessage('Shader Toy: invalid sequencer project JSON (unsupported schemaVersion or malformed)');
                             return;
                         }
+
+                        this.sequencerProjectUri = uri;
+                        this.sequencerProjectUriUserOverride = true;
 
                         // Merge imported project with currently-available tracks for this document.
                         // Imported keys/settings win where track ids match; unknown tracks are dropped.
@@ -1410,9 +1486,28 @@ export class ShaderToyManager {
         try {
             const customUniforms: Types.UniformDefinition[] = webviewContentProvider.getCustomUniforms();
             const nextProject = createSequencerProjectFromUniforms(customUniforms, { displayFps: 60 });
-            const stored = this.loadSequencerProjectForDocument(document);
-            this.sequencerProject = stored;
+
+            const docKey = document.uri.toString();
+            if (this.sequencerProjectDocumentKey !== docKey) {
+                this.sequencerProjectDocumentKey = docKey;
+                this.sequencerProjectUriUserOverride = false;
+                this.sequencerProjectUri = undefined;
+            }
+
+            let projectUri = this.sequencerProjectUri;
+            if (!projectUri || !this.sequencerProjectUriUserOverride) {
+                projectUri = this.getDefaultSequencerProjectUri(document);
+                this.sequencerProjectUri = projectUri;
+            }
+
+            const fileProject = projectUri ? await this.loadSequencerProjectFromFile(projectUri) : undefined;
+            this.sequencerProject = fileProject;
             this.sequencerProject = this.mergeSequencerProject(nextProject);
+
+            // If no project file exists yet, create it with the derived defaults.
+            if (projectUri && !fileProject) {
+                await this.saveSequencerProjectToFile(projectUri, this.sequencerProject);
+            }
 
             // Persist so the sequencer survives VS Code restarts even before the first edit.
             void this.saveSequencerProjectForDocument(document, this.sequencerProject);
