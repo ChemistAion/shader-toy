@@ -143,7 +143,10 @@
                     #sequencer_outline { flex: 0 0 220px; min-width: 160px; max-width: 360px; overflow: auto; background: #1e1e1e; border-right: 1px solid #333; font-family: Consolas, monospace; font-size: 12px; color: #ddd; }
                     #sequencer_outline .outline-header-spacer { height: 48px; border-bottom: 1px solid #333; }
                     #sequencer_outline .outline-item { height: 24px; line-height: 24px; padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-bottom: 2px solid transparent; cursor: pointer; user-select: none; }
+                    #sequencer_outline .outline-item.locked { color: #8c8c8c; }
                     #sequencer_outline .outline-item.selected { background: rgba(156, 220, 254, 0.12); }
+                    #sequencer_outline .outline-btn:disabled { opacity: 0.35; cursor: default; }
+                    #sequencer_outline .outline-label.missing { color: #ff0000; }
                     #sequencer { flex: 1 1 auto; min-width: 0; }
                 `;
                 global.document.head.appendChild(style);
@@ -418,11 +421,13 @@
     const getTrackUi = (trackId) => {
         const t = getTrackById(trackId);
         const ui = t && t.ui ? t.ui : {};
+        const unavailable = ui.unavailable === true;
         return {
             // Default-on behavior for visualization & dragging.
-            valueLine: ui.valueLine !== false,
+            valueLine: !unavailable && ui.valueLine !== false,
             locked: ui.locked === true,
             dragEnabled: ui.dragEnabled !== false,
+            unavailable,
         };
     };
 
@@ -465,7 +470,7 @@
     // per-row control by only assigning keyframe.group for tracks that opt in.
     const isGroupDragEnabled = (trackId) => {
         const ui = getTrackUi(trackId);
-        return ui.dragEnabled && !ui.locked;
+        return ui.dragEnabled && !ui.locked && !ui.unavailable;
     };
 
     const toggleGroupDragForTrack = (trackId) => {
@@ -474,7 +479,7 @@
             return;
         }
         const ui = getTrackUi(id);
-        if (ui.locked) {
+        if (ui.locked || ui.unavailable) {
             return;
         }
         const next = !ui.dragEnabled;
@@ -561,6 +566,9 @@
 
             const getRowState = () => {
                 const s = getTrackUi(trackId);
+                if (s.unavailable) {
+                    return '';
+                }
                 if (s.locked) {
                     return 'L';
                 }
@@ -573,6 +581,12 @@
             const item = global.document.createElement('div');
             item.className = 'outline-item';
             item.dataset.trackId = trackId;
+            if (ui.locked) {
+                item.classList.add('locked');
+            }
+            if (ui.unavailable) {
+                item.classList.add('missing');
+            }
 
             // Resilient layout even if CSS didn't reload yet.
             try {
@@ -583,7 +597,9 @@
                 // ignore
             }
 
-            item.title = 'Click: select track. Shift+Click: toggle N↔D.';
+            item.title = ui.unavailable
+                ? 'Uniform missing in shader source'
+                : 'Click: select track. Shift+Click: toggle N↔D.';
 
             const controls = global.document.createElement('div');
             controls.className = 'outline-controls';
@@ -648,17 +664,21 @@
                 }
             };
 
-            const btnV = mkBtn('V', 'Toggle value line visualization for this row');
-            applyBtnState(btnV, ui.valueLine);
-            btnV.addEventListener('click', (ev) => {
-                try { ev.preventDefault(); ev.stopPropagation(); } catch { /* ignore */ }
-                setSelectedTrackId(trackId);
-                const next = !getTrackUi(trackId).valueLine;
-                applyTrackUiPatchLocal(trackId, { valueLine: next });
-                postTrackUiPatch(trackId, { valueLine: next });
-                rebuildOutline();
-                try { timeline.redraw(); } catch { /* ignore */ }
-            });
+            const btnV = mkBtn(ui.unavailable ? '' : 'V', 'Toggle value line visualization for this row');
+            if (ui.unavailable) {
+                btnV.disabled = true;
+            } else {
+                applyBtnState(btnV, ui.valueLine);
+                btnV.addEventListener('click', (ev) => {
+                    try { ev.preventDefault(); ev.stopPropagation(); } catch { /* ignore */ }
+                    setSelectedTrackId(trackId);
+                    const next = !getTrackUi(trackId).valueLine;
+                    applyTrackUiPatchLocal(trackId, { valueLine: next });
+                    postTrackUiPatch(trackId, { valueLine: next });
+                    rebuildOutline();
+                    try { timeline.redraw(); } catch { /* ignore */ }
+                });
+            }
 
             const btnState = mkBtn(getRowState(), 'Cycle row state: N (normal) → D (no drag) → L (locked)');
 
@@ -680,29 +700,38 @@
 
             applyRowStateUi();
 
-            btnState.addEventListener('click', (ev) => {
-                try { ev.preventDefault(); ev.stopPropagation(); } catch { /* ignore */ }
-                setSelectedTrackId(trackId);
-
-                const cur = getRowState();
-                const next = cur === 'N' ? 'D' : (cur === 'D' ? 'L' : 'N');
-
-                if (next === 'N') {
-                    applyTrackUiPatchLocal(trackId, { locked: false, dragEnabled: true });
-                    postTrackUiPatch(trackId, { locked: false, dragEnabled: true });
-                } else if (next === 'D') {
-                    applyTrackUiPatchLocal(trackId, { locked: false, dragEnabled: false });
-                    postTrackUiPatch(trackId, { locked: false, dragEnabled: false });
-                } else {
-                    // Locked: keep dragEnabled true so unlock returns to normal.
-                    applyTrackUiPatchLocal(trackId, { locked: true, dragEnabled: true });
-                    postTrackUiPatch(trackId, { locked: true, dragEnabled: true });
+            if (ui.unavailable) {
+                btnState.disabled = true;
+                try {
+                    btnState.textContent = '';
+                } catch {
+                    // ignore
                 }
+            } else {
+                btnState.addEventListener('click', (ev) => {
+                    try { ev.preventDefault(); ev.stopPropagation(); } catch { /* ignore */ }
+                    setSelectedTrackId(trackId);
 
-                applyRowStateUi();
-                rebuildTimelineModel();
-                refreshEditButtonsEnabledState();
-            });
+                    const cur = getRowState();
+                    const next = cur === 'N' ? 'D' : (cur === 'D' ? 'L' : 'N');
+
+                    if (next === 'N') {
+                        applyTrackUiPatchLocal(trackId, { locked: false, dragEnabled: true });
+                        postTrackUiPatch(trackId, { locked: false, dragEnabled: true });
+                    } else if (next === 'D') {
+                        applyTrackUiPatchLocal(trackId, { locked: false, dragEnabled: false });
+                        postTrackUiPatch(trackId, { locked: false, dragEnabled: false });
+                    } else {
+                        // Locked: keep dragEnabled true so unlock returns to normal.
+                        applyTrackUiPatchLocal(trackId, { locked: true, dragEnabled: true });
+                        postTrackUiPatch(trackId, { locked: true, dragEnabled: true });
+                    }
+
+                    applyRowStateUi();
+                    rebuildTimelineModel();
+                    refreshEditButtonsEnabledState();
+                });
+            }
 
             controls.appendChild(btnV);
             controls.appendChild(btnState);
@@ -710,6 +739,9 @@
             const labelEl = global.document.createElement('div');
             labelEl.className = 'outline-label';
             labelEl.textContent = label;
+            if (ui.unavailable) {
+                labelEl.classList.add('missing');
+            }
 
             try {
                 labelEl.style.flex = '1 1 auto';
@@ -725,6 +757,9 @@
             item.appendChild(labelEl);
 
             item.addEventListener('click', (ev) => {
+                if (ui.unavailable) {
+                    return;
+                }
                 if (ev && ev.shiftKey) {
                     const s = getRowState();
                     // Shift toggles N↔D, but never changes locked.
@@ -1269,8 +1304,9 @@
         const originalRenderKeyframe = timeline._renderKeyframe;
         const originalRedraw = typeof timeline.redraw === 'function' ? timeline.redraw.bind(timeline) : undefined;
 
-        // Cache last-seen row layout/model from widget rendering.
+        // Cache last-seen row layout/model and keyframe bounds from widget rendering.
         const rowStateByTrackId = new Map();
+        const keyframeBoundsByTrackId = new Map();
 
         // Cursor override: the widget has a global "groupsDraggable" option, so it may show the
         // group-drag cursor even for rows where we emulate "no-drag". We override the cursor
@@ -1311,6 +1347,46 @@
             return NaN;
         };
 
+        const getMouseLocalPos = (ev, el) => {
+            try {
+                const r = el && typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect() : undefined;
+                if (r && typeof ev.clientX === 'number' && typeof ev.clientY === 'number') {
+                    return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+                }
+            } catch {
+                // ignore
+            }
+            try {
+                if (typeof ev.offsetX === 'number' && typeof ev.offsetY === 'number') {
+                    return { x: ev.offsetX, y: ev.offsetY };
+                }
+            } catch {
+                // ignore
+            }
+            return undefined;
+        };
+
+        const isPointOverKeyframe = (trackId, pos) => {
+            if (!trackId || !pos) {
+                return false;
+            }
+            const bounds = keyframeBoundsByTrackId.get(trackId);
+            if (!bounds || bounds.length === 0) {
+                return false;
+            }
+            for (const b of bounds) {
+                if (!b) {
+                    continue;
+                }
+                const halfW = (typeof b.w === 'number' && isFinite(b.w)) ? b.w / 2 : 0;
+                const halfH = (typeof b.h === 'number' && isFinite(b.h)) ? b.h / 2 : 0;
+                if (Math.abs(pos.x - b.x) <= halfW && Math.abs(pos.y - b.y) <= halfH) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
         const findTrackIdAtY = (y) => {
             if (!isFinite(y)) {
                 return undefined;
@@ -1333,18 +1409,13 @@
             return undefined;
         };
 
-        const isResizeCursor = (cursor) => {
-            const c = String(cursor || '').toLowerCase();
-            return c === 'ew-resize' || c === 'col-resize' || c === 'e-resize' || c === 'w-resize';
-        };
-
         const installCursorOverride = () => {
             if (cursorOverrideInstalled || !host) {
                 return;
             }
             cursorOverrideInstalled = true;
 
-            const onMove = (ev) => {
+            const onMoveCapture = (ev) => {
                 const el = getCursorElement();
                 if (!el) {
                     return;
@@ -1353,49 +1424,45 @@
                 const y = getMouseLocalY(ev, el);
                 const trackId = findTrackIdAtY(y);
                 const ui = trackId ? getTrackUi(trackId) : undefined;
-                const wantDefault = !!(ui && (ui.locked || !ui.dragEnabled));
+                const wantDefault = !!(ui && (ui.locked || ui.unavailable || !ui.dragEnabled));
+                const pos = getMouseLocalPos(ev, el);
+                const hoverKeyframe = !!(pos && isPointOverKeyframe(trackId, pos));
 
                 if (!wantDefault) {
                     if (cursorForced) {
                         cursorForced = false;
                         try {
-                            el.style.cursor = '';
+                            if (el.style && typeof el.style.removeProperty === 'function') {
+                                el.style.removeProperty('cursor');
+                            } else {
+                                el.style.cursor = '';
+                            }
                         } catch {
                             // ignore
                         }
                     }
-                    return;
-                }
-
-                // Only override if the widget is trying to show a drag-resize cursor.
-                let current = '';
-                try {
-                    current = el.style && typeof el.style.cursor === 'string' ? el.style.cursor : '';
-                } catch {
-                    current = '';
-                }
-                if (!current) {
-                    try {
-                        current = global.getComputedStyle ? String(global.getComputedStyle(el).cursor || '') : '';
-                    } catch {
-                        current = '';
-                    }
-                }
-
-                if (!isResizeCursor(current) && !cursorForced) {
                     return;
                 }
 
                 cursorForced = true;
+                const forcedCursor = hoverKeyframe ? 'pointer' : 'default';
                 try {
-                    // Run after the widget's handler (which may set cursor each move).
-                    setTimeout(() => {
-                        try {
-                            el.style.cursor = 'default';
-                        } catch {
-                            // ignore
-                        }
-                    }, 0);
+                    if (el.style && typeof el.style.setProperty === 'function') {
+                        el.style.setProperty('cursor', forcedCursor, 'important');
+                    } else {
+                        el.style.cursor = forcedCursor;
+                    }
+                } catch {
+                    // ignore
+                }
+
+                try {
+                    if (typeof ev.stopImmediatePropagation === 'function') {
+                        ev.stopImmediatePropagation();
+                    }
+                    if (typeof ev.preventDefault === 'function') {
+                        ev.preventDefault();
+                    }
                 } catch {
                     // ignore
                 }
@@ -1417,7 +1484,8 @@
             };
 
             try {
-                host.addEventListener('mousemove', onMove, { passive: true });
+                host.addEventListener('mousemove', onMoveCapture, { capture: true });
+                host.addEventListener('pointermove', onMoveCapture, { capture: true });
                 host.addEventListener('mouseleave', onLeave, { passive: true });
             } catch {
                 // ignore
@@ -1619,7 +1687,7 @@
                         }
 
                         ctx.globalAlpha = 1;
-                        ctx.strokeStyle = 'rgba(200, 200, 200, 0.75)';
+                        ctx.strokeStyle = (ui.locked || ui.unavailable) ? 'rgba(140, 140, 140, 0.7)' : 'rgba(200, 200, 200, 0.75)';
                         ctx.lineWidth = 1;
                         ctx.lineCap = 'round';
                         if (typeof ctx.setLineDash === 'function') {
@@ -1675,6 +1743,8 @@
                 try {
                     // NOTE: We intentionally do NOT mutate tick/grid options during redraw.
                     // Keep tick spacing/labeling fully controlled by the timeline widget.
+                    rowStateByTrackId.clear();
+                    keyframeBoundsByTrackId.clear();
                     originalRedraw();
                 } finally {
                     scheduleOverlay();
@@ -1692,12 +1762,26 @@
                 if (trackId && rowModel && rowSize) {
                     rowStateByTrackId.set(trackId, { rowModel, rowSize });
                 }
+                if (trackId && keyframeVm && keyframeVm.size) {
+                    const size = keyframeVm.size;
+                    const w = typeof size.width === 'number' ? size.width : 0;
+                    const h = typeof size.height === 'number' ? size.height : 0;
+                    if (w > 0 && h > 0) {
+                        const list = keyframeBoundsByTrackId.get(trackId) || [];
+                        list.push({
+                            x: typeof size.x === 'number' ? size.x : 0,
+                            y: typeof size.y === 'number' ? size.y : 0,
+                            w,
+                            h,
+                        });
+                        keyframeBoundsByTrackId.set(trackId, list);
+                    }
+                }
             } catch {
                 // ignore
             }
 
-            const r = originalRenderKeyframe(ctx, keyframeVm);
-            return r;
+            return originalRenderKeyframe(ctx, keyframeVm);
         };
 
         // Best effort: redraw overlay on resize.
@@ -1901,24 +1985,76 @@
         return String(trackSelect.value || '');
     };
 
+    const findKeyAtTime = (trackId, timeSec) => {
+        if (!project || !project.tracks) {
+            return undefined;
+        }
+        const t = project.tracks.find((x) => x && x.id === trackId);
+        if (!t || !Array.isArray(t.keys)) {
+            return undefined;
+        }
+        const eps = 1e-5;
+        for (const k of t.keys) {
+            if (!k || typeof k.t !== 'number') {
+                continue;
+            }
+            if (Math.abs(k.t - timeSec) <= eps) {
+                return k;
+            }
+        }
+        return undefined;
+    };
+
+    let refreshingEditButtons = false;
+
     const refreshEditButtonsEnabledState = () => {
-        const trackId = getSelectedTrackId();
-        const locked = trackId ? getTrackUi(trackId).locked : false;
+        if (refreshingEditButtons) {
+            return;
+        }
+        refreshingEditButtons = true;
+        try {
+            const trackId = getSelectedTrackId();
+            const ui = trackId ? getTrackUi(trackId) : undefined;
+            const locked = !trackId || !!(ui && (ui.locked || ui.unavailable));
 
-        const apply = (btn) => {
-            if (!btn) {
-                return;
+            const keyAtTime = (!locked && trackId) ? findKeyAtTime(trackId, currentTimeSeconds) : undefined;
+            if ((!selectedKey || selectedKey.trackId !== trackId) && keyAtTime) {
+                selectedKey = { trackId, keyId: keyAtTime.id };
+                if (keyIdLabel) {
+                    keyIdLabel.textContent = `key: ${keyAtTime.id}`;
+                }
             }
-            try {
-                btn.disabled = !!locked;
-            } catch {
-                // ignore
-            }
-        };
+            const hasSelectedKey = !!(selectedKey && selectedKey.trackId === trackId && selectedKey.keyId);
 
-        apply(addKeyButton);
-        apply(updateKeyButton);
-        apply(deleteKeyButton);
+            if (addKeyButton) {
+                try {
+                    addKeyButton.textContent = keyAtTime ? 'Replace' : 'Add';
+                } catch {
+                    // ignore
+                }
+            }
+
+            const apply = (btn) => {
+                if (!btn) {
+                    return;
+                }
+                try {
+                    btn.disabled = !!locked;
+                } catch {
+                    // ignore
+                }
+            };
+
+            apply(addKeyButton);
+            if (updateKeyButton) {
+                updateKeyButton.disabled = !!locked || !hasSelectedKey;
+            }
+            if (deleteKeyButton) {
+                deleteKeyButton.disabled = !!locked || !hasSelectedKey;
+            }
+        } finally {
+            refreshingEditButtons = false;
+        }
     };
 
     const setSelectedTrackId = (trackId) => {
@@ -1951,6 +2087,7 @@
         if (keyIdLabel) {
             keyIdLabel.textContent = info && info.keyId ? `key: ${info.keyId}` : '';
         }
+        refreshEditButtonsEnabledState();
     };
 
     const findKeyValueInProject = (trackId, keyId) => {
@@ -1979,6 +2116,9 @@
             return;
         }
         for (const t of project.tracks) {
+            if (t?.ui?.unavailable) {
+                continue;
+            }
             const opt = global.document.createElement('option');
             opt.value = t.id;
             opt.textContent = t.name;
@@ -1987,11 +2127,86 @@
         if (previous) {
             setSelectedTrackId(previous);
         }
-        if (!getSelectedTrackId() && project.tracks.length > 0) {
-            setSelectedTrackId(project.tracks[0].id);
+        if (!getSelectedTrackId()) {
+            const firstAvailable = project.tracks.find((t) => t && !t.ui?.unavailable);
+            if (firstAvailable) {
+                setSelectedTrackId(firstAvailable.id);
+            }
         }
 
         rebuildOutline();
+    };
+
+    const TRACK_ROW_STYLES = {
+        locked: {
+            fillColor: '#1f1f1f',
+            keyframesStyle: {
+                fillColor: '#7a7a7a',
+                selectedFillColor: '#7a7a7a',
+                strokeColor: '#4c4c4c',
+                selectedStrokeColor: '#4c4c4c',
+            },
+            groupsStyle: {
+                fillColor: '#2a2a2a',
+                strokeColor: '#3a3a3a',
+            }
+        },
+        noDrag: {}
+    };
+
+    const clampByte = (v) => Math.max(0, Math.min(255, v | 0));
+
+    const dimHexColor = (hex, factor = 0.5) => {
+        if (typeof hex !== 'string') {
+            return undefined;
+        }
+        const m = hex.trim().match(/^#?([0-9a-f]{6})$/i);
+        if (!m) {
+            return undefined;
+        }
+        const n = parseInt(m[1], 16);
+        const r = clampByte(((n >> 16) & 0xff) * factor);
+        const g = clampByte(((n >> 8) & 0xff) * factor);
+        const b = clampByte((n & 0xff) * factor);
+        const toHex = (c) => c.toString(16).padStart(2, '0');
+        return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+    };
+
+    const getDefaultGroupFillColor = () => {
+        try {
+            const opt = (timeline && typeof timeline.getOptions === 'function') ? (timeline.getOptions() || {}) : {};
+            const rowsStyle = opt.rowsStyle || {};
+            const rowGroupsStyle = rowsStyle.groupsStyle || {};
+            if (typeof rowGroupsStyle.fillColor === 'string' && rowGroupsStyle.fillColor) {
+                return rowGroupsStyle.fillColor;
+            }
+            const groupsStyle = opt.groupsStyle || {};
+            if (typeof groupsStyle.fillColor === 'string' && groupsStyle.fillColor) {
+                return groupsStyle.fillColor;
+            }
+        } catch {
+            // ignore
+        }
+        return '#2a2a2a';
+    };
+
+    const getRowStyleForTrack = (ui) => {
+        if (!ui) {
+            return undefined;
+        }
+        if (ui.locked || ui.unavailable) {
+            return TRACK_ROW_STYLES.locked;
+        }
+        if (!ui.dragEnabled) {
+            const base = getDefaultGroupFillColor();
+            return {
+                ...TRACK_ROW_STYLES.noDrag,
+                groupsStyle: {
+                    fillColor: dimHexColor(base, 0.67) || base,
+                }
+            };
+        }
+        return undefined;
     };
 
     const rebuildTimelineModel = () => {
@@ -2005,6 +2220,7 @@
             const maxValue = (typeof t.maxValue === 'number' && isFinite(t.maxValue)) ? t.maxValue : undefined;
             const interpolation = t.interpolation || (project.defaults ? project.defaults.interpolation : undefined) || 'linear';
 
+            const ui = getTrackUi(t.id);
             const keyframes = (t.keys || []).map((k, i) => {
                 return {
                     id: k.id,
@@ -2015,6 +2231,7 @@
                     value: k.v,
                     keyIndex: i,
                     selected: false,
+                    selectable: !ui.locked && !ui.unavailable,
                 };
             });
             return {
@@ -2025,6 +2242,9 @@
                 valueMax: maxValue,
                 interpolation,
                 keyframes,
+                style: getRowStyleForTrack(ui),
+                keyframesDraggable: (ui.locked || ui.unavailable) ? false : undefined,
+                groupsDraggable: (ui.locked || ui.unavailable) ? false : undefined,
             };
         });
         timeline.setModel({ rows });
@@ -2235,6 +2455,7 @@
         const newTimeSeconds = (event.val || 0) / 1000.0;
         currentTimeSeconds = newTimeSeconds;
         setTimeLabel(newTimeSeconds);
+        refreshEditButtonsEnabledState();
 
         if (vscode) {
             try {
@@ -2278,7 +2499,7 @@
         }
 
         const ui = getTrackUi(trackId);
-        if (ui.locked || !ui.dragEnabled) {
+        if (ui.locked || ui.unavailable || !ui.dragEnabled) {
             // Revert the local drag visual by rebuilding from the persisted project.
             rebuildTimelineModel();
             return;
@@ -2303,6 +2524,18 @@
         const k = selected[0];
         const trackId = String(k.trackId || '');
         const keyId = String(k.id || '');
+        if (trackId && (getTrackUi(trackId).locked || getTrackUi(trackId).unavailable)) {
+            try {
+                if (timeline && typeof timeline.select === 'function') {
+                    timeline.select(null);
+                }
+            } catch {
+                // ignore
+            }
+            setSelectedKeyUi(undefined);
+            refreshValueUiFromCurrentTrack();
+            return;
+        }
         if (trackId && keyId) {
             setSelectedTrackId(trackId);
             setSelectedKeyUi({ trackId, keyId });
@@ -2345,6 +2578,7 @@
             currentTimeSeconds = timeSeconds;
             setTimeLabel(timeSeconds);
             lastAppliedTimeSeconds = timeSeconds;
+            refreshEditButtonsEnabledState();
             return;
         }
         case 'syncPause': {
@@ -2426,7 +2660,7 @@
             }
 
             const ui = getTrackUi(trackId);
-            if (ui.locked) {
+            if (ui.locked || ui.unavailable) {
                 return;
             }
             let v = parseNumericInput();
@@ -2451,7 +2685,7 @@
             }
 
             const ui = getTrackUi(selectedKey.trackId);
-            if (ui.locked) {
+            if (ui.locked || ui.unavailable) {
                 return;
             }
             const v = parseNumericInput();
@@ -2473,7 +2707,7 @@
             }
 
             const ui = getTrackUi(selectedKey.trackId);
-            if (ui.locked) {
+            if (ui.locked || ui.unavailable) {
                 return;
             }
             try {

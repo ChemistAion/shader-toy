@@ -652,9 +652,15 @@ export class ShaderToyManager {
             prevTracksById.set(t.id, t);
         }
 
+        const nextTracksById = new Map<string, typeof next.tracks[number]>();
+        for (const t of next.tracks) {
+            nextTracksById.set(t.id, t);
+        }
+
         return {
             ...next,
             // Preserve user settings that shouldn't be overwritten by re-deriving tracks from source.
+            autosave: typeof prev.autosave === 'boolean' ? prev.autosave : next.autosave,
             loop: typeof prev.loop === 'boolean' ? prev.loop : next.loop,
             timeScope: prev.timeScope ?? next.timeScope,
             durationSec: (typeof prev.durationSec === 'number' && isFinite(prev.durationSec)) ? prev.durationSec : next.durationSec,
@@ -662,21 +668,33 @@ export class ShaderToyManager {
             snapSettings: prev.snapSettings ?? next.snapSettings,
             defaults: prev.defaults ?? next.defaults,
             projectId: prev.projectId ?? next.projectId,
-            tracks: next.tracks.map((t) => {
-                const existing = prevTracksById.get(t.id);
-                if (!existing) {
-                    return t;
-                }
-                return {
-                    ...t,
-                    ui: (existing.ui || t.ui) ? { ...(t.ui ?? {}), ...(existing.ui ?? {}) } : undefined,
-                    // Preserve user edits.
-                    keys: Array.isArray(existing.keys) ? existing.keys : t.keys,
-                    interpolation: existing.interpolation ?? t.interpolation,
-                    stepMode: existing.stepMode ?? t.stepMode,
-                    outOfRange: existing.outOfRange ?? t.outOfRange,
-                };
-            })
+            tracks: [
+                ...next.tracks.map((t) => {
+                    const existing = prevTracksById.get(t.id);
+                    if (!existing) {
+                        return t;
+                    }
+                    let mergedUi = (existing.ui || t.ui) ? { ...(t.ui ?? {}), ...(existing.ui ?? {}) } : undefined;
+                    if (mergedUi?.unavailable) {
+                        mergedUi = { ...mergedUi, unavailable: false };
+                    }
+                    return {
+                        ...t,
+                        ui: mergedUi,
+                        // Preserve user edits.
+                        keys: Array.isArray(existing.keys) ? existing.keys : t.keys,
+                        interpolation: existing.interpolation ?? t.interpolation,
+                        stepMode: existing.stepMode ?? t.stepMode,
+                        outOfRange: existing.outOfRange ?? t.outOfRange,
+                    };
+                }),
+                ...prev.tracks
+                    .filter((t) => !nextTracksById.has(t.id))
+                    .map((t) => ({
+                        ...t,
+                        ui: { ...(t.ui ?? {}), unavailable: true },
+                    }))
+            ]
         };
     };
 
@@ -875,10 +893,11 @@ export class ShaderToyManager {
 
                 if (message.command === 'sequencerSetAutosave') {
                     this.sequencerAutosaveEnabled = !!message.enabled;
-                    this.postSequencerProject();
-                    if (this.sequencerAutosaveEnabled) {
-                        void this.saveSequencerProjectToCurrentFile();
+                    if (this.sequencerProject) {
+                        this.sequencerProject = { ...this.sequencerProject, autosave: this.sequencerAutosaveEnabled };
                     }
+                    this.postSequencerProject();
+                    void this.saveSequencerProjectForPanel(previewPanel);
                     return;
                 }
 
@@ -944,6 +963,11 @@ export class ShaderToyManager {
                             return;
                         }
 
+                        const existingTrack = this.sequencerProject.tracks.find((t) => t.id === trackId);
+                        if (existingTrack?.ui?.unavailable) {
+                            return;
+                        }
+
                         const normalizedPatch = {
                             valueLine: ('valueLine' in (uiPatch as any) && typeof (uiPatch as any).valueLine === 'boolean') ? (uiPatch as any).valueLine : undefined,
                             locked: ('locked' in (uiPatch as any) && typeof (uiPatch as any).locked === 'boolean') ? (uiPatch as any).locked : undefined,
@@ -984,7 +1008,7 @@ export class ShaderToyManager {
                         return;
                     }
                         const track = this.sequencerProject.tracks.find((tr) => tr.id === trackId);
-                        if (track?.ui?.locked) {
+                        if (track?.ui?.locked || track?.ui?.unavailable) {
                             return;
                         }
                     this.sequencerProject = addOrReplaceKey(this.sequencerProject, trackId, { t, v });
@@ -994,7 +1018,7 @@ export class ShaderToyManager {
 
                     // Mirror the edit back into the shader source (like #iUniform sliders).
                         try {
-                            if (track && track.target && track.target.kind === 'uniform') {
+                            if (track && !track.ui?.unavailable && track.target && track.target.kind === 'uniform') {
                                 void this.updateIUniformDefaultInDocument(previewPanel, track.target.uniformName, v);
                             }
                         } catch {
@@ -1014,7 +1038,7 @@ export class ShaderToyManager {
                         return;
                     }
                         const track = this.sequencerProject.tracks.find((tr) => tr.id === trackId);
-                        if (track?.ui?.locked || track?.ui?.dragEnabled === false) {
+                        if (track?.ui?.locked || track?.ui?.unavailable || track?.ui?.dragEnabled === false) {
                             return;
                         }
                     this.sequencerProject = moveKeyTime(this.sequencerProject, trackId, keyId, t);
@@ -1035,7 +1059,7 @@ export class ShaderToyManager {
                         return;
                     }
                         const track = this.sequencerProject.tracks.find((tr) => tr.id === trackId);
-                        if (track?.ui?.locked) {
+                        if (track?.ui?.locked || track?.ui?.unavailable) {
                             return;
                         }
                     this.sequencerProject = setKeyValue(this.sequencerProject, trackId, keyId, v);
@@ -1045,7 +1069,7 @@ export class ShaderToyManager {
 
                     // Mirror the edit back into the shader source (like #iUniform sliders).
                         try {
-                            if (track && track.target && track.target.kind === 'uniform') {
+                            if (track && !track.ui?.unavailable && track.target && track.target.kind === 'uniform') {
                                 void this.updateIUniformDefaultInDocument(previewPanel, track.target.uniformName, v);
                             }
                         } catch {
@@ -1064,7 +1088,7 @@ export class ShaderToyManager {
                         return;
                     }
                         const track = this.sequencerProject.tracks.find((tr) => tr.id === trackId);
-                        if (track?.ui?.locked) {
+                        if (track?.ui?.locked || track?.ui?.unavailable) {
                             return;
                         }
                     this.sequencerProject = deleteKey(this.sequencerProject, trackId, keyId);
@@ -1130,7 +1154,7 @@ export class ShaderToyManager {
                         this.sequencerProjectUriUserOverride = true;
 
                         // Merge imported project with currently-available tracks for this document.
-                        // Imported keys/settings win where track ids match; unknown tracks are dropped.
+                        // Imported keys/settings win where track ids match; unknown tracks are preserved as unavailable.
                         this.sequencerProject = imported;
                         try {
                             const webviewContentProvider = new WebviewContentProvider(this.context, doc.getText(), doc.fileName);
@@ -1501,8 +1525,14 @@ export class ShaderToyManager {
             }
 
             const fileProject = projectUri ? await this.loadSequencerProjectFromFile(projectUri) : undefined;
-            this.sequencerProject = fileProject;
+            const localProject = this.loadSequencerProjectForDocument(document) ?? ((this.sequencerProjectDocumentKey === docKey) ? this.sequencerProject : undefined);
+            const preferLocal = !this.sequencerAutosaveEnabled && localProject;
+            this.sequencerProject = preferLocal ? localProject : fileProject;
             this.sequencerProject = this.mergeSequencerProject(nextProject);
+
+            if (this.sequencerProject && typeof this.sequencerProject.autosave === 'boolean') {
+                this.sequencerAutosaveEnabled = this.sequencerProject.autosave;
+            }
 
             // If no project file exists yet, create it with the derived defaults.
             if (projectUri && !fileProject) {

@@ -25,11 +25,14 @@ export const getSequencerPanelHtml = (timelineSrc: string, panelScriptSrc: strin
     #sequencer_outline { flex: 0 0 220px; min-width: 160px; max-width: 360px; overflow: auto; background: #1e1e1e; border-right: 1px solid #333; font-family: Consolas, monospace; font-size: 12px; color: #ddd; }
     #sequencer_outline .outline-header-spacer { height: 48px; border-bottom: 1px solid #333; }
     #sequencer_outline .outline-item { height: 24px; padding: 0 6px; border-bottom: 2px solid transparent; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; }
+    #sequencer_outline .outline-item.locked { color: #8c8c8c; }
     #sequencer_outline .outline-controls { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
     #sequencer_outline .outline-btn { width: 18px; height: 18px; padding: 0; margin: 0; border: 1px solid #333; border-radius: 3px; background: #252526; color: #ddd; font-family: Consolas, monospace; font-size: 10px; line-height: 16px; cursor: pointer; }
     #sequencer_outline .outline-btn.on { background: rgba(156, 220, 254, 0.18); border-color: rgba(156, 220, 254, 0.35); color: #9cdcfe; }
     #sequencer_outline .outline-btn.off { opacity: 0.55; }
+    #sequencer_outline .outline-btn:disabled { opacity: 0.35; cursor: default; }
     #sequencer_outline .outline-label { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 24px; }
+    #sequencer_outline .outline-label.missing { color: #ff0000; }
     #sequencer_outline .outline-item.selected { background: rgba(156, 220, 254, 0.12); }
     #sequencer { flex: 1 1 auto; min-width: 0; }
   </style>

@@ -204,10 +204,58 @@
           "v": 0
         }
       ]
+    },
+    {
+      "id": "uniform:test",
+      "name": "test",
+      "target": {
+        "kind": "uniform",
+        "uniformName": "test"
+      },
+      "valueType": "float",
+      "ui": {
+        "valueLine": true,
+        "locked": false,
+        "dragEnabled": true
+      },
+      "defaultValue": -10,
+      "minValue": -10,
+      "maxValue": 10,
+      "stepValue": 1,
+      "interpolation": "linear",
+      "stepMode": "holdLeft",
+      "outOfRange": "hold",
+      "keys": [
+        {
+          "id": "k0",
+          "t": 0,
+          "v": -10
+        },
+        {
+          "id": "kmkmxdwlne7md",
+          "t": 2,
+          "v": 10
+        },
+        {
+          "id": "kmkmxedz18i5x",
+          "t": 2.5,
+          "v": -10
+        },
+        {
+          "id": "kmkmxdyu21lg7",
+          "t": 3,
+          "v": 10
+        },
+        {
+          "id": "kmkmxdqoqkf8y",
+          "t": 5,
+          "v": -10
+        }
+      ]
     }
   ],
   "snapSettings": {
     "enabled": true,
-    "stepSec": 0.2
+    "stepSec": 0.25
   }
 }

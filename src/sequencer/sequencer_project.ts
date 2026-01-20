@@ -13,6 +13,7 @@ export type SequencerOutOfRange = 'hold' | 'default';
 export type SequencerProject = {
 	schemaVersion: SequencerSchemaVersion;
 	projectId?: string;
+	autosave?: boolean;
 	displayFps: number;
 	/**
 	 * Playback scope for looping/stop behavior. Keys can still exist outside this range.
@@ -56,11 +57,13 @@ export type SequencerTrack = {
 	 * - valueLine: show/hide the value line visualization for this row ("V")
 	 * - locked: lock the row against edits ("L")
 	 * - dragEnabled: allow dragging keyframes/groups for this row ("D")
+	 * - unavailable: uniform currently missing from shader source
 	 */
 	ui?: {
 		valueLine?: boolean;
 		locked?: boolean;
 		dragEnabled?: boolean;
+		unavailable?: boolean;
 	};
 
 	defaultValue: number;
@@ -138,6 +141,7 @@ const normalizeTrack = (raw: unknown): SequencerTrack | undefined => {
 			valueLine: (typeof raw.ui.valueLine === 'boolean') ? raw.ui.valueLine : undefined,
 			locked: (typeof raw.ui.locked === 'boolean') ? raw.ui.locked : undefined,
 			dragEnabled: (typeof raw.ui.dragEnabled === 'boolean') ? raw.ui.dragEnabled : undefined,
+			unavailable: (typeof raw.ui.unavailable === 'boolean') ? raw.ui.unavailable : undefined,
 		};
 	}
 
@@ -194,6 +198,7 @@ export const migrateSequencerProject = (raw: unknown): SequencerProject | undefi
 	const displayFps = normalizeDisplayFps(asNumber(raw.displayFps));
 	const durationSec = asNumber(raw.durationSec);
 	const loop = typeof raw.loop === 'boolean' ? raw.loop : true;
+	const autosave = typeof raw.autosave === 'boolean' ? raw.autosave : undefined;
 
 	let snapSettings: SequencerProject['snapSettings'] | undefined;
 	if (isPlainObject(raw.snapSettings)) {
@@ -253,6 +258,7 @@ export const migrateSequencerProject = (raw: unknown): SequencerProject | undefi
 	return {
 		schemaVersion: SEQUENCER_SCHEMA_VERSION,
 		projectId: asString(raw.projectId),
+		autosave,
 		displayFps,
 		timeScope: { startSec, endSec },
 		durationSec,
@@ -364,6 +370,7 @@ export const createSequencerProjectFromUniforms = (uniforms: UniformDefinition[]
 
 	return {
 		schemaVersion: SEQUENCER_SCHEMA_VERSION,
+		autosave: true,
 		displayFps,
 		timeScope: { startSec: 0, endSec: 10 },
 		loop: true,
@@ -487,7 +494,7 @@ export const evaluateProjectAtTime = (project: SequencerProject | undefined, tim
 		}
 
 		byTrackId[track.id] = value;
-		if (track.target && track.target.kind === 'uniform') {
+		if (!track.ui?.unavailable && track.target && track.target.kind === 'uniform') {
 			byUniformName[track.target.uniformName] = value;
 		}
 	}
