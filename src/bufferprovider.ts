@@ -394,39 +394,49 @@ void main() {
             // IMPORTANT: avoid matching commented-out code like `// void main() {}`.
             // This check only determines whether we should inject a wrapper `main()`.
             const codeForSearch = code
-                // block comments
-                .replace(/\/\*[\s\S]*?\*\//g, '')
-                // line comments
-                .replace(/\/\/.*$/gm, '');
+                // block comments (preserve newlines for line numbers)
+                .replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, ' '))
+                // line comments (preserve line length)
+                .replace(/\/\/.*$/gm, (match) => ' '.repeat(match.length));
 
             const mainPos = codeForSearch.search(/void\s+main\s*\(\s*\)\s*\{/g);
             const mainImagePos = codeForSearch.search(/void\s+mainImage\s*\(\s*out\s+vec4\s+\w+,\s*(in\s)?\s*vec2\s+\w+\s*\)\s*\{/g);
-            const mainSoundPos = codeForSearch.search(/\bmainSound\s*\(/g);
+            const mainSoundAnyPos = codeForSearch.search(/\bmainSound\s*\(/g);
+            const mainSoundIntPos = codeForSearch.search(/vec2\s+mainSound\s*\(\s*int\s+\w+\s*,\s*float\s+\w+\s*\)/g);
+            const mainSoundFloatPos = codeForSearch.search(/vec2\s+mainSound\s*\(\s*float\s+\w+\s*\)/g);
 
-            usesMainSound = mainSoundPos >= 0;
+            usesMainSound = mainSoundAnyPos >= 0;
+            const hasMainSoundInt = mainSoundIntPos >= 0;
+            const hasMainSoundFloat = mainSoundFloatPos >= 0;
+
+            if (usesMainSound) {
+                const webglVersion = this.context.getConfig<string>('webglVersion');
+                if (webglVersion !== 'WebGL2') {
+                    const line = mainSoundAnyPos >= 0
+                        ? codeForSearch.slice(0, mainSoundAnyPos).split(/\r\n|\n/).length
+                        : 1;
+                    this.showErrorAtLine(file, 'mainSound requires shader-toy.webglVersion set to "WebGL2".', line);
+                }
+            }
+
+            if (usesMainSound && hasMainSoundInt && !hasMainSoundFloat) {
+                code += `
+vec2 mainSound(float time) {
+    return mainSound(0, time);
+}`;
+            }
 
             const needsMainWrapper = (mainPos === -1);
             const hasMainImage = (mainImagePos >= 0);
 
-            if (this.context.getConfig<boolean>('shaderToyStrictCompatibility') || strictComp.Value) {
-                if (!hasMainImage && usesMainSound) {
-                    code += `
-void mainImage(out vec4 fragColor, in vec2 fragCoord) {
-    fragColor = vec4(0.0);
-}`;
-                }
-                insertMainImageCode();
-            }
-            else {
-                if (needsMainWrapper && hasMainImage) {
+            if (!usesMainSound) {
+                if (this.context.getConfig<boolean>('shaderToyStrictCompatibility') || strictComp.Value) {
                     insertMainImageCode();
                 }
-                else if (needsMainWrapper && !hasMainImage && usesMainSound) {
-                    code += `
-void mainImage(out vec4 fragColor, in vec2 fragCoord) {
-    fragColor = vec4(0.0);
-}`;
-                    insertMainImageCode();
+                else {
+                    if (needsMainWrapper && hasMainImage) {
+                        insertMainImageCode();
+                    }
                 }
             }
         }

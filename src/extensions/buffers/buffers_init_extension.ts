@@ -13,13 +13,14 @@ export class BuffersInitExtension implements WebviewExtension {
 
     private processBuffers(buffers: Types.BufferDefinition[]) {
         for (const buffer of buffers) {
+            const isSound = buffer.IsSound === true;
             // Create a RenderTarget for all but the final buffer
             let target = 'null';
             let pingPongTarget = 'null';
-            if (buffer !== buffers[buffers.length - 1]) {
+            if (!isSound && buffer !== buffers[buffers.length - 1]) {
                 target = 'new THREE.WebGLRenderTarget(resolution.x, resolution.y, { type: framebufferType })';
             }
-            if (buffer.UsesSelf) {
+            if (!isSound && buffer.UsesSelf) {
                 pingPongTarget = 'new THREE.WebGLRenderTarget(resolution.x, resolution.y, { type: framebufferType })';
             }
 
@@ -37,7 +38,7 @@ buffers.push({
     PingPongTarget: ${pingPongTarget},
     PingPongChannel: ${buffer.SelfChannel},
     Dependents: ${JSON.stringify(buffer.Dependents)},
-    Shader: new THREE.ShaderMaterial({
+    Shader: ${isSound ? 'null' : `new THREE.ShaderMaterial({
         glslVersion: glslUseVersion3 ? THREE.GLSL3 : THREE.GLSL1,
         vertexShader: ${buffer.VertexCode !== undefined ? `prepareVertexShader(document.getElementById(${JSON.stringify(buffer.Name + '_vertex')}).textContent)` : 'undefined'},
         fragmentShader: prepareFragmentShader(document.getElementById(${JSON.stringify(buffer.Name)}).textContent),
@@ -71,7 +72,7 @@ buffers.push({
             time: { type: 'f', value: 0.0 },
             mouse: { type: 'v2', value: normalizedMouse },
         }
-    })
+    })`}
 });`;
         }
     }

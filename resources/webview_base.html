@@ -169,10 +169,16 @@
             paused = pauseButton.checked;
             if (!paused) {
                 // Audio Resume
+                if (window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.resume) {
+                    window.ShaderToy.audioOutput.resume(true);
+                }
                 pausedTime += clock.getDelta();
             }
             else {
                 // Audio Pause
+                if (window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.pause) {
+                    window.ShaderToy.audioOutput.pause();
+                }
             }
 
             if (vscode !== undefined) {
@@ -215,10 +221,16 @@
                 paused = !paused;
                 if (!paused) {
                     // Audio Resume
+                    if (window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.resume) {
+                        window.ShaderToy.audioOutput.resume(true);
+                    }
                     pausedTime += clock.getDelta();
                 }
                 else {
                     // Audio Pause
+                    if (window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.pause) {
+                        window.ShaderToy.audioOutput.pause();
+                    }
                 }
 
                 if (vscode !== undefined) {
@@ -305,6 +317,25 @@
     let texLoader = new THREE.TextureLoader();
     // Texture Init
 
+    const hasSoundBuffer = buffers.some((buffer) => buffer && buffer.IsSound);
+    if (!glslUseVersion3 && hasSoundBuffer && vscode !== undefined) {
+        vscode.postMessage({
+            command: 'errorMessage',
+            message: 'mainSound requires shader-toy.webglVersion set to "WebGL2".'
+        });
+    }
+    if (glslUseVersion3 && window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.initFromGlobals) {
+        window.ShaderToy.audioOutput.initFromGlobals({
+            buffers: buffers,
+            renderer: renderer,
+            gl: gl,
+            glslUseVersion3: glslUseVersion3,
+            prepareFragmentShader: prepareFragmentShader,
+            audioContext: audioContext,
+            paused: paused
+        });
+    }
+
     let scene = new THREE.Scene();
     let quad = new THREE.Mesh(
         new THREE.PlaneGeometry(resolution.x, resolution.y),
@@ -345,6 +376,9 @@
     }
 
     for (let buffer of buffers) {
+        if (buffer.IsSound || !buffer.Shader) {
+            continue;
+        }
         if (buffer.VertexShaderElementId !== undefined) {
             currentShader = {
                 Name: buffer.Name + ' (vertex)',
@@ -420,7 +454,7 @@
         // Audio Update
 
         for (let buffer of buffers) {
-            if (failedBufferNames.has(buffer.Name)) {
+            if (buffer.IsSound || !buffer.Shader || failedBufferNames.has(buffer.Name)) {
                 continue;
             }
             buffer.Shader.uniforms['iResolution'].value = resolution;
@@ -451,12 +485,14 @@
         }
 
         for (let buffer of buffers) {
-            if (buffer.PingPongTarget) {
+            if (buffer.PingPongTarget && buffer.Shader) {
                 [buffer.PingPongTarget, buffer.Target] = [buffer.Target, buffer.PingPongTarget];
                 buffer.Shader.uniforms[`iChannel${buffer.PingPongChannel}`].value = buffer.PingPongTarget.texture;
                 for (let dependent of buffer.Dependents) {
                     const dependentBuffer = buffers[dependent.Index];
-                    dependentBuffer.Shader.uniforms[`iChannel${dependent.Channel}`].value = buffer.Target.texture;
+                    if (dependentBuffer && dependentBuffer.Shader) {
+                        dependentBuffer.Shader.uniforms[`iChannel${dependent.Channel}`].value = buffer.Target.texture;
+                    }
                 }
             }
         }
@@ -538,6 +574,9 @@
             renderer.setSize(forcedScreenshotResolution[0], forcedScreenshotResolution[1], false);
             
             for (let buffer of buffers) {
+                if (buffer.IsSound || !buffer.Shader) {
+                    continue;
+                }
                 buffer.Shader.uniforms['iResolution'].value = new THREE.Vector3(forcedScreenshotResolution[0], forcedScreenshotResolution[1], 1);
                 buffer.Shader.uniforms['resolution'].value = new THREE.Vector3(forcedScreenshotResolution[0], forcedScreenshotResolution[1], 1);
 
