@@ -31,6 +31,7 @@ buffers.push({
     VertexFile: ${buffer.VertexFile !== undefined ? `'${buffer.VertexFile}'` : 'undefined'},
     VertexLineOffset: ${buffer.VertexLineOffset !== undefined ? `${buffer.VertexLineOffset}` : 'undefined'},
     VertexShaderElementId: ${buffer.VertexCode !== undefined ? `'${buffer.Name}_vertex'` : 'undefined'},
+    IsSound: ${buffer.IsSound ? 'true' : 'false'},
     Target: ${target},
     ChannelResolution: Array(10).fill(new THREE.Vector3(0,0,0)),
     PingPongTarget: ${pingPongTarget},

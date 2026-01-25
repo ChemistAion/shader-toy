@@ -380,6 +380,7 @@ export class BufferProvider {
             }
         }
 
+        let usesMainSound = false;
         {
             const insertMainImageCode = () => {
                 code += `
@@ -389,22 +390,42 @@ void main() {
 }`;
             };
 
+            // If there is no void main() in the shader we assume it is a shader-toy style shader
+            // IMPORTANT: avoid matching commented-out code like `// void main() {}`.
+            // This check only determines whether we should inject a wrapper `main()`.
+            const codeForSearch = code
+                // block comments
+                .replace(/\/\*[\s\S]*?\*\//g, '')
+                // line comments
+                .replace(/\/\/.*$/gm, '');
+
+            const mainPos = codeForSearch.search(/void\s+main\s*\(\s*\)\s*\{/g);
+            const mainImagePos = codeForSearch.search(/void\s+mainImage\s*\(\s*out\s+vec4\s+\w+,\s*(in\s)?\s*vec2\s+\w+\s*\)\s*\{/g);
+            const mainSoundPos = codeForSearch.search(/\bmainSound\s*\(/g);
+
+            usesMainSound = mainSoundPos >= 0;
+
+            const needsMainWrapper = (mainPos === -1);
+            const hasMainImage = (mainImagePos >= 0);
+
             if (this.context.getConfig<boolean>('shaderToyStrictCompatibility') || strictComp.Value) {
+                if (!hasMainImage && usesMainSound) {
+                    code += `
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+    fragColor = vec4(0.0);
+}`;
+                }
                 insertMainImageCode();
             }
             else {
-                // If there is no void main() in the shader we assume it is a shader-toy style shader
-                // IMPORTANT: avoid matching commented-out code like `// void main() {}`.
-                // This check only determines whether we should inject a wrapper `main()`.
-                const codeForSearch = code
-                    // block comments
-                    .replace(/\/\*[\s\S]*?\*\//g, '')
-                    // line comments
-                    .replace(/\/\/.*$/gm, '');
-
-                const mainPos = codeForSearch.search(/void\s+main\s*\(\s*\)\s*\{/g);
-                const mainImagePos = codeForSearch.search(/void\s+mainImage\s*\(\s*out\s+vec4\s+\w+,\s*(in\s)?\s*vec2\s+\w+\s*\)\s*\{/g);
-                if (mainPos === -1 && mainImagePos >= 0) {
+                if (needsMainWrapper && hasMainImage) {
+                    insertMainImageCode();
+                }
+                else if (needsMainWrapper && !hasMainImage && usesMainSound) {
+                    code += `
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+    fragColor = vec4(0.0);
+}`;
                     insertMainImageCode();
                 }
             }
@@ -485,6 +506,7 @@ void main() {
             UsesSelf: false,
             SelfChannel: -1,
             Dependents: [],
+            IsSound: usesMainSound,
             UsesKeyboard: usesKeyboard,
             UsesFirstPersonControls: usesFirstPersonControls,
             LineOffset: lineOffset

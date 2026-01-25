@@ -381,6 +381,9 @@ export class WebviewContentProvider {
             const webviewShaderCompile = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/shader_compile.js', getResourceText);
             this.webviewAssembler.addReplaceModule(webviewShaderCompile, '<!-- Webview shader_compile.js -->', '<!-- Webview shader_compile.js -->');
 
+            const webviewAudioOutput = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/audio_output.js', getResourceText);
+            this.webviewAssembler.addReplaceModule(webviewAudioOutput, '<!-- Webview audio_output.js -->', '<!-- Webview audio_output.js -->');
+
             const webviewUiControls = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/ui_controls.js', getResourceText);
             this.webviewAssembler.addReplaceModule(webviewUiControls, '<!-- Webview ui_controls.js -->', '<!-- Webview ui_controls.js -->');
 

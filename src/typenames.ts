@@ -106,6 +106,7 @@ export type BufferDefinition = {
     Dependents: BufferDependency[],
     LineOffset: number
     Includes: IncludeDefinition[],
+    IsSound?: boolean,
     UsesKeyboard?: boolean,
     UsesFirstPersonControls?: boolean,
 };
