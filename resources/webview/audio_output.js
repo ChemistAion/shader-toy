@@ -165,37 +165,55 @@
             return null;
         }
 
-        const analyser = state.audioContext.createAnalyser();
+        const analyserLeft = state.audioContext.createAnalyser();
+        const analyserRight = state.audioContext.createAnalyser();
         const resolvedFft = Number.isFinite(fftSize) ? Math.max(32, Math.floor(fftSize)) : 2048;
-        analyser.fftSize = resolvedFft;
+        analyserLeft.fftSize = resolvedFft;
+        analyserRight.fftSize = resolvedFft;
 
-        const dataSize = Math.max(analyser.fftSize, analyser.frequencyBinCount);
-        const dataArray = new Uint8Array(dataSize * 2);
+        const dataSize = Math.max(analyserLeft.fftSize, analyserLeft.frequencyBinCount);
+        const dataArray = new Uint8Array(dataSize * 2 * 4);
+        const freqLeft = new Uint8Array(analyserLeft.frequencyBinCount);
+        const freqRight = new Uint8Array(analyserRight.frequencyBinCount);
+        const timeLeft = new Uint8Array(analyserLeft.fftSize);
+        const timeRight = new Uint8Array(analyserRight.fftSize);
 
-        const texture = new global.THREE.DataTexture(dataArray, dataSize, 2, global.THREE.LuminanceFormat, global.THREE.UnsignedByteType);
+        const texture = new global.THREE.DataTexture(dataArray, dataSize, 2, global.THREE.RGBAFormat, global.THREE.UnsignedByteType);
         texture.magFilter = global.THREE.LinearFilter;
         texture.needsUpdate = true;
 
         const analysisGain = ensureAnalysisGain();
+        const splitter = state.audioContext.createChannelSplitter(2);
+        splitter.connect(analyserLeft, 0);
+        splitter.connect(analyserRight, 1);
         if (analysisGain) {
-            analyser.connect(analysisGain);
+            analyserLeft.connect(analysisGain);
+            analyserRight.connect(analysisGain);
         }
-        state.analyserNodes.push(analyser);
+        state.analyserNodes.push(analyserLeft, analyserRight);
+        state.soundInputSplitters = state.soundInputSplitters || [];
+        state.soundInputSplitters.push(splitter);
 
         if (state.sourceNode) {
             try {
-                state.sourceNode.connect(analyser);
+                state.sourceNode.connect(splitter);
             } catch {
                 // ignore
             }
         }
 
         return {
-            Analyser: analyser,
+            AnalyserLeft: analyserLeft,
+            AnalyserRight: analyserRight,
             Data: dataArray,
-            Texture: texture,
-            FrequencySamples: analyser.frequencyBinCount,
-            AmplitudeSamples: analyser.fftSize
+            DataSize: dataSize,
+            FrequencySamples: analyserLeft.frequencyBinCount,
+            AmplitudeSamples: analyserLeft.fftSize,
+            FrequencyDataLeft: freqLeft,
+            FrequencyDataRight: freqRight,
+            TimeDataLeft: timeLeft,
+            TimeDataRight: timeRight,
+            Texture: texture
         };
     };
 
@@ -468,7 +486,15 @@
             const source = state.audioContext.createBufferSource();
             source.buffer = state.audioBuffer;
             source.connect(state.gainNode);
-            if (state.analyserNodes.length) {
+            if (state.soundInputSplitters && state.soundInputSplitters.length) {
+                for (const splitter of state.soundInputSplitters) {
+                    try {
+                        source.connect(splitter);
+                    } catch {
+                        // ignore
+                    }
+                }
+            } else if (state.analyserNodes.length) {
                 for (const analyser of state.analyserNodes) {
                     try {
                         source.connect(analyser);

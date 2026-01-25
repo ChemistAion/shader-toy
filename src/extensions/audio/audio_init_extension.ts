@@ -46,10 +46,16 @@ export class AudioInitExtension implements WebviewExtension, TextureExtensionExt
                         audios.push({
                             Channel: ${channel},
                             Media: null,
-                            Analyser: soundInput.Analyser,
+                            AnalyserLeft: soundInput.AnalyserLeft,
+                            AnalyserRight: soundInput.AnalyserRight,
                             AmplitudeSamples: soundInput.AmplitudeSamples,
                             FrequencySamples: soundInput.FrequencySamples,
                             Data: soundInput.Data,
+                            DataSize: soundInput.DataSize,
+                            FrequencyDataLeft: soundInput.FrequencyDataLeft,
+                            FrequencyDataRight: soundInput.FrequencyDataRight,
+                            TimeDataLeft: soundInput.TimeDataLeft,
+                            TimeDataRight: soundInput.TimeDataRight,
                             Texture: soundInput.Texture
                         });
 
@@ -100,29 +106,45 @@ export class AudioInitExtension implements WebviewExtension, TextureExtensionExt
                                     audio.buffer = audioBuffer;
                                     audio.loop = true;
 
-                                    let analyser = audioContext.createAnalyser();
-                                    analyser.fftSize = ${context.getConfig<number>('audioDomainSize')};
+                                    const fftSize = ${context.getConfig<number>('audioDomainSize')};
+                                    const analyserLeft = audioContext.createAnalyser();
+                                    const analyserRight = audioContext.createAnalyser();
+                                    analyserLeft.fftSize = fftSize;
+                                    analyserRight.fftSize = fftSize;
 
-                                    const dataSize = Math.max(analyser.fftSize, analyser.frequencyBinCount);
-                                    const dataArray = new Uint8Array(dataSize * 2);
+                                    const dataSize = Math.max(analyserLeft.fftSize, analyserLeft.frequencyBinCount);
+                                    const dataArray = new Uint8Array(dataSize * 2 * 4);
+                                    const freqLeft = new Uint8Array(analyserLeft.frequencyBinCount);
+                                    const freqRight = new Uint8Array(analyserRight.frequencyBinCount);
+                                    const timeLeft = new Uint8Array(analyserLeft.fftSize);
+                                    const timeRight = new Uint8Array(analyserRight.fftSize);
 
-                                    let texture = new THREE.DataTexture(dataArray, dataSize, 2, THREE.LuminanceFormat, THREE.UnsignedByteType);
+                                    let texture = new THREE.DataTexture(dataArray, dataSize, 2, THREE.RGBAFormat, THREE.UnsignedByteType);
                                     texture.magFilter = THREE.LinearFilter;
                                     texture.needsUpdate = true;
 
                                     buffers[${i}].Shader.uniforms.iChannel${channel} = { type: 't', value: texture };
 
-                                    audio.connect(analyser);
-                                    analyser.connect(audioContext.destination);
+                                    const splitter = audioContext.createChannelSplitter(2);
+                                    audio.connect(audioContext.destination);
+                                    audio.connect(splitter);
+                                    splitter.connect(analyserLeft, 0);
+                                    splitter.connect(analyserRight, 1);
                                     audio.start(0, startingTime % audioBuffer.duration);
         
                                     audios.push({
                                         Channel: ${channel},
                                         Media: audio,
-                                        Analyser: analyser,
-                                        AmplitudeSamples: analyser.fftSize,
-                                        FrequencySamples: analyser.frequencyBinCount,
+                                        AnalyserLeft: analyserLeft,
+                                        AnalyserRight: analyserRight,
+                                        AmplitudeSamples: analyserLeft.fftSize,
+                                        FrequencySamples: analyserLeft.frequencyBinCount,
                                         Data: dataArray,
+                                        DataSize: dataSize,
+                                        FrequencyDataLeft: freqLeft,
+                                        FrequencyDataRight: freqRight,
+                                        TimeDataLeft: timeLeft,
+                                        TimeDataRight: timeRight,
                                         Texture: texture
                                     })
                                 })
