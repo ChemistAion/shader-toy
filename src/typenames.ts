@@ -71,7 +71,8 @@ export type AudioDefinition = {
     Channel: number,
     LocalPath?: string,
     RemotePath?: string,
-    UserPath: string
+    UserPath: string,
+    FromSound?: boolean
 };
 export type UniformDefinition = {
     Name: string,

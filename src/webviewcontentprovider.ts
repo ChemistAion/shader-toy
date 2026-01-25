@@ -70,6 +70,7 @@ import { AudioInitExtension } from './extensions/audio/audio_init_extension';
 import { AudioUpdateExtension } from './extensions/audio/audio_update_extension';
 import { AudioPauseExtension } from './extensions/audio/audio_pause_extension';
 import { AudioResumeExtension } from './extensions/audio/audio_resume_extension';
+import { AudioOutputPrecisionExtension } from './extensions/audio/audio_output_precision_extension';
 
 import { UniformsInitExtension } from './extensions/uniforms/uniforms_init_extension';
 import { UniformsUpdateExtension } from './extensions/uniforms/uniforms_update_extension';
@@ -116,34 +117,43 @@ export class WebviewContentProvider {
                 await buffer_provider.parseShaderCode(shaderName, shader, this.buffers, this.commonIncludes, generateStandalone);
             }
 
-            // If final buffer uses feedback we need to add a last pass that renders it to the screen
+            // If final visual buffer uses feedback we need to add a last pass that renders it to the screen
             // because we can not ping-pong the screen
             {
-                const finalBuffer = this.buffers[this.buffers.length - 1];
-                if (finalBuffer.UsesSelf) {
-                    const finalBufferIndex = this.buffers.length - 1;
-                    finalBuffer.Dependents.push({
-                        Index: this.buffers.length,
-                        Channel: 0
-                    });
-                    this.buffers.push({
-                        Name: 'final-blit',
-                        File: 'final-blit',
-                        Code: 'void main() { GLSL_FRAGCOLOR = texture2D(iChannel0, gl_FragCoord.xy / iResolution.xy); }',
-                        TextureInputs: [{
-                            Channel: 0,
-                            File: '',
-                            Buffer: finalBuffer.Name,
-                            BufferIndex: finalBufferIndex,
-                        }],
-                        AudioInputs: [],
-                        CustomUniforms: [],
-                        Includes: [],
-                        UsesSelf: false,
-                        SelfChannel: -1,
-                        Dependents: [],
-                        LineOffset: 0,
-                    });
+                let finalBufferIndex = -1;
+                for (let i = this.buffers.length - 1; i >= 0; i--) {
+                    if (this.buffers[i].IsSound !== true) {
+                        finalBufferIndex = i;
+                        break;
+                    }
+                }
+
+                if (finalBufferIndex >= 0) {
+                    const finalBuffer = this.buffers[finalBufferIndex];
+                    if (finalBuffer.UsesSelf) {
+                        finalBuffer.Dependents.push({
+                            Index: this.buffers.length,
+                            Channel: 0
+                        });
+                        this.buffers.push({
+                            Name: 'final-blit',
+                            File: 'final-blit',
+                            Code: 'void main() { GLSL_FRAGCOLOR = texture2D(iChannel0, gl_FragCoord.xy / iResolution.xy); }',
+                            TextureInputs: [{
+                                Channel: 0,
+                                File: '',
+                                Buffer: finalBuffer.Name,
+                                BufferIndex: finalBufferIndex,
+                            }],
+                            AudioInputs: [],
+                            CustomUniforms: [],
+                            Includes: [],
+                            UsesSelf: false,
+                            SelfChannel: -1,
+                            Dependents: [],
+                            LineOffset: 0,
+                        });
+                    }
                 }
             }
         }
@@ -359,6 +369,10 @@ export class WebviewContentProvider {
             const noAudioExtension = new NoAudioExtension();
             this.webviewAssembler.addWebviewModule(noAudioExtension, '// Audio Init');
         }
+
+        const audioOutputPrecision = this.context.getConfig<string>('audioOutputPrecision') || '32bFLOAT';
+        const audioOutputPrecisionExtension = new AudioOutputPrecisionExtension(audioOutputPrecision);
+        this.webviewAssembler.addReplaceModule(audioOutputPrecisionExtension, '<!-- Audio Output Precision -->', '<!-- Audio Output Precision -->');
 
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Packages

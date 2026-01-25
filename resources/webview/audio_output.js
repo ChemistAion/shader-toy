@@ -12,6 +12,8 @@
         gainNode: null,
         audioBuffer: null,
         sourceNode: null,
+        analysisGain: null,
+        analyserNodes: [],
         soundBuffer: null,
         ready: false,
         pendingStartAt: null,
@@ -37,7 +39,37 @@
         return new AudioContextCtor();
     };
 
-    const buildSoundMaterial = function (buffer, options, sampleRate) {
+    const resolvePrecision = function (options) {
+        const precision = String(options.precision || '32bFLOAT');
+        const gl = options.gl;
+        const supportsFloat = gl && (gl.getExtension('EXT_color_buffer_float') || gl.getExtension('WEBGL_color_buffer_float'));
+        const supportsHalfFloat = gl && (gl.getExtension('EXT_color_buffer_half_float'));
+
+        if (precision === '32bFLOAT' && supportsFloat) {
+            return '32bFLOAT';
+        }
+        if (precision === '16bFLOAT' && supportsHalfFloat) {
+            return '16bFLOAT';
+        }
+        if (precision === '32bFLOAT' && supportsHalfFloat) {
+            return '16bFLOAT';
+        }
+        return '16bPACK';
+    };
+
+    const reportPrecisionFallback = function (options, resolvedPrecision) {
+        const requested = String(options.precision || '32bFLOAT');
+        if (requested === resolvedPrecision) {
+            return;
+        }
+        const gl = options.gl;
+        const supportsFloat = gl && (gl.getExtension('EXT_color_buffer_float') || gl.getExtension('WEBGL_color_buffer_float'));
+        const supportsHalfFloat = gl && (gl.getExtension('EXT_color_buffer_half_float'));
+        const details = `EXT_color_buffer_float=${supportsFloat ? 'yes' : 'no'}, EXT_color_buffer_half_float=${supportsHalfFloat ? 'yes' : 'no'}`;
+        postErrorMessage(`Audio precision '${requested}' not supported; using '${resolvedPrecision}'. (${details})`);
+    };
+
+    const buildSoundMaterial = function (buffer, options, sampleRate, precisionMode) {
         if (!global.document || !global.document.getElementById) {
             return null;
         }
@@ -47,7 +79,7 @@
             return null;
         }
 
-        const footer = `
+        const footer = (precisionMode === '16bPACK') ? `
     uniform float blockOffset;
 
     void main() {
@@ -57,11 +89,23 @@
     vec2 vl = mod(v, 256.0) / 255.0;
     vec2 vh = floor(v / 256.0) / 255.0;
     GLSL_FRAGCOLOR = vec4(vl.x, vh.x, vl.y, vh.y);
+}` : `
+    uniform float blockOffset;
+
+    void main() {
+    float t = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0) / iSampleRate;
+    vec2 y = mainSound(t);
+    GLSL_FRAGCOLOR = vec4(y, 0.0, 1.0);
 }`;
 
         const source = `${shaderElement.textContent}\n${footer}`;
-        const prepared = options.prepareFragmentShader ? options.prepareFragmentShader(source) : source;
+        const prepared = options.prepareFragmentShader ? options.prepareFragmentShader(source, options.glslUseVersion3) : source;
+        const vertexSource = 'void main() { gl_Position = vec4(position, 1.0); }';
+        const preparedVertex = options.prepareVertexShader
+            ? options.prepareVertexShader(vertexSource, options.glslUseVersion3)
+            : vertexSource;
         const materialOptions = {
+            vertexShader: preparedVertex,
             fragmentShader: prepared,
             depthWrite: false,
             depthTest: false,
@@ -72,8 +116,6 @@
         };
         if (options.glslUseVersion3 && global.THREE.GLSL3) {
             materialOptions.glslVersion = global.THREE.GLSL3;
-        } else if (!options.glslUseVersion3 && global.THREE.GLSL1) {
-            materialOptions.glslVersion = global.THREE.GLSL1;
         }
         return new global.THREE.ShaderMaterial(materialOptions);
     };
@@ -90,6 +132,111 @@
         return true;
     };
 
+    const ensureAnalysisGain = function () {
+        if (!state.audioContext) {
+            return null;
+        }
+        if (!state.analysisGain) {
+            const analysisGain = state.audioContext.createGain();
+            analysisGain.gain.value = 0;
+            analysisGain.connect(state.audioContext.destination);
+            state.analysisGain = analysisGain;
+        }
+        return state.analysisGain;
+    };
+
+    root.audioOutput.createSoundInput = function (fftSize) {
+        if (!state.audioContext || !state.soundBuffer || !global.THREE) {
+            return null;
+        }
+
+        const analyser = state.audioContext.createAnalyser();
+        const resolvedFft = Number.isFinite(fftSize) ? Math.max(32, Math.floor(fftSize)) : 2048;
+        analyser.fftSize = resolvedFft;
+
+        const dataSize = Math.max(analyser.fftSize, analyser.frequencyBinCount);
+        const dataArray = new Uint8Array(dataSize * 2);
+
+        const texture = new global.THREE.DataTexture(dataArray, dataSize, 2, global.THREE.LuminanceFormat, global.THREE.UnsignedByteType);
+        texture.magFilter = global.THREE.LinearFilter;
+        texture.needsUpdate = true;
+
+        const analysisGain = ensureAnalysisGain();
+        if (analysisGain) {
+            analyser.connect(analysisGain);
+        }
+        state.analyserNodes.push(analyser);
+
+        if (state.sourceNode) {
+            try {
+                state.sourceNode.connect(analyser);
+            } catch {
+                // ignore
+            }
+        }
+
+        return {
+            Analyser: analyser,
+            Data: dataArray,
+            Texture: texture,
+            FrequencySamples: analyser.frequencyBinCount,
+            AmplitudeSamples: analyser.fftSize
+        };
+    };
+
+    const getStatusElement = function () {
+        if (!global.document || !global.document.body) {
+            return null;
+        }
+        let el = global.document.getElementById('audio-output-status');
+        if (!el) {
+            el = global.document.createElement('div');
+            el.id = 'audio-output-status';
+            el.style.position = 'absolute';
+            el.style.left = '8px';
+            el.style.bottom = '8px';
+            el.style.padding = '6px 8px';
+            el.style.fontFamily = 'Consolas, monospace';
+            el.style.fontSize = '12px';
+            el.style.background = 'rgba(0,0,0,0.65)';
+            el.style.color = '#ddd';
+            el.style.borderRadius = '4px';
+            el.style.whiteSpace = 'pre';
+            el.style.zIndex = '4';
+            global.document.body.appendChild(el);
+        }
+        return el;
+    };
+
+    const showStatus = function (message) {
+        const el = getStatusElement();
+        if (el) {
+            el.textContent = message;
+        }
+    };
+
+    const renderStatus = function () {
+        const parts = [];
+        if (state.statusLine) {
+            parts.push(state.statusLine);
+        }
+        if (state.statsLine) {
+            parts.push(state.statsLine);
+        }
+        showStatus(parts.join('\n'));
+    };
+
+    const setStatus = function (message) {
+        state.statusMessage = message;
+        state.statusLine = message;
+        renderStatus();
+    };
+
+    const setStats = function (message) {
+        state.statsLine = message;
+        renderStatus();
+    };
+
     const postErrorMessage = function (message) {
         try {
             const vscode = root.env && root.env.getVscodeApi ? root.env.getVscodeApi() : undefined;
@@ -98,6 +245,9 @@
             }
         } catch {
             // ignore
+        }
+        if (message) {
+            setStatus(message);
         }
     };
 
@@ -125,7 +275,7 @@
 
         attachGestureResume(startIfNeeded);
         global.addEventListener('focus', startIfNeeded, { once: true });
-        postErrorMessage('Audio output is blocked until you click inside the preview.');
+        setStatus('Audio output is blocked (WebAudio gesture) until you gain focus to the GLSL-preview.');
     };
 
     const scheduleGestureStart = function (startAt, resumeAndStart) {
@@ -135,7 +285,7 @@
             state.pendingStartAt = null;
             resumeAndStart(pending ?? 0);
         });
-        postErrorMessage('Audio output is blocked until you click inside the preview.');
+        setStatus('Audio output is blocked (WebAudio gesture) until you gain focus to the GLSL-preview.');
     };
 
     const renderAllBlocks = function (options) {
@@ -145,19 +295,35 @@
             return;
         }
 
+        const previousShader = global.currentShader;
+        if (soundBuffer && soundBuffer.File) {
+            global.currentShader = {
+                Name: soundBuffer.Name,
+                File: soundBuffer.File,
+                LineOffset: soundBuffer.LineOffset
+            };
+        }
+
         const WIDTH = 512;
         const HEIGHT = 512;
         const samplesPerBlock = WIDTH * HEIGHT;
         const totalSamples = state.audioBuffer.length;
         const numBlocks = Math.ceil(totalSamples / samplesPerBlock);
 
-        const target = new global.THREE.WebGLRenderTarget(WIDTH, HEIGHT, { type: global.THREE.UnsignedByteType });
+        const precisionMode = resolvePrecision(options);
+        let targetType = global.THREE.UnsignedByteType;
+        if (precisionMode === '32bFLOAT' && global.THREE.FloatType) {
+            targetType = global.THREE.FloatType;
+        } else if (precisionMode === '16bFLOAT' && global.THREE.HalfFloatType) {
+            targetType = global.THREE.HalfFloatType;
+        }
+        const target = new global.THREE.WebGLRenderTarget(WIDTH, HEIGHT, { type: targetType });
         const scene = new global.THREE.Scene();
         const camera = new global.THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
         camera.position.set(0, 0, 1);
         camera.lookAt(scene.position);
 
-        const material = buildSoundMaterial(soundBuffer, options, state.audioContext.sampleRate);
+        const material = buildSoundMaterial(soundBuffer, options, state.audioContext.sampleRate, precisionMode);
         if (!material) {
             return;
         }
@@ -165,11 +331,17 @@
         const mesh = new global.THREE.Mesh(new global.THREE.PlaneGeometry(2, 2), material);
         scene.add(mesh);
 
-        const pixels = new Uint8Array(WIDTH * HEIGHT * 4);
+        const pixels = (precisionMode === '16bPACK')
+            ? new Uint8Array(WIDTH * HEIGHT * 4)
+            : new Float32Array(WIDTH * HEIGHT * 4);
         const outputDataL = state.audioBuffer.getChannelData(0);
         const outputDataR = state.audioBuffer.getChannelData(1);
 
         const previousTarget = renderer.getRenderTarget();
+
+        const renderStart = global.performance && typeof global.performance.now === 'function'
+            ? global.performance.now()
+            : Date.now();
 
         for (let i = 0; i < numBlocks; i++) {
             material.uniforms.blockOffset.value = (i * samplesPerBlock) / state.audioContext.sampleRate;
@@ -181,10 +353,18 @@
             const remaining = totalSamples - baseIndex;
             const blockSamples = Math.min(samplesPerBlock, remaining);
 
-            for (let j = 0; j < blockSamples; j++) {
-                const pixelIndex = j * 4;
-                outputDataL[baseIndex + j] = (pixels[pixelIndex + 0] + 256 * pixels[pixelIndex + 1]) / 65535 * 2 - 1;
-                outputDataR[baseIndex + j] = (pixels[pixelIndex + 2] + 256 * pixels[pixelIndex + 3]) / 65535 * 2 - 1;
+            if (precisionMode === '16bPACK') {
+                for (let j = 0; j < blockSamples; j++) {
+                    const pixelIndex = j * 4;
+                    outputDataL[baseIndex + j] = (pixels[pixelIndex + 0] + 256 * pixels[pixelIndex + 1]) / 65535 * 2 - 1;
+                    outputDataR[baseIndex + j] = (pixels[pixelIndex + 2] + 256 * pixels[pixelIndex + 3]) / 65535 * 2 - 1;
+                }
+            } else {
+                for (let j = 0; j < blockSamples; j++) {
+                    const pixelIndex = j * 4;
+                    outputDataL[baseIndex + j] = Math.max(-1, Math.min(1, pixels[pixelIndex + 0]));
+                    outputDataR[baseIndex + j] = Math.max(-1, Math.min(1, pixels[pixelIndex + 1]));
+                }
             }
         }
 
@@ -192,6 +372,14 @@
         target.dispose();
         material.dispose();
         mesh.geometry.dispose();
+
+        const renderEnd = global.performance && typeof global.performance.now === 'function'
+            ? global.performance.now()
+            : Date.now();
+        const renderSeconds = Math.max(0, renderEnd - renderStart) / 1000;
+        setStats(`Pre-processing time: ${renderSeconds.toFixed(2)}s`);
+
+        global.currentShader = previousShader;
     };
 
     root.audioOutput.initFromGlobals = function (options) {
@@ -232,6 +420,11 @@
             }
         }
 
+        const precisionMode = resolvePrecision(options);
+        reportPrecisionFallback(options, precisionMode);
+        const blockSeconds = (512 * 512) / state.audioContext.sampleRate;
+        setStatus(`Audio: ${precisionMode} @ ${state.audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
+
         renderAllBlocks(options);
         state.ready = true;
         state.started = false;
@@ -258,13 +451,28 @@
             const source = state.audioContext.createBufferSource();
             source.buffer = state.audioBuffer;
             source.connect(state.gainNode);
+            if (state.analyserNodes.length) {
+                for (const analyser of state.analyserNodes) {
+                    try {
+                        source.connect(analyser);
+                    } catch {
+                        // ignore
+                    }
+                }
+            }
             state.sourceNode = source;
 
             state.audioContext.resume().then(() => {
                 source.start(0, startAt);
                 state.started = true;
+                if (state.statusMessage && state.statusMessage.indexOf('Audio output is blocked') >= 0) {
+                    const precisionMode = resolvePrecision(state.options);
+                    const blockSeconds = (512 * 512) / state.audioContext.sampleRate;
+                    const durationSeconds = Number.isFinite(state.options.durationSeconds) ? state.options.durationSeconds : 180;
+                    setStatus(`Audio: ${precisionMode} @ ${state.audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
+                }
             }).catch(() => {
-                postErrorMessage('Audio output is blocked until you click inside the preview.');
+                setStatus('Audio output is blocked (WebAudio gesture) until you gain focus to the GLSL-preview.');
             });
         };
 

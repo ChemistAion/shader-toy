@@ -12,19 +12,33 @@ export class BuffersInitExtension implements WebviewExtension {
     }
 
     private processBuffers(buffers: Types.BufferDefinition[]) {
+        let lastVisualIndex = -1;
+        for (let i = buffers.length - 1; i >= 0; i--) {
+            if (buffers[i].IsSound !== true) {
+                lastVisualIndex = i;
+                break;
+            }
+        }
+
+        let bufferIndex = 0;
         for (const buffer of buffers) {
             const isSound = buffer.IsSound === true;
             // Create a RenderTarget for all but the final buffer
             let target = 'null';
             let pingPongTarget = 'null';
-            if (!isSound && buffer !== buffers[buffers.length - 1]) {
+            if (!isSound && bufferIndex !== lastVisualIndex) {
                 target = 'new THREE.WebGLRenderTarget(resolution.x, resolution.y, { type: framebufferType })';
             }
             if (!isSound && buffer.UsesSelf) {
                 pingPongTarget = 'new THREE.WebGLRenderTarget(resolution.x, resolution.y, { type: framebufferType })';
             }
 
-            this.content += `\
+                const defaultVertexShader = `glslUseVersion3
+            ? prepareVertexShader('void main() { gl_Position = vec4(position, 1.0); }')
+            : 'void main() { gl_Position = vec4(position, 1.0); }'`;
+                const glslVersionLine = `...(glslUseVersion3 && THREE.GLSL3 ? { glslVersion: THREE.GLSL3 } : {})`;
+
+                this.content += `\
 buffers.push({
     Name: ${JSON.stringify(buffer.Name)},
     File: ${JSON.stringify(buffer.File)},
@@ -39,8 +53,8 @@ buffers.push({
     PingPongChannel: ${buffer.SelfChannel},
     Dependents: ${JSON.stringify(buffer.Dependents)},
     Shader: ${isSound ? 'null' : `new THREE.ShaderMaterial({
-        glslVersion: glslUseVersion3 ? THREE.GLSL3 : THREE.GLSL1,
-        vertexShader: ${buffer.VertexCode !== undefined ? `prepareVertexShader(document.getElementById(${JSON.stringify(buffer.Name + '_vertex')}).textContent)` : 'undefined'},
+        ${glslVersionLine},
+        vertexShader: ${buffer.VertexCode !== undefined ? `prepareVertexShader(document.getElementById(${JSON.stringify(buffer.Name + '_vertex')}).textContent)` : defaultVertexShader},
         fragmentShader: prepareFragmentShader(document.getElementById(${JSON.stringify(buffer.Name)}).textContent),
         depthWrite: false,
         depthTest: false,
@@ -74,6 +88,7 @@ buffers.push({
         }
     })`}
 });`;
+            bufferIndex++;
         }
     }
 

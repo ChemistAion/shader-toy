@@ -35,9 +35,11 @@ type InputTextureSettings = {
 export class BufferProvider {
     private context: Context;
     private visitedFiles: string[];
+    private soundFiles: Set<string>;
     constructor(context: Context) {
         this.context = context;
         this.visitedFiles = [];
+        this.soundFiles = new Set<string>();
     }
 
     private looksLikeStandaloneVertexShader(code: string): boolean {
@@ -52,6 +54,19 @@ export class BufferProvider {
 
     public async parseShaderCode(file: string, code: string, buffers: Types.BufferDefinition[], commonIncludes: Types.IncludeDefinition[], generateStandalone: boolean) {
         await this.parseShaderCodeInternal(file, file, code, buffers, commonIncludes, generateStandalone);
+
+        // Ensure any #iSound targets are parsed as standalone buffers.
+        for (const soundFile of this.soundFiles) {
+            if (this.visitedFiles.includes(soundFile)) {
+                continue;
+            }
+            const soundFileRead = await this.readShaderFile(soundFile);
+            if (soundFileRead.success === false) {
+                this.showErrorAtLine(file, `Could not open sound shader file: ${soundFile}`, 1);
+                continue;
+            }
+            await this.parseShaderCodeInternal(file, soundFile, soundFileRead.bufferCode, buffers, commonIncludes, generateStandalone);
+        }
 
         const findByName = (path: string) => {
             const name = this.makeName(path);
@@ -162,6 +177,8 @@ export class BufferProvider {
         const boxedLineOffset: Types.BoxedValue<number> = { Value: 0 };
         const boxedVertexShaderFile: Types.BoxedValue<string | undefined> = { Value: undefined };
         const boxedVertexShaderLine: Types.BoxedValue<number | undefined> = { Value: undefined };
+        const boxedSoundShaderFile: Types.BoxedValue<string | undefined> = { Value: undefined };
+        const boxedSoundShaderLine: Types.BoxedValue<number | undefined> = { Value: undefined };
         const pendingTextures: InputTexture[] = [];
         const pendingTextureSettings = new Map<ChannelId, InputTextureSettings>();
         const pendingUniforms: Types.UniformDefinition[] = [];
@@ -177,6 +194,8 @@ export class BufferProvider {
             boxedLineOffset,
             boxedVertexShaderFile,
             boxedVertexShaderLine,
+            boxedSoundShaderFile,
+            boxedSoundShaderLine,
             pendingTextures,
             pendingTextureSettings,
             pendingUniforms,
@@ -236,6 +255,8 @@ export class BufferProvider {
                     vertexLineOffsetBox,
                     vertexVertexShaderFile,
                     vertexVertexShaderLine,
+                    boxedSoundShaderFile,
+                    boxedSoundShaderLine,
                     vertexPendingTextures,
                     vertexPendingTextureSettings,
                     vertexPendingUniforms,
@@ -264,6 +285,16 @@ export class BufferProvider {
             const userPath = pendingTexture.UserPath;
             const channel = pendingTexture.Channel;
             const local = pendingTexture.Local;
+
+            const normalizedPath = depFile.trim().toLowerCase();
+            if (normalizedPath === 'sound' || normalizedPath.startsWith('sound://')) {
+                audios.push({
+                    Channel: channel,
+                    UserPath: userPath || 'sound',
+                    FromSound: true
+                });
+                continue;
+            }
 
             const fullMime = mime.getType(path.extname(depFile) || 'txt') || 'text/plain';
             const mimeType = fullMime.split('/')[0] || 'text';
@@ -380,6 +411,13 @@ export class BufferProvider {
             }
         }
 
+        // IMPORTANT: avoid matching commented-out code when scanning for entry points or channels.
+        const codeForSearch = code
+            // block comments (preserve newlines for line numbers)
+            .replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, ' '))
+            // line comments (preserve line length)
+            .replace(/\/\/.*$/gm, (match) => ' '.repeat(match.length));
+
         let usesMainSound = false;
         {
             const insertMainImageCode = () => {
@@ -393,12 +431,6 @@ void main() {
             // If there is no void main() in the shader we assume it is a shader-toy style shader
             // IMPORTANT: avoid matching commented-out code like `// void main() {}`.
             // This check only determines whether we should inject a wrapper `main()`.
-            const codeForSearch = code
-                // block comments (preserve newlines for line numbers)
-                .replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, ' '))
-                // line comments (preserve line length)
-                .replace(/\/\/.*$/gm, (match) => ' '.repeat(match.length));
-
             const mainPos = codeForSearch.search(/void\s+main\s*\(\s*\)\s*\{/g);
             const mainImagePos = codeForSearch.search(/void\s+mainImage\s*\(\s*out\s+vec4\s+\w+,\s*(in\s)?\s*vec2\s+\w+\s*\)\s*\{/g);
             const mainSoundAnyPos = codeForSearch.search(/\bmainSound\s*\(/g);
@@ -452,7 +484,7 @@ vec2 mainSound(float time) {
             }
             if (this.context.getConfig<boolean>('warnOnUndefinedTextures')) {
                 for (let i = 0; i < 9; i++) {
-                    if (code.search('iChannel' + i) > 0) {
+                    if (codeForSearch.search('iChannel' + i) > 0) {
                         if (!definedTextures.has(i)) {
                             vscode.window.showWarningMessage(`iChannel${i} in use but there is no definition #iChannel${i} in shader`, 'Details')
                                 .then(() => {
@@ -502,6 +534,7 @@ vec2 mainSound(float time) {
         }
 
         // Push yourself after all your dependencies
+        const isSoundFile = this.soundFiles.has(file);
         buffers.push({
             Name: this.makeName(file),
             File: file,
@@ -516,7 +549,7 @@ vec2 mainSound(float time) {
             UsesSelf: false,
             SelfChannel: -1,
             Dependents: [],
-            IsSound: usesMainSound,
+            IsSound: usesMainSound || isSoundFile,
             UsesKeyboard: usesKeyboard,
             UsesFirstPersonControls: usesFirstPersonControls,
             LineOffset: lineOffset
@@ -530,6 +563,8 @@ vec2 mainSound(float time) {
         lineOffset: Types.BoxedValue<number>,
         vertexShaderFile: Types.BoxedValue<string | undefined>,
         vertexShaderLine: Types.BoxedValue<number | undefined>,
+        soundShaderFile: Types.BoxedValue<string | undefined>,
+        soundShaderLine: Types.BoxedValue<number | undefined>,
         textures: InputTexture[],
         textureSettings: Map<ChannelId, InputTextureSettings>,
         uniforms: Types.UniformDefinition[],
@@ -575,6 +610,19 @@ vec2 mainSound(float time) {
                 let userPath = nextObject.Path;
                 let textureFile: string;
                 let local = false;
+
+                const normalizedPath = userPath.trim().toLowerCase();
+                if (normalizedPath === 'sound' || normalizedPath.startsWith('sound://')) {
+                    const texture: InputTexture = {
+                        Channel: nextObject.Index,
+                        Local: true,
+                        UserPath: 'sound',
+                        Path: 'sound'
+                    };
+                    textures.push(texture);
+                    removeLastObject();
+                    break;
+                }
 
                 // Note: This is sorta cursed
                 try {
@@ -676,6 +724,8 @@ vec2 mainSound(float time) {
                             include_line_offset,
                             include_vertex_file,
                             include_vertex_line,
+                            soundShaderFile,
+                            soundShaderLine,
                             textures,
                             textureSettings,
                             uniforms,
@@ -786,6 +836,68 @@ vec2 mainSound(float time) {
 
                 vertexShaderFile.Value = mappedVertexFile;
                 vertexShaderLine.Value = line;
+                removeLastObject();
+                break;
+            }
+            case ObjectType.Sound: {
+                const line = parser.line();
+                const glslVersionConfig = this.context.getConfig<string>('webglVersion');
+                const isGlslVersion3Mode = (glslVersionConfig === 'WebGL2');
+                if (!isGlslVersion3Mode) {
+                    this.showErrorAtLine(file, 'mainSound requires shader-toy.webglVersion set to "WebGL2".', line);
+                    removeLastObject();
+                    break;
+                }
+
+                let userPath = nextObject.Path;
+                const normalized = userPath.replace('file://', '');
+                if (normalized === 'default') {
+                    soundShaderFile.Value = undefined;
+                    soundShaderLine.Value = undefined;
+                    removeLastObject();
+                    break;
+                }
+                if (normalized === 'self') {
+                    soundShaderFile.Value = file;
+                    soundShaderLine.Value = line;
+                    this.soundFiles.add(file);
+                    removeLastObject();
+                    break;
+                }
+
+                let local = false;
+                try {
+                    const soundUrl = new URL(userPath);
+                    if (soundUrl.protocol === 'file:') {
+                        local = true;
+                    }
+                }
+                catch {
+                    local = true;
+                }
+                if (!local) {
+                    this.showErrorAtLine(file, '#iSound only supports local files (file://...) for now.', line);
+                    removeLastObject();
+                    break;
+                }
+
+                userPath = userPath.replace('file://', '');
+                const mapped = await this.context.mapUserPath(userPath, file);
+                const mappedSoundFile = mapped.file;
+
+                if (path.extname(mappedSoundFile).toLowerCase() !== '.glsl') {
+                    this.showErrorAtLine(file, `#iSound expects a .glsl file, got "${userPath}"`, line);
+                    removeLastObject();
+                    break;
+                }
+
+                if (soundShaderFile.Value !== undefined) {
+                    this.showWarningAtLine(file, '#iSound was specified multiple times; the last one wins.', line);
+                }
+
+                soundShaderFile.Value = mappedSoundFile;
+                soundShaderLine.Value = line;
+                this.soundFiles.add(mappedSoundFile);
                 removeLastObject();
                 break;
             }

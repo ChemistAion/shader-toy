@@ -7,6 +7,7 @@ import { ShaderLexer, Token, TokenType, LineRange } from './shaderlexer';
 export enum ObjectType {
     Include,
     Vertex,
+    Sound,
     Texture,
     TextureMagFilter,
     TextureMinFilter,
@@ -26,6 +27,10 @@ type Include = {
 };
 type Vertex = {
     Type: ObjectType.Vertex,
+    Path: string
+};
+type Sound = {
+    Type: ObjectType.Sound,
     Path: string
 };
 type Texture = {
@@ -88,7 +93,7 @@ type ErrorObject = {
     Message: string
 };
 type TextureObject = Texture | TextureMagFilter | TextureMinFilter | TextureWrapMode | TextureType;
-type ParseObject = Include | Vertex | TextureObject | Uniform | Keyboard | FirstPersonControls | StrictCompatibility;
+type ParseObject = Include | Vertex | Sound | TextureObject | Uniform | Keyboard | FirstPersonControls | StrictCompatibility;
 
 export class ShaderParser {
     private stream: ShaderStream;
@@ -140,6 +145,9 @@ export class ShaderParser {
             break;
         case 'iVertex':
             returnObject = this.getVertex();
+            break;
+        case 'iSound':
+            returnObject = this.getSound();
             break;
         case 'iKeyboard':
             returnObject = { Type: ObjectType.Keyboard };
@@ -200,6 +208,23 @@ export class ShaderParser {
             Path: tokenValue
         };
         return vertex;
+    }
+
+    private getSound(): Sound | ErrorObject {
+        const nextToken = this.lexer.next();
+        if (nextToken === undefined) {
+            return this.makeError('Expected string after "iSound" but got end-of-file');
+        }
+        if (nextToken.type !== TokenType.String) {
+            return this.makeError(`Expected string after "iSound" but got "${nextToken.value}"`);
+        }
+
+        const tokenValue = nextToken.value as string;
+        const sound: Sound = {
+            Type: ObjectType.Sound,
+            Path: tokenValue
+        };
+        return sound;
     }
 
     private getTextureObject(previous: Token): Texture | TextureMagFilter | TextureMinFilter | TextureWrapMode | TextureType | ErrorObject {

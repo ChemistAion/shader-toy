@@ -23,6 +23,57 @@ export class AudioInitExtension implements WebviewExtension, TextureExtensionExt
                 const audio = audios[j];
 
                 const channel = audio.Channel;
+
+                if (audio.FromSound) {
+                    const fftSize = context.getConfig<number>('audioDomainSize');
+                    const soundBindName = `bindSoundChannel_${i}_${j}`;
+                    this.content += `
+                    const ${soundBindName} = function() {
+                        const bufferList = window.ShaderToy ? window.ShaderToy.buffers : undefined;
+                        if (!bufferList || !bufferList[${i}] || !bufferList[${i}].Shader || !bufferList[${i}].Shader.uniforms) {
+                            return false;
+                        }
+                        if (!window.ShaderToy || !window.ShaderToy.audioOutput || !window.ShaderToy.audioOutput.createSoundInput) {
+                            return false;
+                        }
+                        const soundInput = window.ShaderToy.audioOutput.createSoundInput(${fftSize});
+                        if (!soundInput) {
+                            return false;
+                        }
+
+                        bufferList[${i}].Shader.uniforms.iChannel${channel} = { type: 't', value: soundInput.Texture };
+
+                        audios.push({
+                            Channel: ${channel},
+                            Media: null,
+                            Analyser: soundInput.Analyser,
+                            AmplitudeSamples: soundInput.AmplitudeSamples,
+                            FrequencySamples: soundInput.FrequencySamples,
+                            Data: soundInput.Data,
+                            Texture: soundInput.Texture
+                        });
+
+                        return true;
+                    };
+
+                    (function retrySoundChannel(attempt) {
+                        if (${soundBindName}()) {
+                            return;
+                        }
+                        if (attempt >= 40) {
+                            if (vscode !== undefined) {
+                                vscode.postMessage({
+                                    command: 'errorMessage',
+                                    message: 'Sound channel requested but no #iSound buffer is available.'
+                                });
+                            }
+                            return;
+                        }
+                        setTimeout(function() { retrySoundChannel(attempt + 1); }, 250);
+                    })(0);
+                    `;
+                    continue;
+                }
                 
                 const localPath = audio.LocalPath;
                 const remotePath = audio.RemotePath;

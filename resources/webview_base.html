@@ -296,6 +296,9 @@
 
     let buffers = [];
     // Buffers
+    if (window.ShaderToy) {
+        window.ShaderToy.buffers = buffers;
+    }
     let commonIncludes = [];
     // Includes
 
@@ -318,6 +321,7 @@
     // Texture Init
 
     const hasSoundBuffer = buffers.some((buffer) => buffer && buffer.IsSound);
+    const audioOutputPrecision = '<!-- Audio Output Precision -->';
     if (!glslUseVersion3 && hasSoundBuffer && vscode !== undefined) {
         vscode.postMessage({
             command: 'errorMessage',
@@ -331,7 +335,9 @@
             gl: gl,
             glslUseVersion3: glslUseVersion3,
             prepareFragmentShader: prepareFragmentShader,
+            prepareVertexShader: prepareVertexShader,
             audioContext: audioContext,
+            precision: audioOutputPrecision,
             paused: paused
         });
     }

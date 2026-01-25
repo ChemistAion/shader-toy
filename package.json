@@ -193,6 +193,16 @@
                     "default": 512,
                     "description": "Size of the domain used for four transformation when using audio as an input."
                 },
+                "shader-toy.audioOutputPrecision": {
+                    "type": "string",
+                    "default": "32bFLOAT",
+                    "enum": [
+                        "32bFLOAT",
+                        "16bFLOAT",
+                        "16bPACK"
+                    ],
+                    "description": "Precision for mainSound GPU audio output. 32bFLOAT/16bFLOAT use float framebuffers (WebGL2). 16bPACK packs into RGBA8."
+                },
                 "shader-toy.testCompileIncludedFiles": {
                     "type": "boolean",
                     "default": true,
