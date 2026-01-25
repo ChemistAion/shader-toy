@@ -7,6 +7,7 @@ import { RenderStartingData, DiagnosticBatch } from './typenames';
 import { WebviewContentProvider } from './webviewcontentprovider';
 import { Context } from './context';
 import { removeDuplicates } from './utility';
+import { tryFocusGlslPreviewPanel } from './extensions/vscode_helpers/vscode_ui_focus';
 
 type Webview = {
     Panel: vscode.WebviewPanel,
@@ -60,6 +61,13 @@ export class ShaderToyManager {
         else {
             vscode.window.showErrorMessage('Select a TextEditor to show GLSL Preview.');
         }
+
+        if (this.webviewPanel !== undefined) {
+            const workbenchCommands = this.context.getConfig<string[]>('workbenchCommands') || [];
+            if (workbenchCommands.includes('autoFocus')) {
+                await tryFocusGlslPreviewPanel(this.webviewPanel.Panel);
+            }
+        }
     };
 
     public showStaticPreview = async () => {
@@ -82,6 +90,11 @@ export class ShaderToyManager {
                 const staticWebview = this.staticWebviews[this.staticWebviews.length - 1];
                 this.staticWebviews[this.staticWebviews.length - 1] = await this.updateWebview(staticWebview, vscode.window.activeTextEditor.document);
                 newWebviewPanel.onDidDispose(onDidDispose);
+
+                const workbenchCommands = this.context.getConfig<string[]>('workbenchCommands') || [];
+                if (workbenchCommands.includes('autoFocus')) {
+                    await tryFocusGlslPreviewPanel(newWebviewPanel);
+                }
             }
         }
     };

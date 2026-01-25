@@ -101,6 +101,20 @@
                     "default": true,
                     "description": "Shows a sound button that allows enabling or disabling audio output during playback."
                 },
+                "shader-toy.workbenchCommands": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "autoFocus",
+                            "autoPlacement"
+                        ]
+                    },
+                    "default": [
+                        "autoFocus"
+                    ],
+                    "description": "Forces VScode Workbench to manage focus and panel placement (in future) for a more streamlined GLSL preview workflow. Disabling keeps the default VScode behavior."
+                },
                 "shader-toy.screenshotResolution": {
                     "type": "array",
                     "items": [
