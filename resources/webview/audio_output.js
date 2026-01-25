@@ -6,10 +6,11 @@
 
     const state = {
         initialized: false,
-        enabled: false,
+        enabled: true,
         options: {},
         audioContext: null,
         gainNode: null,
+        outputGain: 0.5,
         audioBuffer: null,
         sourceNode: null,
         analysisGain: null,
@@ -120,12 +121,26 @@
         return new global.THREE.ShaderMaterial(materialOptions);
     };
 
+    const applyOutputGain = function () {
+        if (!state.gainNode) {
+            return;
+        }
+        state.gainNode.gain.value = state.enabled ? state.outputGain : 0;
+    };
+
     root.audioOutput.enable = function () {
         state.enabled = true;
+        applyOutputGain();
     };
 
     root.audioOutput.disable = function () {
         state.enabled = false;
+        applyOutputGain();
+    };
+
+    root.audioOutput.setOutputEnabled = function (enabled) {
+        state.enabled = !!enabled;
+        applyOutputGain();
     };
 
     root.audioOutput.isAvailable = function () {
@@ -185,7 +200,7 @@
     };
 
     const getStatusElement = function () {
-        if (!global.document || !global.document.body) {
+        if (!state.showStatus || !global.document || !global.document.body) {
             return null;
         }
         let el = global.document.getElementById('audio-output-status');
@@ -406,8 +421,10 @@
         }
 
         state.audioContext = audioContext;
+        state.showStatus = options.showSoundButton !== false;
+        state.outputGain = 0.5;
         state.gainNode = audioContext.createGain();
-        state.gainNode.gain.value = 0.5;
+        applyOutputGain();
         state.gainNode.connect(audioContext.destination);
 
         const durationSeconds = Number.isFinite(options.durationSeconds) ? options.durationSeconds : 180;

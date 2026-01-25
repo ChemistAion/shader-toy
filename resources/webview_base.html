@@ -67,8 +67,14 @@
             transform: translateX(0%);
             z-index: 1;
         }
-        .rec_base:nth-of-type(2) {
+        #screenshot {
+            top: 0px;
+        }
+        #record {
             top: 60px;
+        }
+        #sound-button {
+            top: 120px;
         }
         
         /* Screenshot Button Style */
@@ -76,6 +82,8 @@
         /* Record Button Style */
 
         /* Reload Button Style */
+
+        /* Sound Button Style */
     </style>
 </head>
 <body>
@@ -85,6 +93,7 @@
         <!-- Pause Element -->
     </div>
     <!-- Screenshot Element -->
+    <!-- Sound Element -->
     <!-- Record Element -->
     <!-- Reload Element -->
 </body>
@@ -194,6 +203,22 @@
         let screenshotButton = document.getElementById("screenshot");
         if (screenshotButton) {
             screenshotButton.addEventListener('click', saveScreenshot);
+        }
+    }
+
+    {
+        let soundButton = document.getElementById("sound-button");
+        if (soundButton) {
+            let soundEnabled = true;
+            soundButton.classList.add('sound-on');
+            soundButton.addEventListener('click', () => {
+                soundEnabled = !soundEnabled;
+                soundButton.classList.toggle('sound-on', soundEnabled);
+                soundButton.classList.toggle('sound-off', !soundEnabled);
+                if (window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.setOutputEnabled) {
+                    window.ShaderToy.audioOutput.setOutputEnabled(soundEnabled);
+                }
+            });
         }
     }
     
@@ -322,6 +347,7 @@
 
     const hasSoundBuffer = buffers.some((buffer) => buffer && buffer.IsSound);
     const audioOutputPrecision = '<!-- Audio Output Precision -->';
+    const showSoundButton = <!-- Show Sound Button -->;
     if (!glslUseVersion3 && hasSoundBuffer && vscode !== undefined) {
         vscode.postMessage({
             command: 'errorMessage',
@@ -338,6 +364,7 @@
             prepareVertexShader: prepareVertexShader,
             audioContext: audioContext,
             precision: audioOutputPrecision,
+            showSoundButton: showSoundButton,
             paused: paused
         });
     }

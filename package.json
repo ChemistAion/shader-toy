@@ -96,6 +96,11 @@
                     "default": true,
                     "description": "Shows a screenshot button in the OpenGL viewport which allows to save the current frame as a png file."
                 },
+                "shader-toy.showSoundButton": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Shows a sound button that allows enabling or disabling audio output during playback."
+                },
                 "shader-toy.screenshotResolution": {
                     "type": "array",
                     "items": [
@@ -186,12 +191,12 @@
                 "shader-toy.enabledAudioInput": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Allow using media files as inputs in shaders. Note that the feature is experimental and should be used with caution."
+                    "description": "Allow using media files as audio inputs in shaders. Note that the feature is experimental and should be used with caution."
                 },
                 "shader-toy.audioDomainSize": {
                     "type": "number",
                     "default": 512,
-                    "description": "Size of the domain used for four transformation when using audio as an input."
+                    "description": "Size of the FFT domain when using audio as an input through #iChannel[N]."
                 },
                 "shader-toy.audioOutputPrecision": {
                     "type": "string",
@@ -201,7 +206,7 @@
                         "16bFLOAT",
                         "16bPACK"
                     ],
-                    "description": "Precision for mainSound GPU audio output. 32bFLOAT/16bFLOAT use float framebuffers (WebGL2). 16bPACK packs into RGBA8."
+                    "description": "Precision for #iSound GPU audio output per sample/channel. 32bFLOAT/16bFLOAT use RGBA32F.xy / RGBA16F.xy framebuffers (WebGL2 extensions required). 16bPACK (also used as fallback when float framebuffer support is unavailable) packs each channel's sample into two UNORM bytes in RGBA8.xy/.zw (L/R), then decodes back to float in [-1, +1]."
                 },
                 "shader-toy.testCompileIncludedFiles": {
                     "type": "boolean",

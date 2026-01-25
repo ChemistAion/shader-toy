@@ -45,6 +45,9 @@ import { ScreenshotButtonStyleExtension } from './extensions/user_interface/scre
 import { ScreenshotButtonExtension } from './extensions/user_interface/screenshot_button_extension';
 import { RecordButtonStyleExtension } from './extensions/user_interface/record_button_style_extension';
 import { RecordButtonExtension } from './extensions/user_interface/record_button_extension';
+import { SoundButtonStyleExtension } from './extensions/user_interface/sound_button_style_extension';
+import { SoundButtonExtension } from './extensions/user_interface/sound_button_extension';
+import { ShowSoundButtonExtension } from './extensions/user_interface/show_sound_button_extension';
 import { ReloadButtonStyleExtension } from './extensions/user_interface/reload_button_style_extension';
 import { ReloadButtonExtension } from './extensions/user_interface/reload_button_extension';
 
@@ -226,9 +229,13 @@ export class WebviewContentProvider {
 
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Initial State
+        const hasSoundBuffer = this.buffers.some((buffer) => buffer && buffer.IsSound);
         const initialTimeExtension = new InitialTimeExtension(startingState.Time);
         this.webviewAssembler.addReplaceModule(initialTimeExtension, 'let startingTime = <!-- Start Time -->;', '<!-- Start Time -->');
-        const initialPausedExtension = new InitialPausedExtension(startingState.Paused);
+        const initialPaused = (generateStandalone && hasSoundBuffer)
+            ? false
+            : startingState.Paused;
+        const initialPausedExtension = new InitialPausedExtension(initialPaused);
         this.webviewAssembler.addReplaceModule(initialPausedExtension, 'let paused = <!-- Start Paused -->;', '<!-- Start Paused -->');
         const initialMouseExtension = new InitialMouseExtension(startingState.Mouse);
         this.webviewAssembler.addReplaceModule(initialMouseExtension, 'let mouse = new THREE.Vector4(<!-- Start Mouse -->);', '<!-- Start Mouse -->');
@@ -374,6 +381,10 @@ export class WebviewContentProvider {
         const audioOutputPrecisionExtension = new AudioOutputPrecisionExtension(audioOutputPrecision);
         this.webviewAssembler.addReplaceModule(audioOutputPrecisionExtension, '<!-- Audio Output Precision -->', '<!-- Audio Output Precision -->');
 
+        const showSoundButton = this.context.getConfig<boolean>('showSoundButton');
+        const showSoundButtonExtension = new ShowSoundButtonExtension(showSoundButton !== false);
+        this.webviewAssembler.addReplaceModule(showSoundButtonExtension, 'const showSoundButton = <!-- Show Sound Button -->;', '<!-- Show Sound Button -->');
+
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Packages
         {
@@ -456,6 +467,14 @@ export class WebviewContentProvider {
 
                 const screenshotButtonExtension = new ScreenshotButtonExtension();
                 this.webviewAssembler.addWebviewModule(screenshotButtonExtension, '<!-- Screenshot Element -->');
+            }
+            const hasSoundBuffer = this.buffers.some((buffer) => buffer && buffer.IsSound);
+            if (hasSoundBuffer && this.context.getConfig<boolean>('showSoundButton')) {
+                const soundButtonStyleExtension = new SoundButtonStyleExtension(getWebviewResourcePath);
+                this.webviewAssembler.addWebviewModule(soundButtonStyleExtension, '/* Sound Button Style */');
+
+                const soundButtonExtension = new SoundButtonExtension();
+                this.webviewAssembler.addWebviewModule(soundButtonExtension, '<!-- Sound Element -->');
             }
             if (this.context.getConfig<boolean>('showRecordButton')) {
                 const recordButtonStyleExtension = new RecordButtonStyleExtension(getWebviewResourcePath);
