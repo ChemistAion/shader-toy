@@ -25,6 +25,12 @@
             nextBlock: 0,
             blockSamples: 512 * 512
         },
+        analysis: {
+            enabled: true,
+            windowSize: 2048,
+            rmsL: 0,
+            rmsR: 0
+        },
         renderContexts: new Map(),
         analysisGain: null,
         analyserNodes: [],
@@ -119,8 +125,24 @@
                 const count = Math.max(0, Math.floor(message.count || 0));
                 requestBlocks(count);
             }
+            if (message.type === 'analysis') {
+                state.analysis.rmsL = Number.isFinite(message.rmsL) ? message.rmsL : 0;
+                state.analysis.rmsR = Number.isFinite(message.rmsR) ? message.rmsR : 0;
+                if (Number.isFinite(message.windowSize)) {
+                    state.analysis.windowSize = message.windowSize;
+                }
+            }
         };
         state.workletPortReady = true;
+        try {
+            state.workletNode.port.postMessage({
+                type: 'analysis',
+                enabled: state.analysis.enabled,
+                windowSize: state.analysis.windowSize
+            });
+        } catch {
+            // ignore
+        }
     };
 
     const ensureWorklet = function (options) {
