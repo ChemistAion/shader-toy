@@ -86,6 +86,9 @@ export class ShaderLexer {
         if (idx >= 0) {
             return true;
         }
+        if (val.indexOf('iSound') === 0) {
+            return true;
+        }
         return val.indexOf('iChannel') === 0;
     }
     private static keywords = [

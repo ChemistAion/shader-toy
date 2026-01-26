@@ -31,6 +31,7 @@ type Vertex = {
 };
 type Sound = {
     Type: ObjectType.Sound,
+    Index: number,
     Path: string
 };
 type Texture = {
@@ -146,8 +147,19 @@ export class ShaderParser {
         case 'iVertex':
             returnObject = this.getVertex();
             break;
-        case 'iSound':
-            returnObject = this.getSound();
+        default:
+            if (tokenValue.indexOf('iSound') === 0) {
+                const indexText = tokenValue.substring('iSound'.length);
+                const index = indexText.length === 0 ? 0 : Number(indexText);
+                if ((indexText.length > 0 && !/^[0-9]+$/.test(indexText)) || !Number.isFinite(index)) {
+                    returnObject = this.makeError(`Invalid iSound index "${indexText}"`);
+                }
+                else {
+                    returnObject = this.getSound(index);
+                }
+                break;
+            }
+            returnObject = this.getTextureObject(nextToken);
             break;
         case 'iKeyboard':
             returnObject = { Type: ObjectType.Keyboard };
@@ -161,9 +173,7 @@ export class ShaderParser {
         case 'iUniform':
             returnObject = this.getUniformObject();
             break;
-        default: // Must be iChannel
-            returnObject = this.getTextureObject(nextToken);
-            break;
+        // no default here; handled above
         }
 
         const rangeEnd = this.lexer.getLastRange().End;
@@ -210,7 +220,7 @@ export class ShaderParser {
         return vertex;
     }
 
-    private getSound(): Sound | ErrorObject {
+    private getSound(index: number): Sound | ErrorObject {
         const nextToken = this.lexer.next();
         if (nextToken === undefined) {
             return this.makeError('Expected string after "iSound" but got end-of-file');
@@ -222,6 +232,7 @@ export class ShaderParser {
         const tokenValue = nextToken.value as string;
         const sound: Sound = {
             Type: ObjectType.Sound,
+            Index: index,
             Path: tokenValue
         };
         return sound;

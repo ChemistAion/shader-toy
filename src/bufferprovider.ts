@@ -35,11 +35,23 @@ type InputTextureSettings = {
 export class BufferProvider {
     private context: Context;
     private visitedFiles: string[];
-    private soundFiles: Set<string>;
+    private soundFileIndices: Map<string, number[]>;
     constructor(context: Context) {
         this.context = context;
         this.visitedFiles = [];
-        this.soundFiles = new Set<string>();
+        this.soundFileIndices = new Map<string, number[]>();
+    }
+
+    private registerSoundFile(index: number, file: string) {
+        const existing = this.soundFileIndices.get(file);
+        if (existing) {
+            if (!existing.includes(index)) {
+                existing.push(index);
+            }
+        }
+        else {
+            this.soundFileIndices.set(file, [index]);
+        }
     }
 
     private looksLikeStandaloneVertexShader(code: string): boolean {
@@ -56,7 +68,7 @@ export class BufferProvider {
         await this.parseShaderCodeInternal(file, file, code, buffers, commonIncludes, generateStandalone);
 
         // Ensure any #iSound targets are parsed as standalone buffers.
-        for (const soundFile of this.soundFiles) {
+        for (const soundFile of this.soundFileIndices.keys()) {
             if (this.visitedFiles.includes(soundFile)) {
                 continue;
             }
@@ -177,8 +189,8 @@ export class BufferProvider {
         const boxedLineOffset: Types.BoxedValue<number> = { Value: 0 };
         const boxedVertexShaderFile: Types.BoxedValue<string | undefined> = { Value: undefined };
         const boxedVertexShaderLine: Types.BoxedValue<number | undefined> = { Value: undefined };
-        const boxedSoundShaderFile: Types.BoxedValue<string | undefined> = { Value: undefined };
-        const boxedSoundShaderLine: Types.BoxedValue<number | undefined> = { Value: undefined };
+        const boxedSoundShaderFiles = new Map<number, Types.BoxedValue<string | undefined>>();
+        const boxedSoundShaderLines = new Map<number, Types.BoxedValue<number | undefined>>();
         const pendingTextures: InputTexture[] = [];
         const pendingTextureSettings = new Map<ChannelId, InputTextureSettings>();
         const pendingUniforms: Types.UniformDefinition[] = [];
@@ -194,8 +206,8 @@ export class BufferProvider {
             boxedLineOffset,
             boxedVertexShaderFile,
             boxedVertexShaderLine,
-            boxedSoundShaderFile,
-            boxedSoundShaderLine,
+            boxedSoundShaderFiles,
+            boxedSoundShaderLines,
             pendingTextures,
             pendingTextureSettings,
             pendingUniforms,
@@ -255,8 +267,8 @@ export class BufferProvider {
                     vertexLineOffsetBox,
                     vertexVertexShaderFile,
                     vertexVertexShaderLine,
-                    boxedSoundShaderFile,
-                    boxedSoundShaderLine,
+                    boxedSoundShaderFiles,
+                    boxedSoundShaderLines,
                     vertexPendingTextures,
                     vertexPendingTextureSettings,
                     vertexPendingUniforms,
@@ -534,7 +546,8 @@ vec2 mainSound(float time) {
         }
 
         // Push yourself after all your dependencies
-        const isSoundFile = this.soundFiles.has(file);
+        const soundIndices = this.soundFileIndices.get(file) || [];
+        const isSoundFile = soundIndices.length > 0;
         buffers.push({
             Name: this.makeName(file),
             File: file,
@@ -550,6 +563,7 @@ vec2 mainSound(float time) {
             SelfChannel: -1,
             Dependents: [],
             IsSound: usesMainSound || isSoundFile,
+            SoundIndices: soundIndices.length > 0 ? soundIndices : undefined,
             UsesKeyboard: usesKeyboard,
             UsesFirstPersonControls: usesFirstPersonControls,
             LineOffset: lineOffset
@@ -563,8 +577,8 @@ vec2 mainSound(float time) {
         lineOffset: Types.BoxedValue<number>,
         vertexShaderFile: Types.BoxedValue<string | undefined>,
         vertexShaderLine: Types.BoxedValue<number | undefined>,
-        soundShaderFile: Types.BoxedValue<string | undefined>,
-        soundShaderLine: Types.BoxedValue<number | undefined>,
+        soundShaderFiles: Map<number, Types.BoxedValue<string | undefined>>,
+        soundShaderLines: Map<number, Types.BoxedValue<number | undefined>>,
         textures: InputTexture[],
         textureSettings: Map<ChannelId, InputTextureSettings>,
         uniforms: Types.UniformDefinition[],
@@ -724,8 +738,8 @@ vec2 mainSound(float time) {
                             include_line_offset,
                             include_vertex_file,
                             include_vertex_line,
-                            soundShaderFile,
-                            soundShaderLine,
+                            soundShaderFiles,
+                            soundShaderLines,
                             textures,
                             textureSettings,
                             uniforms,
@@ -849,6 +863,18 @@ vec2 mainSound(float time) {
                     break;
                 }
 
+                const soundIndex = Number.isFinite(nextObject.Index) ? nextObject.Index : 0;
+                if (soundIndex < 0 || soundIndex > 9 || Math.floor(soundIndex) !== soundIndex) {
+                    this.showErrorAtLine(file, `#iSound index must be an integer in [0..9], got "${nextObject.Index}".`, line);
+                    removeLastObject();
+                    break;
+                }
+
+                const soundShaderFile = soundShaderFiles.get(soundIndex) ?? { Value: undefined };
+                const soundShaderLine = soundShaderLines.get(soundIndex) ?? { Value: undefined };
+                soundShaderFiles.set(soundIndex, soundShaderFile);
+                soundShaderLines.set(soundIndex, soundShaderLine);
+
                 let userPath = nextObject.Path;
                 const normalized = userPath.replace('file://', '');
                 if (normalized === 'default') {
@@ -860,7 +886,7 @@ vec2 mainSound(float time) {
                 if (normalized === 'self') {
                     soundShaderFile.Value = file;
                     soundShaderLine.Value = line;
-                    this.soundFiles.add(file);
+                    this.registerSoundFile(soundIndex, file);
                     removeLastObject();
                     break;
                 }
@@ -897,7 +923,7 @@ vec2 mainSound(float time) {
 
                 soundShaderFile.Value = mappedSoundFile;
                 soundShaderLine.Value = line;
-                this.soundFiles.add(mappedSoundFile);
+                this.registerSoundFile(soundIndex, mappedSoundFile);
                 removeLastObject();
                 break;
             }

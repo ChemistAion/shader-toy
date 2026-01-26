@@ -124,6 +124,7 @@ export type BufferDefinition = {
     LineOffset: number
     Includes: IncludeDefinition[],
     IsSound?: boolean,
+    SoundIndices?: number[],
     UsesKeyboard?: boolean,
     UsesFirstPersonControls?: boolean,
 };

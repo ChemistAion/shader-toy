@@ -25,10 +25,11 @@
             nextBlock: 0,
             blockSamples: 512 * 512
         },
-        renderContext: null,
+        renderContexts: new Map(),
         analysisGain: null,
         analyserNodes: [],
         soundBuffer: null,
+        soundBuffers: [],
         ready: false,
         pendingStartAt: null,
         gestureHandlerAttached: false,
@@ -284,7 +285,7 @@
     };
 
     root.audioOutput.createSoundInput = function (fftSize) {
-        if (!state.audioContext || !state.soundBuffer || !global.THREE) {
+        if (!state.audioContext || !state.soundBuffers || !state.soundBuffers.length || !global.THREE) {
             return null;
         }
 
@@ -447,111 +448,74 @@
 
     const renderAllBlocks = function (options) {
         const renderer = options.renderer;
-        const soundBuffer = state.soundBuffer;
-        if (!renderer || !soundBuffer || !state.audioBuffer || !state.audioContext) {
+        const soundBuffers = state.soundBuffers || [];
+        if (!renderer || !soundBuffers.length || !state.audioBuffer || !state.audioContext) {
             return;
         }
-
-        const previousShader = global.currentShader;
-        if (soundBuffer && soundBuffer.File) {
-            global.currentShader = {
-                Name: soundBuffer.Name,
-                File: soundBuffer.File,
-                LineOffset: soundBuffer.LineOffset
-            };
-        }
-
-        const WIDTH = 512;
-        const HEIGHT = 512;
-        const samplesPerBlock = WIDTH * HEIGHT;
-        const totalSamples = state.audioBuffer.length;
-        const numBlocks = Math.ceil(totalSamples / samplesPerBlock);
-
-        const precisionMode = resolvePrecision(options);
-        let targetType = global.THREE.UnsignedByteType;
-        if (precisionMode === '32bFLOAT' && global.THREE.FloatType) {
-            targetType = global.THREE.FloatType;
-        } else if (precisionMode === '16bFLOAT' && global.THREE.HalfFloatType) {
-            targetType = global.THREE.HalfFloatType;
-        }
-        const target = new global.THREE.WebGLRenderTarget(WIDTH, HEIGHT, { type: targetType });
-        const scene = new global.THREE.Scene();
-        const camera = new global.THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-        camera.position.set(0, 0, 1);
-        camera.lookAt(scene.position);
-
-        const material = buildSoundMaterial(soundBuffer, options, state.audioContext.sampleRate, precisionMode);
-        if (!material) {
-            return;
-        }
-
-        const mesh = new global.THREE.Mesh(new global.THREE.PlaneGeometry(2, 2), material);
-        scene.add(mesh);
-
-        const pixels = (precisionMode === '16bPACK')
-            ? new Uint8Array(WIDTH * HEIGHT * 4)
-            : new Float32Array(WIDTH * HEIGHT * 4);
         const outputDataL = state.audioBuffer.getChannelData(0);
         const outputDataR = state.audioBuffer.getChannelData(1);
-
-        const previousTarget = renderer.getRenderTarget();
+        const totalSamples = state.audioBuffer.length;
+        const precisionMode = resolvePrecision(options);
+        const blockSamples = state.stream.blockSamples || (512 * 512);
+        const numBlocks = Math.ceil(totalSamples / blockSamples);
+        const mixGain = soundBuffers.length > 0 ? 1 / soundBuffers.length : 1;
 
         const renderStart = global.performance && typeof global.performance.now === 'function'
             ? global.performance.now()
             : Date.now();
 
         for (let i = 0; i < numBlocks; i++) {
-            material.uniforms.blockOffset.value = (i * samplesPerBlock) / state.audioContext.sampleRate;
-            renderer.setRenderTarget(target);
-            renderer.render(scene, camera);
-            renderer.readRenderTargetPixels(target, 0, 0, WIDTH, HEIGHT, pixels);
-
-            const baseIndex = i * samplesPerBlock;
+            const baseIndex = i * blockSamples;
             const remaining = totalSamples - baseIndex;
-            const blockSamples = Math.min(samplesPerBlock, remaining);
+            const count = Math.min(blockSamples, remaining);
 
-            if (precisionMode === '16bPACK') {
-                for (let j = 0; j < blockSamples; j++) {
-                    const pixelIndex = j * 4;
-                    outputDataL[baseIndex + j] = (pixels[pixelIndex + 0] + 256 * pixels[pixelIndex + 1]) / 65535 * 2 - 1;
-                    outputDataR[baseIndex + j] = (pixels[pixelIndex + 2] + 256 * pixels[pixelIndex + 3]) / 65535 * 2 - 1;
+            outputDataL.fill(0, baseIndex, baseIndex + count);
+            outputDataR.fill(0, baseIndex, baseIndex + count);
+
+            for (const soundBuffer of soundBuffers) {
+                const block = renderSoundBlock(i, options, precisionMode, soundBuffer);
+                if (!block) {
+                    continue;
                 }
-            } else {
-                for (let j = 0; j < blockSamples; j++) {
-                    const pixelIndex = j * 4;
-                    outputDataL[baseIndex + j] = Math.max(-1, Math.min(1, pixels[pixelIndex + 0]));
-                    outputDataR[baseIndex + j] = Math.max(-1, Math.min(1, pixels[pixelIndex + 1]));
+                for (let j = 0; j < count; j++) {
+                    outputDataL[baseIndex + j] += block.left[j] * mixGain;
+                    outputDataR[baseIndex + j] += block.right[j] * mixGain;
                 }
             }
         }
-
-        renderer.setRenderTarget(previousTarget);
-        target.dispose();
-        material.dispose();
-        mesh.geometry.dispose();
 
         const renderEnd = global.performance && typeof global.performance.now === 'function'
             ? global.performance.now()
             : Date.now();
         const renderSeconds = Math.max(0, renderEnd - renderStart) / 1000;
         setStats(`Pre-processing time: ${renderSeconds.toFixed(2)}s`);
-
-        global.currentShader = previousShader;
     };
 
-    const disposeRenderContext = function () {
-        if (!state.renderContext) {
+    const disposeRenderContext = function (soundBufferName) {
+        if (!state.renderContexts || state.renderContexts.size === 0) {
             return;
         }
-        try { state.renderContext.target.dispose(); } catch { /* ignore */ }
-        try { state.renderContext.material.dispose(); } catch { /* ignore */ }
-        try { state.renderContext.mesh.geometry.dispose(); } catch { /* ignore */ }
-        state.renderContext = null;
+        if (soundBufferName) {
+            const ctx = state.renderContexts.get(soundBufferName);
+            if (ctx) {
+                try { ctx.target.dispose(); } catch { /* ignore */ }
+                try { ctx.material.dispose(); } catch { /* ignore */ }
+                try { ctx.mesh.geometry.dispose(); } catch { /* ignore */ }
+                state.renderContexts.delete(soundBufferName);
+            }
+            return;
+        }
+
+        for (const [name, ctx] of state.renderContexts.entries()) {
+            try { ctx.target.dispose(); } catch { /* ignore */ }
+            try { ctx.material.dispose(); } catch { /* ignore */ }
+            try { ctx.mesh.geometry.dispose(); } catch { /* ignore */ }
+            state.renderContexts.delete(name);
+        }
     };
 
-    const getRenderContext = function (options, precisionMode) {
+    const getRenderContext = function (options, precisionMode, soundBuffer) {
         const renderer = options.renderer;
-        const soundBuffer = state.soundBuffer;
         if (!renderer || !soundBuffer || !state.audioContext) {
             return null;
         }
@@ -560,12 +524,12 @@
         const HEIGHT = 512;
         const samplesPerBlock = WIDTH * HEIGHT;
 
-        if (state.renderContext) {
-            const ctx = state.renderContext;
-            if (ctx.renderer === renderer && ctx.precisionMode === precisionMode && ctx.soundBufferName === soundBuffer.Name) {
-                return ctx;
+        const existing = state.renderContexts.get(soundBuffer.Name);
+        if (existing) {
+            if (existing.renderer === renderer && existing.precisionMode === precisionMode) {
+                return existing;
             }
-            disposeRenderContext();
+            disposeRenderContext(soundBuffer.Name);
         }
 
         let targetType = global.THREE.UnsignedByteType;
@@ -594,7 +558,7 @@
             ? new Uint8Array(WIDTH * HEIGHT * 4)
             : new Float32Array(WIDTH * HEIGHT * 4);
 
-        state.renderContext = {
+        const ctx = {
             renderer,
             soundBufferName: soundBuffer.Name,
             precisionMode,
@@ -608,22 +572,23 @@
             width: WIDTH,
             height: HEIGHT
         };
+        state.renderContexts.set(soundBuffer.Name, ctx);
         state.stream.blockSamples = samplesPerBlock;
-        return state.renderContext;
+        return ctx;
     };
 
-    const renderSoundBlock = function (blockIndex, options, precisionMode) {
-        const ctx = getRenderContext(options, precisionMode);
+    const renderSoundBlock = function (blockIndex, options, precisionMode, soundBuffer) {
+        const ctx = getRenderContext(options, precisionMode, soundBuffer);
         if (!ctx) {
             return null;
         }
 
         const previousShader = global.currentShader;
-        if (state.soundBuffer && state.soundBuffer.File) {
+        if (soundBuffer && soundBuffer.File) {
             global.currentShader = {
-                Name: state.soundBuffer.Name,
-                File: state.soundBuffer.File,
-                LineOffset: state.soundBuffer.LineOffset
+                Name: soundBuffer.Name,
+                File: soundBuffer.File,
+                LineOffset: soundBuffer.LineOffset
             };
         }
 
@@ -674,16 +639,36 @@
         }
         const options = state.options || {};
         const precisionMode = resolvePrecision(options);
+        const soundBuffers = state.soundBuffers || [];
+        const mixGain = soundBuffers.length > 0 ? 1 / soundBuffers.length : 1;
         for (let i = 0; i < count; i++) {
-            const block = renderSoundBlock(state.stream.nextBlock, options, precisionMode);
-            if (!block) {
+            let mixedLeft = null;
+            let mixedRight = null;
+
+            for (const soundBuffer of soundBuffers) {
+                const block = renderSoundBlock(state.stream.nextBlock, options, precisionMode, soundBuffer);
+                if (!block) {
+                    continue;
+                }
+                if (!mixedLeft || !mixedRight) {
+                    mixedLeft = new Float32Array(block.left.length);
+                    mixedRight = new Float32Array(block.right.length);
+                }
+                for (let j = 0; j < block.left.length; j++) {
+                    mixedLeft[j] += block.left[j] * mixGain;
+                    mixedRight[j] += block.right[j] * mixGain;
+                }
+            }
+
+            if (!mixedLeft || !mixedRight) {
                 break;
             }
+
             state.stream.nextBlock += 1;
             try {
                 state.workletNode.port.postMessage(
-                    { type: 'push', left: block.left.buffer, right: block.right.buffer },
-                    [block.left.buffer, block.right.buffer]
+                    { type: 'push', left: mixedLeft.buffer, right: mixedRight.buffer },
+                    [mixedLeft.buffer, mixedRight.buffer]
                 );
             } catch {
                 // ignore
@@ -703,11 +688,17 @@
             return;
         }
 
-        const soundBuffer = options.buffers.find((buffer) => buffer && buffer.IsSound);
-        if (!soundBuffer) {
+        const soundBuffers = options.buffers.filter((buffer) => buffer && buffer.IsSound);
+        if (!soundBuffers.length) {
             return;
         }
-        state.soundBuffer = soundBuffer;
+        soundBuffers.sort((a, b) => {
+            const aIndex = a.SoundIndices && a.SoundIndices.length ? a.SoundIndices[0] : 0;
+            const bIndex = b.SoundIndices && b.SoundIndices.length ? b.SoundIndices[0] : 0;
+            return aIndex - bIndex;
+        });
+        state.soundBuffers = soundBuffers;
+        state.soundBuffer = soundBuffers[0] || null;
         disposeRenderContext();
 
         const audioContext = resolveAudioContext(options.audioContext);
@@ -768,13 +759,21 @@
             return;
         }
 
-        const soundBuffer = options.buffers.find((buffer) => buffer && buffer.IsSound);
-        if (!soundBuffer) {
+        const soundBuffers = options.buffers.filter((buffer) => buffer && buffer.IsSound);
+        if (!soundBuffers.length) {
+            state.soundBuffers = [];
             state.soundBuffer = null;
             state.ready = false;
+            disposeRenderContext();
             return;
         }
-        state.soundBuffer = soundBuffer;
+        soundBuffers.sort((a, b) => {
+            const aIndex = a.SoundIndices && a.SoundIndices.length ? a.SoundIndices[0] : 0;
+            const bIndex = b.SoundIndices && b.SoundIndices.length ? b.SoundIndices[0] : 0;
+            return aIndex - bIndex;
+        });
+        state.soundBuffers = soundBuffers;
+        state.soundBuffer = soundBuffers[0] || null;
         disposeRenderContext();
 
         const audioContext = state.audioContext || resolveAudioContext(options.audioContext);
