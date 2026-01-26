@@ -31,6 +31,8 @@
             rmsL: 0,
             rmsR: 0
         },
+        transportStartTime: null,
+        transportStartContextTime: null,
         renderContexts: new Map(),
         analysisGain: null,
         analyserNodes: [],
@@ -143,6 +145,25 @@
         } catch {
             // ignore
         }
+    };
+
+    const setTransportStart = function (startAtSeconds) {
+        if (!state.audioContext) {
+            return;
+        }
+        state.transportStartTime = Number.isFinite(startAtSeconds) ? startAtSeconds : 0;
+        state.transportStartContextTime = state.audioContext.currentTime;
+    };
+
+    root.audioOutput.getAudioTime = function () {
+        if (!state.audioContext || !state.started) {
+            return null;
+        }
+        if (!Number.isFinite(state.transportStartTime) || !Number.isFinite(state.transportStartContextTime)) {
+            return null;
+        }
+        const now = state.audioContext.currentTime;
+        return state.transportStartTime + Math.max(0, now - state.transportStartContextTime);
     };
 
     const ensureWorklet = function (options) {
@@ -866,6 +887,7 @@
                 state.stream.nextBlock = Math.floor(startAt * state.audioContext.sampleRate / state.stream.blockSamples);
                 requestBlocks(4);
                 state.sourceNode = null;
+                setTransportStart(startAt);
 
                 state.audioContext.resume().then(() => {
                     state.started = true;
@@ -906,6 +928,7 @@
                 }
             }
             state.sourceNode = source;
+            setTransportStart(startAt);
 
             state.audioContext.resume().then(() => {
                 source.start(0, startAt);
@@ -948,6 +971,8 @@
             resetStreaming();
         }
         state.started = false;
+        state.transportStartTime = null;
+        state.transportStartContextTime = null;
     };
 
     root.audioOutput.pause = function () {
