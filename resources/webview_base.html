@@ -352,6 +352,7 @@
 
     const hasSoundBuffer = buffers.some((buffer) => buffer && buffer.IsSound);
     const audioOutputPrecision = '<!-- Audio Output Precision -->';
+    const audioWorkletUrl = '<!-- Audio Worklet Processor -->';
     const showSoundButton = <!-- Show Sound Button -->;
     if (!glslUseVersion3 && hasSoundBuffer && vscode !== undefined) {
         vscode.postMessage({
@@ -369,6 +370,7 @@
             prepareVertexShader: prepareVertexShader,
             audioContext: audioContext,
             precision: audioOutputPrecision,
+            audioWorkletUrl: audioWorkletUrl,
             showSoundButton: showSoundButton,
             paused: paused
         });
@@ -577,6 +579,7 @@
                 prepareVertexShader: prepareVertexShader,
                 audioContext: audioContext,
                 precision: audioOutputPrecision,
+                audioWorkletUrl: audioWorkletUrl,
                 showSoundButton: showSoundButton,
                 paused: paused
             });

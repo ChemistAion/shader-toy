@@ -12,6 +12,11 @@
         gainNode: null,
         gainConnected: false,
         outputGain: 0.5,
+        workletNode: null,
+        workletReady: false,
+        workletLoading: false,
+        workletFailed: false,
+        outputUsesWorklet: false,
         audioBuffer: null,
         sourceNode: null,
         analysisGain: null,
@@ -28,6 +33,70 @@
     root.audioOutput.init = function (options) {
         state.initialized = true;
         state.options = options || {};
+    };
+
+    const disconnectSafe = function (node) {
+        if (!node) {
+            return;
+        }
+        try {
+            node.disconnect();
+        } catch {
+            // ignore
+        }
+    };
+
+    const connectOutput = function () {
+        if (!state.audioContext || !state.gainNode) {
+            return;
+        }
+        disconnectSafe(state.gainNode);
+        if (state.workletNode && state.workletReady) {
+            disconnectSafe(state.workletNode);
+            try {
+                state.gainNode.connect(state.workletNode);
+                state.workletNode.connect(state.audioContext.destination);
+                state.outputUsesWorklet = true;
+                return;
+            } catch {
+                // fall back
+            }
+        }
+        try {
+            state.gainNode.connect(state.audioContext.destination);
+            state.outputUsesWorklet = false;
+        } catch {
+            // ignore
+        }
+    };
+
+    const ensureWorklet = function (options) {
+        if (state.workletReady || state.workletFailed || state.workletLoading) {
+            return;
+        }
+        if (!state.audioContext || !state.audioContext.audioWorklet) {
+            state.workletFailed = true;
+            return;
+        }
+        const url = options && options.audioWorkletUrl ? String(options.audioWorkletUrl) : '';
+        if (!url) {
+            state.workletFailed = true;
+            return;
+        }
+        state.workletLoading = true;
+        state.audioContext.audioWorklet.addModule(url).then(() => {
+            try {
+                state.workletNode = new global.AudioWorkletNode(state.audioContext, 'shadertoy-pass-through');
+                state.workletReady = true;
+            } catch {
+                state.workletFailed = true;
+            }
+        }).catch(() => {
+            state.workletFailed = true;
+        }).finally(() => {
+            state.workletLoading = false;
+            connectOutput();
+        });
     };
 
     const resolveAudioContext = function (input) {
@@ -444,8 +513,8 @@
         state.outputGain = 0.5;
         state.gainNode = audioContext.createGain();
         applyOutputGain();
-        state.gainNode.connect(audioContext.destination);
-        state.gainConnected = true;
+        connectOutput();
+        ensureWorklet(options);
 
         const durationSeconds = Number.isFinite(options.durationSeconds) ? options.durationSeconds : 180;
         const totalSamples = Math.max(1, Math.floor(audioContext.sampleRate * durationSeconds));
@@ -507,14 +576,8 @@
             state.gainNode = audioContext.createGain();
         }
         applyOutputGain();
-        if (!state.gainConnected) {
-            try {
-                state.gainNode.connect(audioContext.destination);
-                state.gainConnected = true;
-            } catch {
-                // ignore
-            }
-        }
+        connectOutput();
+        ensureWorklet(options);
 
         state.analyserNodes = [];
         state.soundInputSplitters = [];

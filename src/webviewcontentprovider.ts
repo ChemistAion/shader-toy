@@ -75,6 +75,7 @@ import { AudioUpdateExtension } from './extensions/audio/audio_update_extension'
 import { AudioPauseExtension } from './extensions/audio/audio_pause_extension';
 import { AudioResumeExtension } from './extensions/audio/audio_resume_extension';
 import { AudioOutputPrecisionExtension } from './extensions/audio/audio_output_precision_extension';
+import { AudioWorkletUrlExtension } from './extensions/audio/audio_worklet_url_extension';
 
 import { UniformsInitExtension } from './extensions/uniforms/uniforms_init_extension';
 import { UniformsUpdateExtension } from './extensions/uniforms/uniforms_update_extension';
@@ -542,6 +543,10 @@ export class WebviewContentProvider {
         const audioOutputPrecision = this.context.getConfig<string>('audioOutputPrecision') || '32bFLOAT';
         const audioOutputPrecisionExtension = new AudioOutputPrecisionExtension(audioOutputPrecision);
         this.webviewAssembler.addReplaceModule(audioOutputPrecisionExtension, '<!-- Audio Output Precision -->', '<!-- Audio Output Precision -->');
+
+        const audioWorkletUrl = getWebviewResourcePath('webview/audio_worklet_processor.js');
+        const audioWorkletUrlExtension = new AudioWorkletUrlExtension(audioWorkletUrl);
+        this.webviewAssembler.addReplaceModule(audioWorkletUrlExtension, '<!-- Audio Worklet Processor -->', '<!-- Audio Worklet Processor -->');
 
         const showSoundButton = this.context.getConfig<boolean>('showSoundButton');
         const showSoundButtonExtension = new ShowSoundButtonExtension(showSoundButton !== false);
