@@ -22,9 +22,25 @@ export class UniformsInitExtension implements WebviewExtension {
 
         if (has_uniforms) {
             this.content += `
-let dat_gui = new dat.GUI({ autoPlace: false, closed: ${!startingState.Open} });
+if (window.ShaderToy && window.ShaderToy.dat_gui) {
+    try {
+        window.ShaderToy.dat_gui.destroy();
+    } catch { /* ignore */ }
+    window.ShaderToy.dat_gui = undefined;
+}
 var dat_gui_container = document.getElementById('dat_gui_container');
-dat_gui_container.appendChild(dat_gui.domElement);
+if (dat_gui_container) {
+    while (dat_gui_container.firstChild) {
+        dat_gui_container.removeChild(dat_gui_container.firstChild);
+    }
+}
+var dat_gui = new dat.GUI({ autoPlace: false, closed: ${!startingState.Open} });
+if (dat_gui_container) {
+    dat_gui_container.appendChild(dat_gui.domElement);
+}
+if (window.ShaderToy) {
+    window.ShaderToy.dat_gui = dat_gui;
+}
 `;
         }
 

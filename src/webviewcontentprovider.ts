@@ -2,6 +2,7 @@
 
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as path from 'path';
 import * as Types from './typenames';
 import { Context } from './context';
 import { BufferProvider } from './bufferprovider';
@@ -107,6 +108,150 @@ export class WebviewContentProvider {
         this.commonIncludes = [];
     }
 
+    public async generateHotReloadPayload(webview: vscode.Webview | undefined, startingState: Types.RenderStartingData): Promise<Types.HotReloadPayload> {
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        // Resource Helpers
+        const makeWebviewResource = webview !== undefined
+            ? (localPath: string) => this.context.makeWebviewResource(webview, this.context.makeUri(localPath)).toString()
+            : (localPath: string) => localPath;
+
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        // Feature Check
+        let useKeyboard = false;
+        let useAudio = false;
+        let useUniforms = false;
+        for (const buffer of this.buffers) {
+            if (buffer.UsesKeyboard) {
+                useKeyboard = true;
+            }
+
+            const audios = buffer.AudioInputs;
+            if (audios.length > 0) {
+                useAudio = true;
+            }
+
+            const uniforms = buffer.CustomUniforms;
+            if (uniforms.length > 0) {
+                useUniforms = true;
+            }
+        }
+
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        // Shader Preamble
+        const preambleExtension = new ShaderPreambleExtension();
+
+        let keyboardShaderExtension: KeyboardShaderExtension | undefined;
+        if (useKeyboard) {
+            keyboardShaderExtension = new KeyboardShaderExtension();
+        }
+
+        if (useUniforms) {
+            const uniformsPreambleExtension = new UniformsPreambleExtension(this.buffers);
+            preambleExtension.addPreambleExtension(uniformsPreambleExtension);
+        }
+
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        // Fix up line offsets
+        {
+            const glslPlusThreeJsLineNumbers = 107;
+            for (const buffer of this.buffers) {
+                buffer.LineOffset += preambleExtension.getShaderPreambleLineNumbers() + glslPlusThreeJsLineNumbers;
+                if (buffer.UsesKeyboard && keyboardShaderExtension !== undefined) {
+                    buffer.LineOffset += keyboardShaderExtension.getShaderPreambleLineNumbers();
+                }
+            }
+        }
+
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        // Init Script
+        const initScriptParts: string[] = [];
+
+        // Reset buffers/includes before re-initialization.
+        initScriptParts.push('buffers = [];');
+        initScriptParts.push('if (window.ShaderToy) { window.ShaderToy.buffers = buffers; }');
+        initScriptParts.push('commonIncludes = [];');
+
+        // Audio first (buffers init depends on audioContext.sampleRate).
+        if (useAudio) {
+            const audioInitExtension = new AudioInitExtension(this.buffers, this.context, makeWebviewResource);
+            initScriptParts.push(audioInitExtension.generateContent());
+
+            const textureInitExtension = new TexturesInitExtension();
+            await textureInitExtension.init(this.buffers, this.context, makeWebviewResource);
+            textureInitExtension.addTextureContent(audioInitExtension);
+
+            const buffersInitExtension = new BuffersInitExtension(this.buffers);
+            const includesInitExtension = new IncludesInitExtension(this.commonIncludes);
+
+            initScriptParts.push(buffersInitExtension.generateContent());
+            initScriptParts.push(includesInitExtension.generateContent());
+            initScriptParts.push(`if (isWebGL2) {\n    for (let buffer of buffers) {\n        buffer.LineOffset += WEBGL2_EXTRA_SHADER_LINES;\n        if (buffer.VertexLineOffset !== undefined) {\n            buffer.VertexLineOffset += WEBGL2_EXTRA_SHADER_LINES;\n        }\n    }\n}`);
+
+            if (useKeyboard) {
+                const keyboardInit = new KeyboardInitExtension(startingState.Keys);
+                initScriptParts.push(keyboardInit.generateContent());
+                const keyboardCallbacks = new KeyboardCallbacksExtension();
+                initScriptParts.push(keyboardCallbacks.generateContent());
+            }
+
+            if (useUniforms) {
+                const uniformsInitExtension = new UniformsInitExtension(this.buffers, startingState.UniformsGui);
+                initScriptParts.push(uniformsInitExtension.generateContent());
+            }
+
+            initScriptParts.push(textureInitExtension.generateContent());
+        }
+        else {
+            const noAudioExtension = new NoAudioExtension();
+            initScriptParts.push(noAudioExtension.generateContent());
+
+            const textureInitExtension = new TexturesInitExtension();
+            await textureInitExtension.init(this.buffers, this.context, makeWebviewResource);
+
+            const buffersInitExtension = new BuffersInitExtension(this.buffers);
+            const includesInitExtension = new IncludesInitExtension(this.commonIncludes);
+
+            initScriptParts.push(buffersInitExtension.generateContent());
+            initScriptParts.push(includesInitExtension.generateContent());
+            initScriptParts.push(`if (isWebGL2) {\n    for (let buffer of buffers) {\n        buffer.LineOffset += WEBGL2_EXTRA_SHADER_LINES;\n        if (buffer.VertexLineOffset !== undefined) {\n            buffer.VertexLineOffset += WEBGL2_EXTRA_SHADER_LINES;\n        }\n    }\n}`);
+
+            if (useKeyboard) {
+                const keyboardInit = new KeyboardInitExtension(startingState.Keys);
+                initScriptParts.push(keyboardInit.generateContent());
+                const keyboardCallbacks = new KeyboardCallbacksExtension();
+                initScriptParts.push(keyboardCallbacks.generateContent());
+            }
+
+            if (useUniforms) {
+                const uniformsInitExtension = new UniformsInitExtension(this.buffers, startingState.UniformsGui);
+                initScriptParts.push(uniformsInitExtension.generateContent());
+            }
+
+            initScriptParts.push(textureInitExtension.generateContent());
+        }
+
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        // Shader Scripts
+        const shadersExtension = new ShadersExtension(this.buffers, preambleExtension, keyboardShaderExtension);
+        const includesExtension = new IncludesExtension(this.commonIncludes, preambleExtension);
+
+        const state: Types.HotReloadState = {
+            time: startingState.Time,
+            paused: startingState.Paused,
+            mouse: startingState.Mouse,
+            normalizedMouse: startingState.NormalizedMouse,
+            flyControlPosition: startingState.FlyControlPosition,
+            flyControlRotation: startingState.FlyControlRotation
+        };
+
+        return {
+            shadersHtml: shadersExtension.generateContent(),
+            includesHtml: includesExtension.generateContent(),
+            initScript: initScriptParts.join('\n'),
+            state
+        };
+    }
+
     public async parseShaderTree(generateStandalone: boolean): Promise<string[]> {
         let shaderName = this.documentName;
         shaderName = shaderName.replace(/\\/g, '/');
@@ -164,7 +309,21 @@ export class WebviewContentProvider {
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Local Resources
         let localResources: string[] = [];
+        const addIfLocalPath = (candidate: string | undefined) => {
+            if (!candidate || candidate === 'final-blit') {
+                return;
+            }
+            const normalized = candidate.replace(/\\/g, '/');
+            if (path.isAbsolute(normalized)) {
+                localResources.push(normalized);
+            }
+        };
         for (const buffer of this.buffers) {
+            addIfLocalPath(buffer.File);
+            addIfLocalPath(buffer.VertexFile);
+            for (const include of buffer.Includes) {
+                addIfLocalPath(include.File);
+            }
             for (const texture of buffer.TextureInputs) {
                 if (texture.LocalTexture) {
                     localResources.push(texture.LocalTexture);
@@ -175,6 +334,9 @@ export class WebviewContentProvider {
                     localResources.push(audio.LocalPath);
                 }
             }
+        }
+        for (const include of this.commonIncludes) {
+            addIfLocalPath(include.File);
         }
         localResources = localResources.filter(function (elem, index, self) {
             return index === self.indexOf(elem);

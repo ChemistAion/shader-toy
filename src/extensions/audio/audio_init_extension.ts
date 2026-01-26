@@ -173,10 +173,46 @@ export class AudioInitExtension implements WebviewExtension, TextureExtensionExt
 
         if (this.content !== '') {
             this.content = `
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            const audioContext = new AudioContext();
-            
-            let audios = [];
+            var AudioContext = window.AudioContext || window.webkitAudioContext;
+            var audioContext = (window.ShaderToy && window.ShaderToy.audioContext)
+                ? window.ShaderToy.audioContext
+                : (AudioContext ? new AudioContext() : undefined);
+            if (!audioContext) {
+                audioContext = { sampleRate: 0 };
+            }
+            if (window.ShaderToy) {
+                window.ShaderToy.audioContext = audioContext;
+            }
+
+            var audios = (window.ShaderToy && window.ShaderToy.audios) ? window.ShaderToy.audios : [];
+            if (audios && audios.length) {
+                for (const existing of audios) {
+                    try {
+                        if (existing.Media && typeof existing.Media.stop === 'function') {
+                            existing.Media.stop();
+                        }
+                    } catch { /* ignore */ }
+                    try {
+                        if (existing.Media && typeof existing.Media.disconnect === 'function') {
+                            existing.Media.disconnect();
+                        }
+                    } catch { /* ignore */ }
+                    try {
+                        if (existing.AnalyserLeft && typeof existing.AnalyserLeft.disconnect === 'function') {
+                            existing.AnalyserLeft.disconnect();
+                        }
+                    } catch { /* ignore */ }
+                    try {
+                        if (existing.AnalyserRight && typeof existing.AnalyserRight.disconnect === 'function') {
+                            existing.AnalyserRight.disconnect();
+                        }
+                    } catch { /* ignore */ }
+                }
+            }
+            audios = [];
+            if (window.ShaderToy) {
+                window.ShaderToy.audios = audios;
+            }
             ` + this.content;
         }
         else {

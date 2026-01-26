@@ -10,7 +10,10 @@ import { removeDuplicates } from './utility';
 
 type Webview = {
     Panel: vscode.WebviewPanel,
-    OnDidDispose: () => void
+    OnDidDispose: () => void,
+    HasHtml?: boolean,
+    RootDocument?: vscode.TextDocument,
+    LocalResources?: string[]
 };
 type StaticWebview = Webview & {
     Document: vscode.TextDocument
@@ -60,6 +63,7 @@ export class ShaderToyManager {
         else {
             vscode.window.showErrorMessage('Select a TextEditor to show GLSL Preview.');
         }
+
     };
 
     public showStaticPreview = async () => {
@@ -82,6 +86,7 @@ export class ShaderToyManager {
                 const staticWebview = this.staticWebviews[this.staticWebviews.length - 1];
                 this.staticWebviews[this.staticWebviews.length - 1] = await this.updateWebview(staticWebview, vscode.window.activeTextEditor.document);
                 newWebviewPanel.onDidDispose(onDidDispose);
+
             }
         }
     };
@@ -111,15 +116,22 @@ export class ShaderToyManager {
 
     public onDocumentEvent = async (document: vscode.TextDocument) => {
         if (this.context.getConfig<boolean>('reloadAutomatically')) {
-            const staticWebview = this.staticWebviews.find((webview: StaticWebview) => { return webview.Document === document; });
-            const isActiveDocument = this.context.activeEditor !== undefined && document === this.context.activeEditor.document;
-            if (isActiveDocument || staticWebview !== undefined) {
-                if (this.webviewPanel !== undefined && this.context.activeEditor !== undefined) {
-                    this.webviewPanel = await this.updateWebview(this.webviewPanel, this.context.activeEditor.document);
-                }
+            const changedFile = this.normalizePath(document.fileName);
 
-                this.staticWebviews.map((staticWebview: StaticWebview) => this.updateWebview(staticWebview, staticWebview.Document));
+            if (this.webviewPanel !== undefined && this.webviewPanel.LocalResources !== undefined) {
+                if (this.webviewPanel.LocalResources.includes(changedFile)) {
+                    const rootDocument = this.webviewPanel.RootDocument ?? document;
+                    this.webviewPanel = await this.updateWebview(this.webviewPanel, rootDocument);
+                }
             }
+
+            this.staticWebviews.forEach((staticWebview: StaticWebview) => {
+                const resources = staticWebview.LocalResources || [];
+                if (resources.includes(changedFile)) {
+                    const rootDocument = staticWebview.RootDocument ?? staticWebview.Document;
+                    this.updateWebview(staticWebview, rootDocument);
+                }
+            });
         }
     };
 
@@ -257,6 +269,9 @@ export class ShaderToyManager {
                 case 'setPause':
                     this.startingData.Paused = message.paused;
                     return;
+                case 'clearDiagnostics':
+                    this.context.clearDiagnostics();
+                    return;
                 case 'updateMouse':
                     this.startingData.Mouse = message.mouse;
                     this.startingData.NormalizedMouse = message.normalizedMouse;
@@ -329,6 +344,10 @@ export class ShaderToyManager {
         }
         localResourceRoots = removeDuplicates(localResourceRoots);
 
+        const allResources = [document.fileName, ...localResources].map((resource) => this.normalizePath(resource));
+        webviewPanel.LocalResources = removeDuplicates(allResources);
+        webviewPanel.RootDocument = document;
+
         // Recreate webview if allowed resource roots are not part of the current resource roots
         const previousLocalResourceRoots = webviewPanel.Panel.webview.options.localResourceRoots || [];
         const previousHadLocalResourceRoot = (localResourceRootAsUri: string) => {
@@ -342,9 +361,22 @@ export class ShaderToyManager {
             webviewPanel.Panel.dispose();
             newWebviewPanel.onDidDispose(webviewPanel.OnDidDispose);
             webviewPanel.Panel = newWebviewPanel;
+            webviewPanel.HasHtml = false;
+        }
+
+        if (webviewPanel.HasHtml) {
+            const payload = await webviewContentProvider.generateHotReloadPayload(webviewPanel.Panel.webview, this.startingData);
+            webviewPanel.Panel.webview.postMessage({ command: 'hotReload', payload });
+            return webviewPanel;
         }
 
         webviewPanel.Panel.webview.html = await webviewContentProvider.generateWebviewContent(webviewPanel.Panel.webview, this.startingData);
+        webviewPanel.HasHtml = true;
         return webviewPanel;
     };
+
+    private normalizePath(input: string): string {
+        const normalized = path.normalize(input).replace(/\\/g, '/');
+        return normalized.toLowerCase();
+    }
 }

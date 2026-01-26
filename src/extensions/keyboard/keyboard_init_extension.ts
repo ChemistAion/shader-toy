@@ -11,17 +11,18 @@ export class KeyboardInitExtension implements WebviewExtension {
 
     public generateContent(): string {
         return `\
-const numKeys = 256;
-const numStates = 4;
-let keyBoardData = new Uint8Array(numKeys * numStates);
-let keyBoardTexture = new THREE.DataTexture(keyBoardData, numKeys, numStates, THREE.LuminanceFormat, THREE.UnsignedByteType);
+var numKeys = 256;
+var numStates = 4;
+var keyBoardData = new Uint8Array(numKeys * numStates);
+var keyBoardTexture = new THREE.DataTexture(keyBoardData, numKeys, numStates, THREE.LuminanceFormat, THREE.UnsignedByteType);
 keyBoardTexture.magFilter = THREE.NearestFilter;
 keyBoardTexture.needsUpdate = true;
-let pressedKeys = [];
-let releasedKeys = [];
-let toggledKeys = [${this.startingKeys}];
+var pressedKeys = [];
+var releasedKeys = [];
+var toggledKeys = [${this.startingKeys}];
 for (let key of toggledKeys) {
     keyBoardData[key + 512] = 255; // Toggled
-}`;
+}
+`;
     }
 }

@@ -10,6 +10,7 @@
         options: {},
         audioContext: null,
         gainNode: null,
+        gainConnected: false,
         outputGain: 0.5,
         audioBuffer: null,
         sourceNode: null,
@@ -308,7 +309,7 @@
 
         attachGestureResume(startIfNeeded);
         global.addEventListener('focus', startIfNeeded, { once: true });
-        setStatus('Audio output is blocked (WebAudio gesture) until you gain focus to the GLSL-preview.');
+        setStatus('Audio output is blocked (due to WebAudio autoplay gesture policy) until you provide a user action to the GLSL-preview.');
     };
 
     const scheduleGestureStart = function (startAt, resumeAndStart) {
@@ -318,7 +319,7 @@
             state.pendingStartAt = null;
             resumeAndStart(pending ?? 0);
         });
-        setStatus('Audio output is blocked (WebAudio gesture) until you gain focus to the GLSL-preview.');
+        setStatus('Audio output is blocked (due to WebAudio autoplay gesture policy) until you provide a user action to the GLSL-preview.');
     };
 
     const renderAllBlocks = function (options) {
@@ -444,6 +445,7 @@
         state.gainNode = audioContext.createGain();
         applyOutputGain();
         state.gainNode.connect(audioContext.destination);
+        state.gainConnected = true;
 
         const durationSeconds = Number.isFinite(options.durationSeconds) ? options.durationSeconds : 180;
         const totalSamples = Math.max(1, Math.floor(audioContext.sampleRate * durationSeconds));
@@ -466,6 +468,79 @@
 
         if (options.autoStart !== false && !options.paused) {
             if (state.audioContext.state !== 'running') {
+                attachInitialStart();
+            }
+            else {
+                root.audioOutput.start(0);
+            }
+        }
+    };
+
+    root.audioOutput.reloadFromGlobals = function (options) {
+        root.audioOutput.init(options);
+
+        if (!options || !options.buffers || !global.THREE) {
+            return;
+        }
+
+        if (!options.glslUseVersion3) {
+            postErrorMessage('mainSound requires shader-toy.webglVersion set to "WebGL2".');
+            return;
+        }
+
+        const soundBuffer = options.buffers.find((buffer) => buffer && buffer.IsSound);
+        if (!soundBuffer) {
+            state.soundBuffer = null;
+            state.ready = false;
+            return;
+        }
+        state.soundBuffer = soundBuffer;
+
+        const audioContext = state.audioContext || resolveAudioContext(options.audioContext);
+        if (!audioContext) {
+            return;
+        }
+
+        state.audioContext = audioContext;
+        state.showStatus = options.showSoundButton !== false;
+        if (!state.gainNode) {
+            state.gainNode = audioContext.createGain();
+        }
+        applyOutputGain();
+        if (!state.gainConnected) {
+            try {
+                state.gainNode.connect(audioContext.destination);
+                state.gainConnected = true;
+            } catch {
+                // ignore
+            }
+        }
+
+        state.analyserNodes = [];
+        state.soundInputSplitters = [];
+
+        const durationSeconds = Number.isFinite(options.durationSeconds) ? options.durationSeconds : 180;
+        const totalSamples = Math.max(1, Math.floor(audioContext.sampleRate * durationSeconds));
+        state.audioBuffer = audioContext.createBuffer(2, totalSamples, audioContext.sampleRate);
+
+        for (const buffer of options.buffers) {
+            if (buffer && buffer.Shader && buffer.Shader.uniforms && buffer.Shader.uniforms.iSampleRate) {
+                buffer.Shader.uniforms.iSampleRate.value = audioContext.sampleRate;
+            }
+        }
+
+        const precisionMode = resolvePrecision(options);
+        reportPrecisionFallback(options, precisionMode);
+        const blockSeconds = (512 * 512) / audioContext.sampleRate;
+        setStatus(`Audio: ${precisionMode} @ ${audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
+
+        renderAllBlocks(options);
+        state.ready = true;
+
+        const shouldStart = state.started || (options.autoStart !== false && !options.paused);
+        state.started = false;
+        if (shouldStart) {
+            if (audioContext.state !== 'running') {
                 attachInitialStart();
             }
             else {
@@ -515,7 +590,7 @@
                     setStatus(`Audio: ${precisionMode} @ ${state.audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
                 }
             }).catch(() => {
-                setStatus('Audio output is blocked (WebAudio gesture) until you gain focus to the GLSL-preview.');
+                setStatus('Audio output is blocked (due to WebAudio autoplay gesture policy) until you provide a user action to the GLSL-preview.');
             });
         };
 

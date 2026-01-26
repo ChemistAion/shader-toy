@@ -144,8 +144,9 @@ function(err) {
 
         const ddsFloatTextureLoaderScript = () => {
             return `\
-let ddsRequestId = 0;
-let ddsPendingRequests = new Map();
+if (!window.ShaderToy || !window.ShaderToy.ddsLoaderInitialized) {
+var ddsRequestId = 0;
+var ddsPendingRequests = new Map();
 
 function ddsBase64ToArrayBuffer(base64) {
     const binaryString = atob(base64);
@@ -196,6 +197,11 @@ window.addEventListener('message', event => {
         pending.reject(new Error(message.error || 'Failed to read binary file'));
     }
 });
+
+if (window.ShaderToy) {
+    window.ShaderToy.ddsLoaderInitialized = true;
+}
+}
 
 function isDDSMagic(buffer) {
     // 'DDS '
