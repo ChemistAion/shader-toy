@@ -118,6 +118,7 @@
 <!-- Webview runtime_env.js -->
 <!-- Webview glsl_error_hook.js -->
 <!-- Webview shader_compile.js -->
+<!-- Audio Worklet Source -->
 <!-- Webview audio_output.js -->
 <!-- Webview ui_controls.js -->
 <!-- Webview gl_context.js -->
@@ -129,6 +130,11 @@
     if (typeof acquireVsCodeApi === 'function') {
         vscode = acquireVsCodeApi();
     }
+    let webviewState = vscode && typeof vscode.getState === 'function' ? vscode.getState() : {};
+    if (!webviewState) {
+        webviewState = {};
+    }
+    let audioGestureUnlockedState = !!webviewState.audioGestureUnlocked;
     var compileTimePanel;
 
     let revealError = function(line, file) {
@@ -143,6 +149,9 @@
 
     let currentShader = {};
     // Error Callback
+    if (window.ShaderToy) {
+        window.ShaderToy.audioGestureUnlocked = audioGestureUnlockedState;
+    }
 
     // Development feature: Output warnings from third-party libraries
     // console.warn = function (message) {
@@ -172,30 +181,38 @@
     let paused = <!-- Start Paused -->;
     let forceRenderOneFrame = paused;
     let pauseButton = document.getElementById('pause-button');
+    let forcedPauseForGesture = false;
+    let pausedBeforeGesture = paused;
+    const applyPauseState = function(newPaused, notifyExtension) {
+        paused = !!newPaused;
+        if (pauseButton) {
+            pauseButton.checked = paused;
+        }
+        if (!paused) {
+            // Audio Resume
+            if (window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.resume) {
+                window.ShaderToy.audioOutput.resume(true);
+            }
+            pausedTime += clock.getDelta();
+        }
+        else {
+            // Audio Pause
+            if (window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.pause) {
+                window.ShaderToy.audioOutput.pause();
+            }
+        }
+
+        if (notifyExtension && vscode !== undefined) {
+            vscode.postMessage({
+                command: 'setPause',
+                paused: paused
+            });
+        }
+    };
     if (pauseButton) {
         pauseButton.checked = paused;
         pauseButton.onclick = function(){
-            paused = pauseButton.checked;
-            if (!paused) {
-                // Audio Resume
-                if (window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.resume) {
-                    window.ShaderToy.audioOutput.resume(true);
-                }
-                pausedTime += clock.getDelta();
-            }
-            else {
-                // Audio Pause
-                if (window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.pause) {
-                    window.ShaderToy.audioOutput.pause();
-                }
-            }
-
-            if (vscode !== undefined) {
-                vscode.postMessage({
-                    command: 'setPause',
-                    paused: paused
-                });
-            }
+            applyPauseState(pauseButton.checked, true);
         };
     }
     
@@ -240,30 +257,7 @@
         const message = event.data; // The JSON data our extension sent
         switch (message.command) {
             case 'pause':
-                if (pauseButton) {
-                    pauseButton.checked = !pauseButton.checked;
-                }
-                paused = !paused;
-                if (!paused) {
-                    // Audio Resume
-                    if (window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.resume) {
-                        window.ShaderToy.audioOutput.resume(true);
-                    }
-                    pausedTime += clock.getDelta();
-                }
-                else {
-                    // Audio Pause
-                    if (window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.pause) {
-                        window.ShaderToy.audioOutput.pause();
-                    }
-                }
-
-                if (vscode !== undefined) {
-                    vscode.postMessage({
-                        command: 'setPause',
-                        paused: paused
-                    });
-                }
+                applyPauseState(!paused, true);
                 break;
             case 'screenshot':
                 saveScreenshot();
@@ -320,6 +314,7 @@
     let recorder = null;
     let recordingTimeout = null;
     let offlineRecording = false;
+    let lastHadVisualBuffers = true;
 
     // Audio Init
     // Audio Resume
@@ -374,6 +369,47 @@
             showSoundButton: showSoundButton,
             paused: paused
         });
+    }
+
+    if (window.ShaderToy && window.ShaderToy.audioGestureUnlocked !== true) {
+        if (glslUseVersion3 && hasSoundBuffer && audioContext && audioContext.state === 'running') {
+            window.ShaderToy.audioGestureUnlocked = true;
+            if (vscode && typeof vscode.setState === 'function') {
+                vscode.setState({ ...webviewState, audioGestureUnlocked: true });
+            }
+        }
+    }
+
+    if (glslUseVersion3 && hasSoundBuffer && audioContext && audioContext.state !== 'running') {
+        const gestureAlreadyUnlocked = window.ShaderToy && window.ShaderToy.audioGestureUnlocked === true;
+        if (!gestureAlreadyUnlocked) {
+            if (!paused) {
+                forcedPauseForGesture = true;
+                pausedBeforeGesture = false;
+                applyPauseState(true, true);
+            } else {
+                pausedBeforeGesture = true;
+            }
+            if (forcedPauseForGesture) {
+                const resumeFromGesture = () => {
+                    if (!forcedPauseForGesture) {
+                        return;
+                    }
+                    forcedPauseForGesture = false;
+                    if (window.ShaderToy) {
+                        window.ShaderToy.audioGestureUnlocked = true;
+                    }
+                    if (vscode && typeof vscode.setState === 'function') {
+                        vscode.setState({ ...webviewState, audioGestureUnlocked: true });
+                    }
+                    if (!pausedBeforeGesture) {
+                        applyPauseState(false, true);
+                    }
+                };
+                window.addEventListener('pointerdown', resumeFromGesture, { once: true });
+                window.addEventListener('keydown', resumeFromGesture, { once: true });
+            }
+        }
     }
 
     let scene = new THREE.Scene();
@@ -632,6 +668,17 @@
         }
 
         // Audio Update
+
+        const hasVisualBuffers = buffers && buffers.some((buffer) => buffer && !buffer.IsSound && buffer.Shader);
+        if (!hasVisualBuffers) {
+            if (lastHadVisualBuffers) {
+                renderer.setRenderTarget(null);
+                renderer.clear();
+            }
+            lastHadVisualBuffers = false;
+            return;
+        }
+        lastHadVisualBuffers = true;
 
         for (let buffer of buffers) {
             if (buffer.IsSound || !buffer.Shader || failedBufferNames.has(buffer.Name)) {

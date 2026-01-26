@@ -23,7 +23,9 @@
         stream: {
             active: false,
             nextBlock: 0,
-            blockSamples: 512 * 512
+            blockSamples: 512 * 512,
+            renderedBlocks: 0,
+            lastNeed: 0
         },
         analysis: {
             enabled: true,
@@ -38,6 +40,8 @@
         analyserNodes: [],
         soundBuffer: null,
         soundBuffers: [],
+        precisionDetails: null,
+        debugDetails: [],
         ready: false,
         pendingStartAt: null,
         gestureHandlerAttached: false,
@@ -172,24 +176,70 @@
         }
         if (!state.audioContext || !state.audioContext.audioWorklet) {
             state.workletFailed = true;
+            setStats('Worklet: unavailable (no audioWorklet)');
             return;
         }
         const url = options && options.audioWorkletUrl ? String(options.audioWorkletUrl) : '';
         if (!url) {
             state.workletFailed = true;
+            setStats('Worklet: missing module URL');
             return;
         }
         state.workletLoading = true;
-        state.audioContext.audioWorklet.addModule(url).then(() => {
+        setStats('Worklet: loading module');
+        const loadModule = async () => {
+            const inline = global.document ? global.document.getElementById('audio-worklet-source') : null;
+            if (inline && inline.textContent) {
+                const blob = new Blob([inline.textContent], { type: 'application/javascript' });
+                const blobUrl = URL.createObjectURL(blob);
+                try {
+                    await state.audioContext.audioWorklet.addModule(blobUrl);
+                    return;
+                } finally {
+                    URL.revokeObjectURL(blobUrl);
+                }
+            }
+
             try {
-                state.workletNode = new global.AudioWorkletNode(state.audioContext, 'shadertoy-stream');
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const code = await response.text();
+                const blob = new Blob([code], { type: 'application/javascript' });
+                const blobUrl = URL.createObjectURL(blob);
+                try {
+                    await state.audioContext.audioWorklet.addModule(blobUrl);
+                } finally {
+                    URL.revokeObjectURL(blobUrl);
+                }
+            } catch (e) {
+                // Fall back to direct URL load.
+                await state.audioContext.audioWorklet.addModule(url);
+            }
+        };
+
+        loadModule().then(() => {
+            try {
+                state.workletNode = new global.AudioWorkletNode(state.audioContext, 'shadertoy-stream', {
+                    numberOfInputs: 1,
+                    numberOfOutputs: 1,
+                    outputChannelCount: [2],
+                    channelCount: 2,
+                    channelCountMode: 'explicit',
+                    channelInterpretation: 'speakers'
+                });
                 state.workletReady = true;
+                setStats('Worklet: ready');
                 setupWorkletPort();
             } catch {
                 state.workletFailed = true;
+                setStats('Worklet: failed to create node');
             }
-        }).catch(() => {
+        }).catch((err) => {
             state.workletFailed = true;
+            postErrorMessage(`AudioWorklet failed to load: ${err && err.message ? err.message : String(err)}`);
+            setStats('Worklet: module load failed');
         }).finally(() => {
             state.workletLoading = false;
             connectOutput();
@@ -208,10 +258,18 @@
     };
 
     const resolvePrecision = function (options) {
-        const precision = String(options.precision || '32bFLOAT');
+        const precisionRaw = String(options.precision || '32bFLOAT');
+        const precision = (precisionRaw === '32bFLOAT' || precisionRaw === '16bFLOAT' || precisionRaw === '16bPACK')
+            ? precisionRaw
+            : '32bFLOAT';
         const gl = options.gl;
-        const supportsFloat = gl && (gl.getExtension('EXT_color_buffer_float') || gl.getExtension('WEBGL_color_buffer_float'));
-        const supportsHalfFloat = gl && (gl.getExtension('EXT_color_buffer_half_float'));
+        const isWebGL2 = !!(options.glslUseVersion3 || (gl && (typeof global.WebGL2RenderingContext !== 'undefined') && (gl instanceof global.WebGL2RenderingContext)));
+
+        const extColorFloat = gl ? gl.getExtension('EXT_color_buffer_float') : null;
+        const extColorHalfFloat = gl ? gl.getExtension('EXT_color_buffer_half_float') : null;
+
+        const supportsFloat = isWebGL2 && !!extColorFloat;
+        const supportsHalfFloat = isWebGL2 && (!!extColorFloat || !!extColorHalfFloat);
 
         if (precision === '32bFLOAT' && supportsFloat) {
             return '32bFLOAT';
@@ -226,15 +284,28 @@
     };
 
     const reportPrecisionFallback = function (options, resolvedPrecision) {
-        const requested = String(options.precision || '32bFLOAT');
+        const requestedRaw = String(options.precision || '32bFLOAT');
+        const requested = (requestedRaw === '32bFLOAT' || requestedRaw === '16bFLOAT' || requestedRaw === '16bPACK')
+            ? requestedRaw
+            : '32bFLOAT';
         if (requested === resolvedPrecision) {
+            state.precisionDetails = null;
             return;
         }
         const gl = options.gl;
-        const supportsFloat = gl && (gl.getExtension('EXT_color_buffer_float') || gl.getExtension('WEBGL_color_buffer_float'));
-        const supportsHalfFloat = gl && (gl.getExtension('EXT_color_buffer_half_float'));
-        const details = `EXT_color_buffer_float=${supportsFloat ? 'yes' : 'no'}, EXT_color_buffer_half_float=${supportsHalfFloat ? 'yes' : 'no'}`;
+        const isWebGL2 = !!(options.glslUseVersion3 || (gl && (typeof global.WebGL2RenderingContext !== 'undefined') && (gl instanceof global.WebGL2RenderingContext)));
+
+        const hasExtColorFloat = !!(gl && gl.getExtension('EXT_color_buffer_float'));
+        const hasExtColorHalfFloat = !!(gl && gl.getExtension('EXT_color_buffer_half_float'));
+
+        const details = [
+            `webgl2=${isWebGL2 ? 'yes' : 'no'}`,
+            `EXT_color_buffer_float=${hasExtColorFloat ? 'yes' : 'no'}`,
+            `EXT_color_buffer_half_float=${hasExtColorHalfFloat ? 'yes' : 'no'}`
+        ].join(', ');
+        state.precisionDetails = `Precision fallback: ${requested} -> ${resolvedPrecision} (${details})`;
         postErrorMessage(`Audio precision '${requested}' not supported; using '${resolvedPrecision}'. (${details})`);
+        renderStatus();
     };
 
     const buildSoundMaterial = function (buffer, options, sampleRate, precisionMode) {
@@ -423,6 +494,12 @@
         }
         if (state.statsLine) {
             parts.push(state.statsLine);
+        }
+        if (state.precisionDetails) {
+            parts.push(state.precisionDetails);
+        }
+        if (state.debugDetails && state.debugDetails.length) {
+            parts.push(...state.debugDetails);
         }
         showStatus(parts.join('\n'));
     };
@@ -617,6 +694,37 @@
         };
         state.renderContexts.set(soundBuffer.Name, ctx);
         state.stream.blockSamples = samplesPerBlock;
+        try {
+            const typeName = (targetType === global.THREE.FloatType)
+                ? 'FloatType'
+                : (targetType === global.THREE.HalfFloatType)
+                    ? 'HalfFloatType'
+                    : 'UnsignedByteType';
+            let textureTypeName = 'unknown';
+            if (ctx.target && ctx.target.texture) {
+                const texType = ctx.target.texture.type;
+                if (texType === global.THREE.FloatType) {
+                    textureTypeName = 'FloatType';
+                } else if (texType === global.THREE.HalfFloatType) {
+                    textureTypeName = 'HalfFloatType';
+                } else if (texType === global.THREE.UnsignedByteType) {
+                    textureTypeName = 'UnsignedByteType';
+                } else {
+                    textureTypeName = String(texType);
+                }
+            }
+            const readbackType = (precisionMode === '16bPACK') ? 'Uint8Array' : 'Float32Array';
+            const bytesPerComponent = (precisionMode === '32bFLOAT') ? 4 : (precisionMode === '16bFLOAT' ? 2 : 1);
+            const targetBytes = WIDTH * HEIGHT * 4 * bytesPerComponent;
+            const audioBlockBytes = samplesPerBlock * 2 * 4;
+            state.debugDetails = [
+                `RT: precision ${precisionMode}, targetType ${typeName}, texture.type ${textureTypeName}`,
+                `Readback: ${readbackType}, RT bytes ${Math.round(targetBytes / 1024)} KB, block PCM bytes ${Math.round(audioBlockBytes / 1024)} KB`
+            ];
+            renderStatus();
+        } catch {
+            // ignore
+        }
         return ctx;
     };
 
@@ -667,6 +775,10 @@
     const resetStreaming = function () {
         state.stream.active = false;
         state.stream.nextBlock = 0;
+        state.stream.renderedBlocks = 0;
+        state.stream.lastNeed = 0;
+        state.statsLine = undefined;
+        renderStatus();
         if (state.workletNode) {
             try {
                 state.workletNode.port.postMessage({ type: 'reset' });
@@ -684,6 +796,8 @@
         const precisionMode = resolvePrecision(options);
         const soundBuffers = state.soundBuffers || [];
         const mixGain = soundBuffers.length > 0 ? 1 / soundBuffers.length : 1;
+        state.stream.lastNeed = count;
+        const blockSeconds = state.stream.blockSamples / state.audioContext.sampleRate;
         for (let i = 0; i < count; i++) {
             let mixedLeft = null;
             let mixedRight = null;
@@ -708,6 +822,7 @@
             }
 
             state.stream.nextBlock += 1;
+            state.stream.renderedBlocks += 1;
             try {
                 state.workletNode.port.postMessage(
                     { type: 'push', left: mixedLeft.buffer, right: mixedRight.buffer },
@@ -717,6 +832,11 @@
                 // ignore
             }
         }
+
+        const workletState = state.workletFailed
+            ? 'failed'
+            : (state.workletReady ? 'ready' : (state.workletLoading ? 'loading' : 'idle'));
+        setStats(`Streaming: block ${blockSeconds.toFixed(3)}s, rendered ${state.stream.renderedBlocks}, need ${state.stream.lastNeed}, sources ${soundBuffers.length}, precision ${precisionMode}, worklet ${workletState}`);
     };
 
     root.audioOutput.initFromGlobals = function (options) {
@@ -776,6 +896,7 @@
             renderAllBlocks(options);
         } else {
             resetStreaming();
+            setStats('Worklet: streaming enabled');
         }
         state.ready = true;
         state.started = false;
@@ -855,6 +976,7 @@
             renderAllBlocks(options);
         } else {
             resetStreaming();
+            setStats('Worklet: streaming enabled');
         }
         state.ready = true;
 

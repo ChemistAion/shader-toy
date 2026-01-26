@@ -46,17 +46,18 @@ export class ShaderToyManager {
             this.context.activeEditor = vscode.window.activeTextEditor;
         }
 
-        if (this.webviewPanel) {
-            this.webviewPanel.Panel.dispose();
+        if (!this.webviewPanel) {
+            const newWebviewPanel = this.createWebview('GLSL Preview', undefined);
+            this.webviewPanel = {
+                Panel: newWebviewPanel,
+                OnDidDispose: () => {
+                    this.webviewPanel = undefined;
+                }
+            };
+            newWebviewPanel.onDidDispose(this.webviewPanel.OnDidDispose);
+        } else {
+            this.webviewPanel.Panel.reveal(undefined, true);
         }
-        const newWebviewPanel = this.createWebview('GLSL Preview', undefined);
-        this.webviewPanel = {
-            Panel: newWebviewPanel,
-            OnDidDispose: () => {
-                this.webviewPanel = undefined;
-            }
-        };
-        newWebviewPanel.onDidDispose(this.webviewPanel.OnDidDispose);
         if (this.context.activeEditor !== undefined) {
             this.webviewPanel = await this.updateWebview(this.webviewPanel, this.context.activeEditor.document);
         }
@@ -170,13 +171,23 @@ export class ShaderToyManager {
     };
 
     private createWebview = (title: string, localResourceRoots: vscode.Uri[] | undefined) => {
-        if (localResourceRoots !== undefined) {
-            const extensionRoot = vscode.Uri.file(this.context.getVscodeExtensionContext().extensionPath);
-            localResourceRoots.push(extensionRoot);
+        const resourceRoots: vscode.Uri[] = [];
+        const extensionRoot = vscode.Uri.file(this.context.getVscodeExtensionContext().extensionPath);
+        resourceRoots.push(extensionRoot);
+        if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length) {
+            for (const folder of vscode.workspace.workspaceFolders) {
+                resourceRoots.push(folder.uri);
+            }
         }
-        const options: vscode.WebviewOptions = {
+        if (localResourceRoots && localResourceRoots.length) {
+            for (const root of localResourceRoots) {
+                resourceRoots.push(root);
+            }
+        }
+        const options: vscode.WebviewPanelOptions & vscode.WebviewOptions = {
             enableScripts: true,
-            localResourceRoots: localResourceRoots
+            localResourceRoots: removeDuplicates(resourceRoots.map((uri) => uri.toString())).map((uri) => vscode.Uri.parse(uri)),
+            retainContextWhenHidden: true
         };
         const newWebviewPanel = vscode.window.createWebviewPanel(
             'shadertoy',
@@ -348,21 +359,7 @@ export class ShaderToyManager {
         webviewPanel.LocalResources = removeDuplicates(allResources);
         webviewPanel.RootDocument = document;
 
-        // Recreate webview if allowed resource roots are not part of the current resource roots
-        const previousLocalResourceRoots = webviewPanel.Panel.webview.options.localResourceRoots || [];
-        const previousHadLocalResourceRoot = (localResourceRootAsUri: string) => {
-            const foundElement = previousLocalResourceRoots.find(uri => uri.toString() === localResourceRootAsUri);
-            return foundElement !== undefined;
-        };
-        const previousHadAllLocalResourceRoots = localResourceRoots.every(localResourceRoot => previousHadLocalResourceRoot(vscode.Uri.file(localResourceRoot).toString()));
-        if (!previousHadAllLocalResourceRoots) {
-            const localResourceRootsUri = localResourceRoots.map(localResourceRoot => vscode.Uri.file(localResourceRoot));
-            const newWebviewPanel = this.createWebview(webviewPanel.Panel.title, localResourceRootsUri);
-            webviewPanel.Panel.dispose();
-            newWebviewPanel.onDidDispose(webviewPanel.OnDidDispose);
-            webviewPanel.Panel = newWebviewPanel;
-            webviewPanel.HasHtml = false;
-        }
+        // Keep webview resource roots stable to preserve gesture state.
 
         if (webviewPanel.HasHtml) {
             const payload = await webviewContentProvider.generateHotReloadPayload(webviewPanel.Panel.webview, this.startingData);
