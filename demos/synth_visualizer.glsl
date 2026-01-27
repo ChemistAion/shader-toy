@@ -15,9 +15,8 @@
 // - Bottom half: left/right waveforms split by screen halves
 
 #iSound0 "file://synth/supersaw_iSound.glsl"
-// #iSound "file://synth/chords_iSound.glsl"
-// #iSound "file://synth/rain_iSound.glsl"
-#iChannel0 "sound0"
+#iSound1 "file://synth/rain_iSound.glsl"
+#iChannel0 "sound1"
 
 void mainImage( out vec4 fragColor, in vec2 fragCoord )
 {
