@@ -613,10 +613,14 @@ export class ShaderParser {
 
     private makeError(message: string): ErrorObject {
         const lastRange = this.lexer.getLastRange();
-        const lastRangeSize = lastRange.End - lastRange.Begin;
+        const rawRangeSize = lastRange.End - lastRange.Begin;
+        const lastRangeSize = Number.isFinite(rawRangeSize) ? Math.max(0, rawRangeSize) : 0;
         const currentColumn = this.stream.column();
-        const lastRangeColumn = currentColumn - lastRangeSize;
-        const lastRangeHighlight = `${' '.repeat(lastRangeColumn - 1)}^${'~'.repeat(lastRangeSize)}^`;
+        const lastRangeColumn = Number.isFinite(currentColumn)
+            ? Math.max(1, currentColumn - lastRangeSize)
+            : 1;
+        const padCount = Math.max(0, lastRangeColumn - 1);
+        const lastRangeHighlight = `${' '.repeat(padCount)}^${'~'.repeat(lastRangeSize)}^`;
         const error: ErrorObject = {
             Type: ObjectType.Error,
             Message: message + `\n${this.lexer.getCurrentLine()}\n${lastRangeHighlight}`

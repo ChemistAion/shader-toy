@@ -1054,6 +1054,7 @@ vec2 mainSound(float time) {
     }
     private showErrorAtLineAndMessage(file: string, message: string, line: number) {
         this.showErrorAtLine(file, message, line);
+        this.context.showErrorMessage(`${message} (${file}:${line})`);
         this.webviewErrors.push({ file, line, message });
     }
     private showWarningAtLine(file: string, message: string, line: number) {
