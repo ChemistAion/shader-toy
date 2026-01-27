@@ -130,6 +130,9 @@
     if (typeof acquireVsCodeApi === 'function') {
         vscode = acquireVsCodeApi();
     }
+    if (vscode) {
+        window.vscode = vscode;
+    }
     if (window.ShaderToy) {
         window.ShaderToy.reportErrorsInWebview = true;
     }

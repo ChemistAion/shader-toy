@@ -335,6 +335,9 @@ export class ShaderToyManager {
                 case 'errorMessage':
                     vscode.window.showErrorMessage(message.message);
                     return;
+                case 'infoMessage':
+                    vscode.window.showInformationMessage(message.message);
+                    return;
                 }
             },
             undefined,

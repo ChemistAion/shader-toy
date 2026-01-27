@@ -45,7 +45,8 @@
         ready: false,
         pendingStartAt: null,
         gestureHandlerAttached: false,
-        started: false
+        started: false,
+        autoplayNotified: false
     };
 
     root.audioOutput.state = state;
@@ -495,68 +496,43 @@
         return soundInput;
     };
 
-    const getStatusElement = function () {
-        if (!state.showStatus || !global.document || !global.document.body) {
-            return null;
-        }
-        let el = global.document.getElementById('audio-output-status');
-        if (!el) {
-            el = global.document.createElement('div');
-            el.id = 'audio-output-status';
-            el.style.position = 'absolute';
-            el.style.left = '8px';
-            el.style.bottom = '8px';
-            el.style.padding = '6px 8px';
-            el.style.fontFamily = 'Consolas, monospace';
-            el.style.fontSize = '12px';
-            el.style.background = 'rgba(0,0,0,0.65)';
-            el.style.color = '#ddd';
-            el.style.borderRadius = '4px';
-            el.style.whiteSpace = 'pre';
-            el.style.zIndex = '4';
-            global.document.body.appendChild(el);
-        }
-        return el;
-    };
-
-    const showStatus = function (message) {
-        const el = getStatusElement();
-        if (el) {
-            el.textContent = message;
-        }
-    };
-
     const renderStatus = function () {
-        const parts = [];
-        if (state.statusLine) {
-            parts.push(state.statusLine);
-        }
-        if (state.statsLine) {
-            parts.push(state.statsLine);
-        }
-        if (state.precisionDetails) {
-            parts.push(state.precisionDetails);
-        }
-        if (state.debugDetails && state.debugDetails.length) {
-            parts.push(...state.debugDetails);
-        }
-        showStatus(parts.join('\n'));
+        // Stats overlay intentionally disabled (kept only as stateful data).
     };
 
     const setStatus = function (message) {
         state.statusMessage = message;
         state.statusLine = message;
-        renderStatus();
     };
 
     const setStats = function (message) {
         state.statsLine = message;
-        renderStatus();
+    };
+
+    const getVscodeApi = function () {
+        try {
+            if (root.env && root.env.getVscodeApi) {
+                const api = root.env.getVscodeApi();
+                if (api) {
+                    return api;
+                }
+            }
+        } catch {
+            // ignore
+        }
+        try {
+            if (global.acquireVsCodeApi) {
+                return global.acquireVsCodeApi();
+            }
+        } catch {
+            // ignore
+        }
+        return global.vscode;
     };
 
     const postErrorMessage = function (message) {
         try {
-            const vscode = root.env && root.env.getVscodeApi ? root.env.getVscodeApi() : undefined;
+            const vscode = getVscodeApi();
             if (vscode && message) {
                 vscode.postMessage({ command: 'errorMessage', message: message });
             }
@@ -565,6 +541,17 @@
         }
         if (message) {
             setStatus(message);
+        }
+    };
+
+    const postInfoMessage = function (message) {
+        try {
+            const vscode = getVscodeApi();
+            if (vscode && message) {
+                vscode.postMessage({ command: 'infoMessage', message: message });
+            }
+        } catch {
+            // ignore
         }
     };
 
@@ -592,7 +579,12 @@
 
         attachGestureResume(startIfNeeded);
         global.addEventListener('focus', startIfNeeded, { once: true });
-        setStatus('Audio output is blocked (due to WebAudio autoplay gesture policy) until you provide a user action to the GLSL-preview.');
+        const autoplayMessage = 'Audio output is blocked (due to WebAudio autoplay gesture policy) until you provide a user action to the GLSL-preview.';
+        setStatus(autoplayMessage);
+        if (!state.autoplayNotified) {
+            state.autoplayNotified = true;
+            postInfoMessage(autoplayMessage);
+        }
     };
 
     const scheduleGestureStart = function (startAt, resumeAndStart) {
@@ -602,7 +594,12 @@
             state.pendingStartAt = null;
             resumeAndStart(pending ?? 0);
         });
-        setStatus('Audio output is blocked (due to WebAudio autoplay gesture policy) until you provide a user action to the GLSL-preview.');
+        const autoplayMessage = 'Audio output is blocked (due to WebAudio autoplay gesture policy) until you provide a user action to the GLSL-preview.';
+        setStatus(autoplayMessage);
+        if (!state.autoplayNotified) {
+            state.autoplayNotified = true;
+            postInfoMessage(autoplayMessage);
+        }
     };
 
     const renderAllBlocks = function (options) {
@@ -1066,7 +1063,12 @@
                         setStatus(`Audio: ${precisionMode} @ ${state.audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
                     }
                 }).catch(() => {
-                    setStatus('Audio output is blocked (due to WebAudio autoplay gesture policy) until you provide a user action to the GLSL-preview.');
+                    const autoplayMessage = 'Audio output is blocked (due to WebAudio autoplay gesture policy) until you provide a user action to the GLSL-preview.';
+                    setStatus(autoplayMessage);
+                    if (!state.autoplayNotified) {
+                        state.autoplayNotified = true;
+                        postInfoMessage(autoplayMessage);
+                    }
                 });
                 return;
             }
@@ -1108,7 +1110,12 @@
                     setStatus(`Audio: ${precisionMode} @ ${state.audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
                 }
             }).catch(() => {
-                setStatus('Audio output is blocked (due to WebAudio autoplay gesture policy) until you provide a user action to the GLSL-preview.');
+                const autoplayMessage = 'Audio output is blocked (due to WebAudio autoplay gesture policy) until you provide a user action to the GLSL-preview.';
+                setStatus(autoplayMessage);
+                if (!state.autoplayNotified) {
+                    state.autoplayNotified = true;
+                    postInfoMessage(autoplayMessage);
+                }
             });
         };
 
