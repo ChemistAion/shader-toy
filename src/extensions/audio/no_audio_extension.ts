@@ -12,6 +12,12 @@ var audioContext = (window.ShaderToy && window.ShaderToy.audioContext)
     };
 if (window.ShaderToy) {
     window.ShaderToy.audioContext = audioContext;
+}
+var audios = (window.ShaderToy && window.ShaderToy.audios)
+    ? window.ShaderToy.audios
+    : [];
+if (window.ShaderToy) {
+    window.ShaderToy.audios = audios;
 }`;
     }
 }

@@ -95,6 +95,44 @@
         }
     };
 
+    const rebuildAnalysisFromGlobals = function () {
+        if (!global.ShaderToy || !Array.isArray(global.ShaderToy.audios)) {
+            return;
+        }
+        if (!state.audioContext) {
+            return;
+        }
+        const analysisGain = ensureAnalysisGain();
+        const audios = global.ShaderToy.audios;
+        for (const audio of audios) {
+            const analyserLeft = audio && (audio.AnalyserLeft || audio.Analyser);
+            const analyserRight = audio && (audio.AnalyserRight || audio.Analyser);
+            if (!analyserLeft || !analyserRight) {
+                continue;
+            }
+
+            const splitter = state.audioContext.createChannelSplitter(2);
+            try {
+                splitter.connect(analyserLeft, 0);
+                splitter.connect(analyserRight, 1);
+            } catch {
+                // ignore
+            }
+            if (analysisGain) {
+                try {
+                    analyserLeft.connect(analysisGain);
+                    analyserRight.connect(analysisGain);
+                } catch {
+                    // ignore
+                }
+            }
+            state.analyserNodes.push(analyserLeft, analyserRight);
+            state.soundInputSplitters = state.soundInputSplitters || [];
+            state.soundInputSplitters.push(splitter);
+        }
+        reconnectAnalysisInputs();
+    };
+
     const connectOutput = function () {
         if (!state.audioContext || !state.gainNode) {
             return;
@@ -103,8 +141,8 @@
         if (state.workletNode && state.workletReady) {
             disconnectSafe(state.workletNode);
             try {
-                state.gainNode.connect(state.workletNode);
-                state.workletNode.connect(state.audioContext.destination);
+                state.workletNode.connect(state.gainNode);
+                state.gainNode.connect(state.audioContext.destination);
                 state.outputUsesWorklet = true;
                 reconnectAnalysisInputs();
                 return;
@@ -854,6 +892,10 @@
 
         const soundBuffers = options.buffers.filter((buffer) => buffer && buffer.IsSound);
         if (!soundBuffers.length) {
+            root.audioOutput.stop();
+            state.soundBuffers = [];
+            state.soundBuffer = null;
+            state.ready = false;
             return;
         }
         soundBuffers.sort((a, b) => {
@@ -877,6 +919,8 @@
         applyOutputGain();
         connectOutput();
         ensureWorklet(options);
+
+        rebuildAnalysisFromGlobals();
 
         const durationSeconds = Number.isFinite(options.durationSeconds) ? options.durationSeconds : 180;
         const totalSamples = Math.max(1, Math.floor(audioContext.sampleRate * durationSeconds));
@@ -930,6 +974,7 @@
             state.soundBuffer = null;
             state.ready = false;
             disposeRenderContext();
+            root.audioOutput.stop();
             return;
         }
         soundBuffers.sort((a, b) => {

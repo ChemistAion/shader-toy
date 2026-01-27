@@ -598,6 +598,7 @@
                     }
                 }
                 (0, eval)(payload.initScript);
+                computeSize();
             } catch (e) {
                 if (vscode) {
                     vscode.postMessage({

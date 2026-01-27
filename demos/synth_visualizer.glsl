@@ -14,10 +14,10 @@
 // - Top half: combined FFT (avg L+R)
 // - Bottom half: left/right waveforms split by screen halves
 
-#iSound "file://synth/supersaw_iSound.glsl"
+#iSound0 "file://synth/supersaw_iSound.glsl"
 // #iSound "file://synth/chords_iSound.glsl"
 // #iSound "file://synth/rain_iSound.glsl"
-#iChannel0 "sound"
+#iChannel0 "sound0"
 
 void mainImage( out vec4 fragColor, in vec2 fragCoord )
 {

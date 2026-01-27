@@ -583,9 +583,6 @@ export class WebviewContentProvider {
             this.webviewAssembler.addWebviewModule(audioInitExtension, '// Audio Init');
             textureInitExtension.addTextureContent(audioInitExtension);
 
-            const audioUpdateExtension = new AudioUpdateExtension();
-            this.webviewAssembler.addWebviewModule(audioUpdateExtension, '// Audio Update');
-
             const audioPauseExtension = new AudioPauseExtension();
             this.webviewAssembler.addWebviewModule(audioPauseExtension, '// Audio Pause');
 
@@ -596,6 +593,9 @@ export class WebviewContentProvider {
             const noAudioExtension = new NoAudioExtension();
             this.webviewAssembler.addWebviewModule(noAudioExtension, '// Audio Init');
         }
+
+        const audioUpdateExtension = new AudioUpdateExtension();
+        this.webviewAssembler.addWebviewModule(audioUpdateExtension, '// Audio Update');
 
         const audioOutputPrecision = this.context.getConfig<string>('audioOutputPrecision') || '32bFLOAT';
         const audioOutputPrecisionExtension = new AudioOutputPrecisionExtension(audioOutputPrecision);
