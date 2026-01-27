@@ -88,7 +88,8 @@ export type AudioDefinition = {
     LocalPath?: string,
     RemotePath?: string,
     UserPath: string,
-    FromSound?: boolean
+    FromSound?: boolean,
+    SoundIndex?: number
 };
 export type UniformDefinition = {
     Name: string,

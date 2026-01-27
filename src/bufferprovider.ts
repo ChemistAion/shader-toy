@@ -17,7 +17,9 @@ type InputTexture = {
     Channel: ChannelId,
     Local: boolean,
     UserPath: string,
-    Path: string
+    Path: string,
+    SoundIndex?: number,
+    Line?: number
 };
 type InputTextureSettings = {
     Mag?: Types.TextureMagFilter,
@@ -36,10 +38,16 @@ export class BufferProvider {
     private context: Context;
     private visitedFiles: string[];
     private soundFileIndices: Map<string, number[]>;
+    private webviewErrors: { file: string, line: number, message: string }[];
     constructor(context: Context) {
         this.context = context;
         this.visitedFiles = [];
         this.soundFileIndices = new Map<string, number[]>();
+        this.webviewErrors = [];
+    }
+
+    public getWebviewErrors(): { file: string, line: number, message: string }[] {
+        return this.webviewErrors.slice();
     }
 
     private registerSoundFile(index: number, file: string) {
@@ -299,12 +307,23 @@ export class BufferProvider {
             const local = pendingTexture.Local;
 
             const normalizedPath = depFile.trim().toLowerCase();
-            if (normalizedPath === 'sound' || normalizedPath.startsWith('sound://')) {
+            const soundMatch = normalizedPath.match(/^sound(?:\/\/)?(\d+)$/);
+            if (soundMatch) {
+                const soundIndex = Number(soundMatch[1]);
+                if (!Number.isFinite(soundIndex) || soundIndex < 0 || soundIndex > 9 || Math.floor(soundIndex) !== soundIndex) {
+                    this.showErrorAtLineAndMessage(file, '#iChannel sound index must be an integer in [0..9].', pendingTexture.Line ?? 1);
+                    continue;
+                }
                 audios.push({
                     Channel: channel,
-                    UserPath: userPath || 'sound',
-                    FromSound: true
+                    UserPath: userPath || `sound${soundIndex}`,
+                    FromSound: true,
+                    SoundIndex: soundIndex
                 });
+                continue;
+            }
+            if (normalizedPath === 'sound' || normalizedPath.startsWith('sound://')) {
+                this.showErrorAtLineAndMessage(file, '#iChannel requires explicit sound index (use "sound0" .. "sound9").', pendingTexture.Line ?? 1);
                 continue;
             }
 
@@ -618,22 +637,42 @@ vec2 mainSound(float time) {
 
             switch (nextObject.Type) {
             case ObjectType.Error:
-                this.showErrorAtLine(file, nextObject.Message, parser.line());
+                if (nextObject.Message && nextObject.Message.indexOf('iSound') >= 0) {
+                    this.showErrorAtLineAndMessage(file, nextObject.Message, parser.line());
+                }
+                else {
+                    this.showErrorAtLine(file, nextObject.Message, parser.line());
+                }
                 break;
             case ObjectType.Texture: {
+                const line = parser.line();
                 let userPath = nextObject.Path;
                 let textureFile: string;
                 let local = false;
 
                 const normalizedPath = userPath.trim().toLowerCase();
-                if (normalizedPath === 'sound' || normalizedPath.startsWith('sound://')) {
+                const soundMatch = normalizedPath.match(/^sound(?:\/\/)?(\d+)$/);
+                if (soundMatch) {
+                    const soundIndex = Number(soundMatch[1]);
+                    if (!Number.isFinite(soundIndex) || soundIndex < 0 || soundIndex > 9 || Math.floor(soundIndex) !== soundIndex) {
+                        this.showErrorAtLineAndMessage(file, '#iChannel sound index must be an integer in [0..9].', line);
+                        removeLastObject();
+                        break;
+                    }
                     const texture: InputTexture = {
                         Channel: nextObject.Index,
                         Local: true,
-                        UserPath: 'sound',
-                        Path: 'sound'
+                        UserPath: userPath,
+                        Path: `sound${soundIndex}`,
+                        SoundIndex: soundIndex,
+                        Line: line
                     };
                     textures.push(texture);
+                    removeLastObject();
+                    break;
+                }
+                if (normalizedPath === 'sound' || normalizedPath.startsWith('sound://')) {
+                    this.showErrorAtLineAndMessage(file, '#iChannel requires explicit sound index (use "sound0" .. "sound9").', line);
                     removeLastObject();
                     break;
                 }
@@ -669,7 +708,8 @@ vec2 mainSound(float time) {
                     Channel: nextObject.Index,
                     Local: local,
                     UserPath: userPath,
-                    Path: textureFile
+                    Path: textureFile,
+                    Line: line
                 };
                 textures.push(texture);
                 removeLastObject();
@@ -863,9 +903,15 @@ vec2 mainSound(float time) {
                     break;
                 }
 
-                const soundIndex = Number.isFinite(nextObject.Index) ? nextObject.Index : 0;
+                if (!Number.isFinite(nextObject.Index)) {
+                    this.showErrorAtLineAndMessage(file, '#iSound requires an explicit index in [0..9] (use #iSound0 .. #iSound9).', line);
+                    removeLastObject();
+                    break;
+                }
+
+                const soundIndex = nextObject.Index;
                 if (soundIndex < 0 || soundIndex > 9 || Math.floor(soundIndex) !== soundIndex) {
-                    this.showErrorAtLine(file, `#iSound index must be an integer in [0..9], got "${nextObject.Index}".`, line);
+                    this.showErrorAtLineAndMessage(file, `#iSound index must be an integer in [0..9], got "${nextObject.Index}".`, line);
                     removeLastObject();
                     break;
                 }
@@ -875,11 +921,17 @@ vec2 mainSound(float time) {
                 soundShaderFiles.set(soundIndex, soundShaderFile);
                 soundShaderLines.set(soundIndex, soundShaderLine);
 
+                if (soundShaderLine.Value !== undefined) {
+                    this.showErrorAtLineAndMessage(file, `#iSound${soundIndex} was specified multiple times.`, line);
+                    removeLastObject();
+                    break;
+                }
+
                 let userPath = nextObject.Path;
                 const normalized = userPath.replace('file://', '');
                 if (normalized === 'default') {
                     soundShaderFile.Value = undefined;
-                    soundShaderLine.Value = undefined;
+                    soundShaderLine.Value = line;
                     removeLastObject();
                     break;
                 }
@@ -915,10 +967,6 @@ vec2 mainSound(float time) {
                     this.showErrorAtLine(file, `#iSound expects a .glsl file, got "${userPath}"`, line);
                     removeLastObject();
                     break;
-                }
-
-                if (soundShaderFile.Value !== undefined) {
-                    this.showWarningAtLine(file, '#iSound was specified multiple times; the last one wins.', line);
                 }
 
                 soundShaderFile.Value = mappedSoundFile;
@@ -1003,6 +1051,10 @@ vec2 mainSound(float time) {
     }
     private showErrorAtLine(file: string, message: string, line: number) {
         this.showDiagnosticAtLine(file, message, line, vscode.DiagnosticSeverity.Error);
+    }
+    private showErrorAtLineAndMessage(file: string, message: string, line: number) {
+        this.showErrorAtLine(file, message, line);
+        this.webviewErrors.push({ file, line, message });
     }
     private showWarningAtLine(file: string, message: string, line: number) {
         this.showDiagnosticAtLine(file, message, line, vscode.DiagnosticSeverity.Warning);

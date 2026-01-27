@@ -398,7 +398,7 @@
         return state.analysisGain;
     };
 
-    root.audioOutput.createSoundInput = function (fftSize) {
+    root.audioOutput.createSoundInput = function (fftSize, soundIndex) {
         if (!state.audioContext || !state.soundBuffers || !state.soundBuffers.length || !global.THREE) {
             return null;
         }
@@ -441,7 +441,7 @@
             }
         }
 
-        return {
+        const soundInput = {
             AnalyserLeft: analyserLeft,
             AnalyserRight: analyserRight,
             Data: dataArray,
@@ -454,6 +454,7 @@
             TimeDataRight: timeRight,
             Texture: texture
         };
+        return soundInput;
     };
 
     const getStatusElement = function () {

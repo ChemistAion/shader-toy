@@ -36,7 +36,7 @@ export class AudioInitExtension implements WebviewExtension, TextureExtensionExt
                         if (!window.ShaderToy || !window.ShaderToy.audioOutput || !window.ShaderToy.audioOutput.createSoundInput) {
                             return false;
                         }
-                        const soundInput = window.ShaderToy.audioOutput.createSoundInput(${fftSize});
+                        const soundInput = window.ShaderToy.audioOutput.createSoundInput(${fftSize}, ${audio.SoundIndex !== undefined ? audio.SoundIndex : 'undefined'});
                         if (!soundInput) {
                             return false;
                         }
@@ -56,7 +56,8 @@ export class AudioInitExtension implements WebviewExtension, TextureExtensionExt
                             FrequencyDataRight: soundInput.FrequencyDataRight,
                             TimeDataLeft: soundInput.TimeDataLeft,
                             TimeDataRight: soundInput.TimeDataRight,
-                            Texture: soundInput.Texture
+                            Texture: soundInput.Texture,
+                            SoundIndex: ${audio.SoundIndex !== undefined ? audio.SoundIndex : 'undefined'}
                         });
 
                         return true;

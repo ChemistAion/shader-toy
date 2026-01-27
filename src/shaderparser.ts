@@ -150,12 +150,17 @@ export class ShaderParser {
         default:
             if (tokenValue.indexOf('iSound') === 0) {
                 const indexText = tokenValue.substring('iSound'.length);
-                const index = indexText.length === 0 ? 0 : Number(indexText);
-                if ((indexText.length > 0 && !/^[0-9]+$/.test(indexText)) || !Number.isFinite(index)) {
-                    returnObject = this.makeError(`Invalid iSound index "${indexText}"`);
+                if (indexText.length === 0) {
+                    returnObject = this.makeError('iSound requires an explicit index in [0..9] (use #iSound0 .. #iSound9).');
                 }
                 else {
-                    returnObject = this.getSound(index);
+                    const index = Number(indexText);
+                    if (!/^[0-9]+$/.test(indexText) || !Number.isFinite(index)) {
+                        returnObject = this.makeError(`Invalid iSound index "${indexText}"`);
+                    }
+                    else {
+                        returnObject = this.getSound(index);
+                    }
                 }
                 break;
             }

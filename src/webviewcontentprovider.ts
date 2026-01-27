@@ -99,6 +99,7 @@ export class WebviewContentProvider {
 
     private buffers: Types.BufferDefinition[];
     private commonIncludes: Types.IncludeDefinition[];
+    private webviewErrors: { file: string, line: number, message: string }[];
 
     constructor(context: Context, documentContent: string, documentName: string) {
         this.context = context;
@@ -108,6 +109,55 @@ export class WebviewContentProvider {
 
         this.buffers = [];
         this.commonIncludes = [];
+        this.webviewErrors = [];
+    }
+
+    private buildDirectiveErrorScript(): string {
+        if (!this.webviewErrors || this.webviewErrors.length === 0) {
+            return '';
+        }
+
+        const errorsJson = JSON.stringify(this.webviewErrors);
+        return `
+(() => {
+    const directiveErrors = ${errorsJson};
+    if (!directiveErrors || directiveErrors.length === 0) {
+        return;
+    }
+    const messageElement = document.getElementById('message');
+    if (!messageElement) {
+        return;
+    }
+    messageElement.innerHTML = '';
+    const header = document.createElement('h3');
+    header.textContent = 'Shader directive errors';
+    messageElement.appendChild(header);
+    const list = document.createElement('ul');
+    for (const err of directiveErrors) {
+        const li = document.createElement('li');
+        const lineNumber = Number(err.line);
+        const hasLine = Number.isFinite(lineNumber) && lineNumber >= 1;
+        if (hasLine && err.file) {
+            const link = document.createElement('a');
+            link.className = 'error';
+            link.setAttribute('unselectable', 'on');
+            link.textContent = 'Line ' + lineNumber;
+            link.onclick = () => {
+                try {
+                    revealError(lineNumber, err.file);
+                } catch { /* ignore */ }
+            };
+            li.appendChild(link);
+            li.appendChild(document.createTextNode(': ' + String(err.message) + ' (' + String(err.file) + ')'));
+        }
+        else {
+            li.textContent = String(err.message);
+        }
+        list.appendChild(li);
+    }
+    messageElement.appendChild(list);
+})();
+`;
     }
 
     public async generateHotReloadPayload(webview: vscode.Webview | undefined, startingState: Types.RenderStartingData): Promise<Types.HotReloadPayload> {
@@ -246,6 +296,11 @@ export class WebviewContentProvider {
             flyControlRotation: startingState.FlyControlRotation
         };
 
+        const directiveErrorScript = this.buildDirectiveErrorScript();
+        if (directiveErrorScript) {
+            initScriptParts.push(directiveErrorScript);
+        }
+
         return {
             shadersHtml: shadersExtension.generateContent(),
             includesHtml: includesExtension.generateContent(),
@@ -265,6 +320,7 @@ export class WebviewContentProvider {
             {
                 const buffer_provider = new BufferProvider(this.context);
                 await buffer_provider.parseShaderCode(shaderName, shader, this.buffers, this.commonIncludes, generateStandalone);
+                this.webviewErrors = buffer_provider.getWebviewErrors();
             }
 
             // If final visual buffer uses feedback we need to add a last pass that renders it to the screen
@@ -712,6 +768,14 @@ export class WebviewContentProvider {
         }
         else {
             errorsExtension = new DefaultErrorsExtension();
+        }
+
+        const directiveErrorScript = this.buildDirectiveErrorScript();
+        if (directiveErrorScript) {
+            const directiveErrorsExtension: WebviewExtension = {
+                generateContent: () => directiveErrorScript
+            };
+            this.webviewAssembler.addWebviewModule(directiveErrorsExtension, '// Error Callback');
         }
 
         if (glslVersionSetting === 'WebGL2') {
