@@ -1,23 +1,23 @@
-// Conceptual demo showcasing sampling helper math for future iSample/iAudioTime.
-// NOTE: This will not run until iSample + ring-buffer sampling is implemented.
+// Demo showcasing iSample bindings and sample-index math.
+// NOTE: sampleSound(...) is still a conceptual helper; only iSampleN bindings are implemented.
 //
-// Assumed globals (proposal):
+// Available globals:
 //   iAudioTime (float), iSampleRate (float)
 //   iSampleBlockSize (int), iSampleRingDepth (int)
 //
-// Assumed directive:
+// Implemented directive:
 //   #iSample0 s0 -> vec2 current sample from sound0
 //
-// Assumed helper to sample arbitrary offsets from ring buffer:
+// Optional helper idea (not implemented yet):
 //   vec2 sampleSound(int soundIndex, int sampleIndexAbsolute);
-//
-// Sound source to be sampled (conceptual)
+
+// Sound source to be sampled
 #iSound0 "file://synth/supersaw_iSound.glsl"
 
-// Proposed direct sample binding (current sample at iAudioTime)
+// Direct sample binding (current sample at iAudioTime)
 #iSample0 s0
 
-// NOTE: sampleSound(...) is conceptual; see design report in audioworklet.md.
+// Placeholder for future helper; see audioworklet.md for design notes.
 vec2 sampleSound(int soundIndex, int sampleIndexAbsolute);
 
 int stSampleIndexFromTime(float t) {
@@ -44,15 +44,15 @@ vec2 stSampleLerp(vec2 a, vec2 b, float t) {
     return mix(a, b, clamp(t, 0.0, 1.0));
 }
 
-vec2 mainSound(int sample, float time) {
+vec2 mainSound(int sampleIndex, float sampleTime) {
     vec2 dry = s0;
 
-    // Undersampling: every 4th sample.
-    int undersampleIndex = sample / 4;
+    // Undersampling: every 4th sample (conceptual).
+    int undersampleIndex = sampleIndex / 4;
     vec2 undersampled = sampleSound(0, undersampleIndex);
 
-    // Supersampling: linear interpolation between adjacent samples.
-    float sampleFloat = float(sample);
+    // Supersampling: linear interpolation between adjacent samples (conceptual).
+    float sampleFloat = float(sampleIndex);
     int sampleBase = int(floor(sampleFloat));
     float frac = sampleFloat - float(sampleBase);
     vec2 sA = sampleSound(0, sampleBase);

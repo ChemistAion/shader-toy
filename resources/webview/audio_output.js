@@ -439,14 +439,16 @@
             return null;
         }
 
+        const samplesPerBlock = 512 * 512;
+
         const footer = (precisionMode === '16bPACK') ? `
     uniform float blockOffset;
 
     void main() {
-    float t = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0) / iSampleRate;
+    float sampleTime = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0) / iSampleRate;
     float sampleIndex = (blockOffset * iSampleRate) + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0);
-    int sample = int(sampleIndex);
-    vec2 y = mainSound(sample, t);
+    int sampleIndexInt = int(sampleIndex);
+    vec2 y = mainSound(sampleIndexInt, sampleTime);
     vec2 v  = floor((0.5 + 0.5 * y) * 65536.0);
     vec2 vl = mod(v, 256.0) / 255.0;
     vec2 vh = floor(v / 256.0) / 255.0;
@@ -455,10 +457,10 @@
     uniform float blockOffset;
 
     void main() {
-    float t = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0) / iSampleRate;
+    float sampleTime = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0) / iSampleRate;
     float sampleIndex = (blockOffset * iSampleRate) + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0);
-    int sample = int(sampleIndex);
-    vec2 y = mainSound(sample, t);
+    int sampleIndexInt = int(sampleIndex);
+    vec2 y = mainSound(sampleIndexInt, sampleTime);
     GLSL_FRAGCOLOR = vec4(y, 0.0, 1.0);
 }`;
 

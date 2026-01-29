@@ -499,14 +499,14 @@ void main() {
 
             if (usesMainSound && hasMainSoundInt && !hasMainSoundFloat) {
                 code += `
-vec2 mainSound(float time) {
-    return mainSound(0, time);
+vec2 mainSound(float sampleTime) {
+    return mainSound(0, sampleTime);
 }`;
             }
             if (usesMainSound && hasMainSoundFloat && !hasMainSoundInt) {
                 code += `
-vec2 mainSound(int sample, float time) {
-    return mainSound(time);
+vec2 mainSound(int sampleIndex, float sampleTime) {
+    return mainSound(sampleTime);
 }`;
             }
 

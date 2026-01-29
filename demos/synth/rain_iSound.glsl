@@ -30,26 +30,26 @@ float distort(float x, float time) {
     return sign(x) * mix(a, b, cos(time * 0.5) * 0.5 + 0.5);
 }
 
-vec2 mainSound(float time) {
+vec2 mainSound(float sampleTime) {
     
     vec2 result = vec2(0.0);
     
     // Lightning
-    float amplitude = min(1.0, exp(mod(time - 1.0, 6.0) * -0.5));
-    result.x += coloredNoise(time, 20.0, 500.0) * amplitude;
-    result.y += coloredNoise(time + 1.5, 20.0, 500.0) * amplitude;
+    float amplitude = min(1.0, exp(mod(sampleTime - 1.0, 6.0) * -0.5));
+    result.x += coloredNoise(sampleTime, 20.0, 500.0) * amplitude;
+    result.y += coloredNoise(sampleTime + 1.5, 20.0, 500.0) * amplitude;
     
     // Low frequency rumble
-    result.x += coloredNoise(time, 100.0, 1000.0) * 0.3;
-    result.y += coloredNoise(time + 1.5, 100.0, 1000.0) * 0.3;
+    result.x += coloredNoise(sampleTime, 100.0, 1000.0) * 0.3;
+    result.y += coloredNoise(sampleTime + 1.5, 100.0, 1000.0) * 0.3;
     
     // Mid frequency rumble
-    result.x += coloredNoise(time, 700.0, 2000.0) * 0.05;
-    result.y += coloredNoise(time + 1.5, 700.0, 2000.0) * 0.05;
+    result.x += coloredNoise(sampleTime, 700.0, 2000.0) * 0.05;
+    result.y += coloredNoise(sampleTime + 1.5, 700.0, 2000.0) * 0.05;
     
     // Distorted noise for rain
-    result.x += distort(coloredNoise(time, 120.0, 2000.0), time) * 0.25;
-    result.y += distort(coloredNoise(time + 1.5, 120.0, 2000.0), time) * 0.25;
+    result.x += distort(coloredNoise(sampleTime, 120.0, 2000.0), sampleTime) * 0.25;
+    result.y += distort(coloredNoise(sampleTime + 1.5, 120.0, 2000.0), sampleTime) * 0.25;
     
     return result;
 }

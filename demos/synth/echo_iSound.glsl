@@ -22,17 +22,17 @@
 // NOTE: sampleSound(...) is conceptual; see design report in audioworklet.md.
 vec2 sampleSound(int soundIndex, int sampleIndexAbsolute);
 
-vec2 mainSound(int sample, float time) {
+vec2 mainSound(int sampleIndex, float sampleTime) {
     // Dry signal from current sample
     vec2 dry = s0;
 
     // Simple echo: 250 ms delay
     int delaySamples = int(0.25 * iSampleRate);
-    vec2 echo = sampleSound(0, sample - delaySamples);
+    vec2 echo = sampleSound(0, sampleIndex - delaySamples);
 
     // 2nd tap: 500 ms delay, attenuated
     int delaySamples2 = int(0.50 * iSampleRate);
-    vec2 echo2 = sampleSound(0, sample - delaySamples2) * 0.5;
+    vec2 echo2 = sampleSound(0, sampleIndex - delaySamples2) * 0.5;
 
     // Mix
     vec2 wet = dry + echo * 0.6 + echo2 * 0.3;
