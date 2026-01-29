@@ -677,6 +677,18 @@
         // Audio Update
 
         const audioTimeUniform = (typeof audioTime === 'number' && isFinite(audioTime)) ? audioTime : time;
+        let sampleBlockSizeUniform = 0;
+        let sampleRingDepthUniform = 0;
+        if (window.ShaderToy && window.ShaderToy.audioOutput) {
+            if (window.ShaderToy.audioOutput.getSampleBlockSize) {
+                const value = window.ShaderToy.audioOutput.getSampleBlockSize();
+                sampleBlockSizeUniform = Number.isFinite(value) ? value : 0;
+            }
+            if (window.ShaderToy.audioOutput.getSampleRingDepth) {
+                const value = window.ShaderToy.audioOutput.getSampleRingDepth();
+                sampleRingDepthUniform = Number.isFinite(value) ? value : 0;
+            }
+        }
 
         const hasVisualBuffers = buffers && buffers.some((buffer) => buffer && !buffer.IsSound && buffer.Shader);
         if (!hasVisualBuffers) {
@@ -698,6 +710,12 @@
             buffer.Shader.uniforms['iTime'].value = time;
             if (buffer.Shader.uniforms['iAudioTime']) {
                 buffer.Shader.uniforms['iAudioTime'].value = audioTimeUniform;
+            }
+            if (buffer.Shader.uniforms['iSampleBlockSize']) {
+                buffer.Shader.uniforms['iSampleBlockSize'].value = sampleBlockSizeUniform;
+            }
+            if (buffer.Shader.uniforms['iSampleRingDepth']) {
+                buffer.Shader.uniforms['iSampleRingDepth'].value = sampleRingDepthUniform;
             }
             buffer.Shader.uniforms['iFrame'].value = frameCounter;
             buffer.Shader.uniforms['iMouse'].value = mouse;

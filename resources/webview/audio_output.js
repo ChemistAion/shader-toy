@@ -27,6 +27,10 @@
             renderedBlocks: 0,
             lastNeed: 0
         },
+        sampleRing: new Map(),
+        sampleRingDepth: 4,
+        sampleRingBlockWidth: 512,
+        sampleRingBlockHeight: 512,
         analysis: {
             enabled: true,
             windowSize: 2048,
@@ -207,6 +211,14 @@
         }
         const now = state.audioContext.currentTime;
         return state.transportStartTime + Math.max(0, now - state.transportStartContextTime);
+    };
+
+    root.audioOutput.getSampleBlockSize = function () {
+        return state.stream.blockSamples || (512 * 512);
+    };
+
+    root.audioOutput.getSampleRingDepth = function () {
+        return state.sampleRingDepth || 0;
     };
 
     const ensureWorklet = function (options) {
@@ -394,8 +406,8 @@
             uniforms: {
                 iSampleRate: { type: 'f', value: sampleRate },
                 iAudioTime: { type: 'f', value: 0 },
-                iSampleBlockSize: { type: 'i', value: 512 * 512 },
-                iSampleRingDepth: { type: 'i', value: 0 },
+                iSampleBlockSize: { type: 'i', value: samplesPerBlock },
+                iSampleRingDepth: { type: 'i', value: state.sampleRingDepth || 0 },
                 blockOffset: { type: 'f', value: 0 }
             }
         };
@@ -771,6 +783,70 @@
         return ctx;
     };
 
+    const ensureSampleRing = function (soundBufferName) {
+        if (!global.THREE || !soundBufferName) {
+            return null;
+        }
+        const existing = state.sampleRing.get(soundBufferName);
+        if (existing) {
+            return existing;
+        }
+
+        const ringDepth = Math.max(1, Math.floor(state.sampleRingDepth || 4));
+        const blockWidth = state.sampleRingBlockWidth || 512;
+        const blockHeight = state.sampleRingBlockHeight || 512;
+        const width = blockWidth;
+        const height = blockHeight * ringDepth;
+        const data = new Float32Array(width * height * 4);
+        const texture = new global.THREE.DataTexture(data, width, height, global.THREE.RGBAFormat, global.THREE.FloatType);
+        texture.magFilter = global.THREE.LinearFilter;
+        texture.minFilter = global.THREE.LinearFilter;
+        texture.needsUpdate = true;
+
+        const ring = {
+            name: soundBufferName,
+            ringDepth,
+            blockWidth,
+            blockHeight,
+            width,
+            height,
+            data,
+            texture,
+            writeIndex: 0
+        };
+        state.sampleRing.set(soundBufferName, ring);
+        return ring;
+    };
+
+    const writeSampleRing = function (soundBufferName, blockIndex, left, right) {
+        const ring = ensureSampleRing(soundBufferName);
+        if (!ring || !left || !right) {
+            return;
+        }
+        const ringSlot = Math.max(0, Math.floor(blockIndex)) % ring.ringDepth;
+        const rowOffset = ringSlot * ring.blockHeight;
+        const width = ring.width;
+        const blockWidth = ring.blockWidth;
+        const blockHeight = ring.blockHeight;
+        const data = ring.data;
+
+        for (let j = 0; j < left.length; j++) {
+            const x = j % blockWidth;
+            const y = Math.floor(j / blockWidth);
+            if (y >= blockHeight) {
+                break;
+            }
+            const outY = rowOffset + y;
+            const idx = (outY * width + x) * 4;
+            data[idx + 0] = left[j];
+            data[idx + 1] = right[j];
+            data[idx + 2] = 0;
+            data[idx + 3] = 1;
+        }
+        ring.writeIndex = blockIndex;
+        ring.texture.needsUpdate = true;
+    };
+
     const renderSoundBlock = function (blockIndex, options, precisionMode, soundBuffer) {
         const ctx = getRenderContext(options, precisionMode, soundBuffer);
         if (!ctx) {
@@ -814,6 +890,8 @@
             }
         }
 
+        writeSampleRing(soundBuffer.Name, blockIndex, left, right);
+
         global.currentShader = previousShader;
         return { left, right };
     };
@@ -830,6 +908,20 @@
                 state.workletNode.port.postMessage({ type: 'reset' });
             } catch {
                 // ignore
+            }
+        }
+    };
+
+    const resetSampleRings = function () {
+        if (!state.sampleRing || state.sampleRing.size === 0) {
+            return;
+        }
+        for (const ring of state.sampleRing.values()) {
+            if (ring && ring.data) {
+                ring.data.fill(0);
+            }
+            if (ring && ring.texture) {
+                ring.texture.needsUpdate = true;
             }
         }
     };
@@ -913,6 +1005,7 @@
         state.soundBuffers = soundBuffers;
         state.soundBuffer = soundBuffers[0] || null;
         disposeRenderContext();
+        state.sampleRing = new Map();
 
         const audioContext = resolveAudioContext(options.audioContext);
         if (!audioContext) {
@@ -943,6 +1036,7 @@
         reportPrecisionFallback(options, precisionMode);
         const blockSeconds = (512 * 512) / state.audioContext.sampleRate;
         setStatus(`Audio: ${precisionMode} @ ${state.audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
+        resetSampleRings();
 
         if (!state.workletReady || state.workletFailed) {
             renderAllBlocks(options);
@@ -992,6 +1086,7 @@
         state.soundBuffers = soundBuffers;
         state.soundBuffer = soundBuffers[0] || null;
         disposeRenderContext();
+        state.sampleRing = new Map();
 
         const audioContext = state.audioContext || resolveAudioContext(options.audioContext);
         if (!audioContext) {
@@ -1024,6 +1119,7 @@
         reportPrecisionFallback(options, precisionMode);
         const blockSeconds = (512 * 512) / audioContext.sampleRate;
         setStatus(`Audio: ${precisionMode} @ ${audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
+        resetSampleRings();
 
         if (!state.workletReady || state.workletFailed) {
             renderAllBlocks(options);
