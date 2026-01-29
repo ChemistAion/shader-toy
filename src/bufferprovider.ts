@@ -488,6 +488,12 @@ vec2 mainSound(float time) {
     return mainSound(0, time);
 }`;
             }
+            if (usesMainSound && hasMainSoundFloat && !hasMainSoundInt) {
+                code += `
+vec2 mainSound(int sample, float time) {
+    return mainSound(time);
+}`;
+            }
 
             const needsMainWrapper = (mainPos === -1);
             const hasMainImage = (mainImagePos >= 0);

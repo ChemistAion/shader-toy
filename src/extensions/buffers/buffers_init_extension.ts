@@ -70,6 +70,9 @@ buffers.push({
 
             iDate: { type: 'v4', value: date },
             iSampleRate: { type: 'f', value: audioContext.sampleRate },
+            iAudioTime: { type: 'f', value: 0.0 },
+            iSampleBlockSize: { type: 'i', value: 512 * 512 },
+            iSampleRingDepth: { type: 'i', value: 0 },
 
             iChannel0: { type: 't' },
             iChannel1: { type: 't' },

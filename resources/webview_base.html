@@ -676,6 +676,8 @@
 
         // Audio Update
 
+        const audioTimeUniform = (typeof audioTime === 'number' && isFinite(audioTime)) ? audioTime : time;
+
         const hasVisualBuffers = buffers && buffers.some((buffer) => buffer && !buffer.IsSound && buffer.Shader);
         if (!hasVisualBuffers) {
             if (lastHadVisualBuffers) {
@@ -694,6 +696,9 @@
             buffer.Shader.uniforms['iResolution'].value = resolution;
             buffer.Shader.uniforms['iTimeDelta'].value = deltaTime;
             buffer.Shader.uniforms['iTime'].value = time;
+            if (buffer.Shader.uniforms['iAudioTime']) {
+                buffer.Shader.uniforms['iAudioTime'].value = audioTimeUniform;
+            }
             buffer.Shader.uniforms['iFrame'].value = frameCounter;
             buffer.Shader.uniforms['iMouse'].value = mouse;
             buffer.Shader.uniforms['iMouseButton'].value = mouseButton;

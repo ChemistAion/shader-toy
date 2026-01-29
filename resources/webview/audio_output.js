@@ -362,7 +362,9 @@
 
     void main() {
     float t = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0) / iSampleRate;
-    vec2 y = mainSound(t);
+    float sampleIndex = (blockOffset * iSampleRate) + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0);
+    int sample = int(sampleIndex);
+    vec2 y = mainSound(sample, t);
     vec2 v  = floor((0.5 + 0.5 * y) * 65536.0);
     vec2 vl = mod(v, 256.0) / 255.0;
     vec2 vh = floor(v / 256.0) / 255.0;
@@ -372,7 +374,9 @@
 
     void main() {
     float t = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0) / iSampleRate;
-    vec2 y = mainSound(t);
+    float sampleIndex = (blockOffset * iSampleRate) + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0);
+    int sample = int(sampleIndex);
+    vec2 y = mainSound(sample, t);
     GLSL_FRAGCOLOR = vec4(y, 0.0, 1.0);
 }`;
 
@@ -389,6 +393,9 @@
             depthTest: false,
             uniforms: {
                 iSampleRate: { type: 'f', value: sampleRate },
+                iAudioTime: { type: 'f', value: 0 },
+                iSampleBlockSize: { type: 'i', value: 512 * 512 },
+                iSampleRingDepth: { type: 'i', value: 0 },
                 blockOffset: { type: 'f', value: 0 }
             }
         };
@@ -782,6 +789,9 @@
         const renderer = ctx.renderer;
         const previousTarget = renderer.getRenderTarget();
         ctx.material.uniforms.blockOffset.value = (blockIndex * ctx.samplesPerBlock) / state.audioContext.sampleRate;
+        if (ctx.material.uniforms.iAudioTime) {
+            ctx.material.uniforms.iAudioTime.value = ctx.material.uniforms.blockOffset.value;
+        }
         renderer.setRenderTarget(ctx.target);
         renderer.render(ctx.scene, ctx.camera);
         renderer.readRenderTargetPixels(ctx.target, 0, 0, ctx.width, ctx.height, ctx.pixels);
