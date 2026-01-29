@@ -604,6 +604,8 @@ vec2 mainSound(int sample, float time) {
             if (!soundPrecision) {
                 soundPrecision = this.selfSoundPrecisions.get(file);
             }
+        } else if (usesMainSound) {
+            soundPrecision = this.selfSoundPrecisions.get(file);
         }
         buffers.push({
             Name: this.makeName(file),
@@ -1107,8 +1109,13 @@ vec2 mainSound(int sample, float time) {
                 break;
             case ObjectType.Sample: {
                 const line = parser.line();
-                if (nextObject.Index < 0 || nextObject.Index > 9) {
-                    this.showErrorAtLineAndMessage(file, '#iSample index must be in [0..9].', line);
+                if (nextObject.Index < -1 || nextObject.Index > 9) {
+                    this.showErrorAtLineAndMessage(file, '#iSample index must be in [0..9] or use #iSample with #iSound "self".', line);
+                    removeLastObject();
+                    break;
+                }
+                if (nextObject.Index === -1 && !selfSoundDeclared) {
+                    this.showErrorAtLineAndMessage(file, '#iSample without index requires #iSound "self" in the same file.', line);
                     removeLastObject();
                     break;
                 }

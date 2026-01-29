@@ -192,7 +192,7 @@ export class ShaderParser {
             if (tokenValue.indexOf('iSample') === 0) {
                 const indexText = tokenValue.substring('iSample'.length);
                 if (indexText.length === 0) {
-                    returnObject = this.makeError('iSample requires an explicit index in [0..9] (use #iSample0 .. #iSample9).');
+                    returnObject = this.getSample(-1);
                 }
                 else {
                     const index = Number(indexText);

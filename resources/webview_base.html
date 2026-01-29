@@ -729,7 +729,15 @@
                     if (!binding || !binding.Name || typeof binding.SoundIndex !== 'number') {
                         continue;
                     }
-                    const sample = window.ShaderToy.audioOutput.getSampleFromRing(binding.SoundIndex, sampleIndexUniform);
+                    let soundIndex = binding.SoundIndex;
+                    if (soundIndex < 0) {
+                        if (buffer.SoundIndices && buffer.SoundIndices.length) {
+                            soundIndex = buffer.SoundIndices[0];
+                        } else {
+                            continue;
+                        }
+                    }
+                    const sample = window.ShaderToy.audioOutput.getSampleFromRing(soundIndex, sampleIndexUniform);
                     if (!buffer.Shader.uniforms[binding.Name]) {
                         buffer.Shader.uniforms[binding.Name] = { value: new THREE.Vector2(0, 0) };
                     }
