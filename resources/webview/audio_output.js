@@ -380,7 +380,30 @@
         return '16bPACK';
     };
 
-    const reportPrecisionFallback = function (options, resolvedPrecision) {
+    const resolvePrecisionForBuffer = function (options, soundBuffer) {
+        const precision = soundBuffer && soundBuffer.SoundPrecision ? soundBuffer.SoundPrecision : options.precision;
+        if (precision === undefined || precision === null) {
+            return resolvePrecision(options);
+        }
+        const localOptions = Object.assign({}, options, { precision: precision });
+        return resolvePrecision(localOptions);
+    };
+
+    const getPrecisionSummary = function (options, soundBuffers) {
+        const precisions = new Set();
+        for (const soundBuffer of soundBuffers || []) {
+            precisions.add(resolvePrecisionForBuffer(options, soundBuffer));
+        }
+        if (precisions.size === 0) {
+            return resolvePrecision(options);
+        }
+        if (precisions.size === 1) {
+            return Array.from(precisions)[0];
+        }
+        return Array.from(precisions).join(',');
+    };
+
+    const reportPrecisionFallback = function (options, resolvedPrecision, label) {
         const requestedRaw = String(options.precision || '32bFLOAT');
         const requested = (requestedRaw === '32bFLOAT' || requestedRaw === '16bFLOAT' || requestedRaw === '16bPACK')
             ? requestedRaw
@@ -400,8 +423,9 @@
             `EXT_color_buffer_float=${hasExtColorFloat ? 'yes' : 'no'}`,
             `EXT_color_buffer_half_float=${hasExtColorHalfFloat ? 'yes' : 'no'}`
         ].join(', ');
-        state.precisionDetails = `Precision fallback: ${requested} -> ${resolvedPrecision} (${details})`;
-        postErrorMessage(`Audio precision '${requested}' not supported; using '${resolvedPrecision}'. (${details})`);
+        const labelText = label ? ` (${label})` : '';
+        state.precisionDetails = `Precision fallback${labelText}: ${requested} -> ${resolvedPrecision} (${details})`;
+        postErrorMessage(`Audio precision${labelText} '${requested}' not supported; using '${resolvedPrecision}'. (${details})`);
         renderStatus();
     };
 
@@ -676,7 +700,7 @@
         const outputDataL = state.audioBuffer.getChannelData(0);
         const outputDataR = state.audioBuffer.getChannelData(1);
         const totalSamples = state.audioBuffer.length;
-        const precisionMode = resolvePrecision(options);
+        const precisionSummary = getPrecisionSummary(options, soundBuffers);
         const blockSamples = state.stream.blockSamples || (512 * 512);
         const numBlocks = Math.ceil(totalSamples / blockSamples);
         const mixGain = soundBuffers.length > 0 ? 1 / soundBuffers.length : 1;
@@ -694,6 +718,7 @@
             outputDataR.fill(0, baseIndex, baseIndex + count);
 
             for (const soundBuffer of soundBuffers) {
+                const precisionMode = resolvePrecisionForBuffer(options, soundBuffer);
                 const block = renderSoundBlock(i, options, precisionMode, soundBuffer);
                 if (!block) {
                     continue;
@@ -709,7 +734,7 @@
             ? global.performance.now()
             : Date.now();
         const renderSeconds = Math.max(0, renderEnd - renderStart) / 1000;
-        setStats(`Pre-processing time: ${renderSeconds.toFixed(2)}s`);
+        setStats(`Pre-processing time: ${renderSeconds.toFixed(2)}s (${precisionSummary})`);
     };
 
     const disposeRenderContext = function (soundBufferName) {
@@ -977,8 +1002,8 @@
             return;
         }
         const options = state.options || {};
-        const precisionMode = resolvePrecision(options);
         const soundBuffers = state.soundBuffers || [];
+        const precisionSummary = getPrecisionSummary(options, soundBuffers);
         const mixGain = soundBuffers.length > 0 ? 1 / soundBuffers.length : 1;
         state.stream.lastNeed = count;
         const blockSeconds = state.stream.blockSamples / state.audioContext.sampleRate;
@@ -987,6 +1012,7 @@
             let mixedRight = null;
 
             for (const soundBuffer of soundBuffers) {
+                const precisionMode = resolvePrecisionForBuffer(options, soundBuffer);
                 const block = renderSoundBlock(state.stream.nextBlock, options, precisionMode, soundBuffer);
                 if (!block) {
                     continue;
@@ -1020,7 +1046,7 @@
         const workletState = state.workletFailed
             ? 'failed'
             : (state.workletReady ? 'ready' : (state.workletLoading ? 'loading' : 'idle'));
-        setStats(`Streaming: block ${blockSeconds.toFixed(3)}s, rendered ${state.stream.renderedBlocks}, need ${state.stream.lastNeed}, sources ${soundBuffers.length}, precision ${precisionMode}, worklet ${workletState}`);
+        setStats(`Streaming: block ${blockSeconds.toFixed(3)}s, rendered ${state.stream.renderedBlocks}, need ${state.stream.lastNeed}, sources ${soundBuffers.length}, precision ${precisionSummary}, worklet ${workletState}`);
     };
 
     root.audioOutput.initFromGlobals = function (options) {
@@ -1079,9 +1105,18 @@
         }
 
         const precisionMode = resolvePrecision(options);
+        const precisionSummary = getPrecisionSummary(options, soundBuffers);
         reportPrecisionFallback(options, precisionMode);
+        for (const soundBuffer of soundBuffers) {
+            if (!soundBuffer || !soundBuffer.SoundPrecision) {
+                continue;
+            }
+            const localOptions = Object.assign({}, options, { precision: soundBuffer.SoundPrecision });
+            const bufferPrecision = resolvePrecision(localOptions);
+            reportPrecisionFallback(localOptions, bufferPrecision, soundBuffer.Name);
+        }
         const blockSeconds = (512 * 512) / state.audioContext.sampleRate;
-        setStatus(`Audio: ${precisionMode} @ ${state.audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
+        setStatus(`Audio: ${precisionSummary} @ ${state.audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
         resetSampleRings();
 
         if (!state.workletReady || state.workletFailed) {
@@ -1162,9 +1197,18 @@
         }
 
         const precisionMode = resolvePrecision(options);
+        const precisionSummary = getPrecisionSummary(options, soundBuffers);
         reportPrecisionFallback(options, precisionMode);
+        for (const soundBuffer of soundBuffers) {
+            if (!soundBuffer || !soundBuffer.SoundPrecision) {
+                continue;
+            }
+            const localOptions = Object.assign({}, options, { precision: soundBuffer.SoundPrecision });
+            const bufferPrecision = resolvePrecision(localOptions);
+            reportPrecisionFallback(localOptions, bufferPrecision, soundBuffer.Name);
+        }
         const blockSeconds = (512 * 512) / audioContext.sampleRate;
-        setStatus(`Audio: ${precisionMode} @ ${audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
+        setStatus(`Audio: ${precisionSummary} @ ${audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
         resetSampleRings();
 
         if (!state.workletReady || state.workletFailed) {
@@ -1209,7 +1253,7 @@
                 state.audioContext.resume().then(() => {
                     state.started = true;
                     if (state.statusMessage && state.statusMessage.indexOf('Audio output is blocked') >= 0) {
-                        const precisionMode = resolvePrecision(state.options);
+                        const precisionMode = getPrecisionSummary(state.options || {}, state.soundBuffers || []);
                         const blockSeconds = (512 * 512) / state.audioContext.sampleRate;
                         const durationSeconds = Number.isFinite(state.options.durationSeconds) ? state.options.durationSeconds : 180;
                         setStatus(`Audio: ${precisionMode} @ ${state.audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);

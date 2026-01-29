@@ -38,11 +38,15 @@ export class BufferProvider {
     private context: Context;
     private visitedFiles: string[];
     private soundFileIndices: Map<string, number[]>;
+    private soundIndexPrecisions: Map<number, string>;
+    private selfSoundPrecisions: Map<string, string>;
     private webviewErrors: { file: string, line: number, message: string }[];
     constructor(context: Context) {
         this.context = context;
         this.visitedFiles = [];
         this.soundFileIndices = new Map<string, number[]>();
+        this.soundIndexPrecisions = new Map<number, string>();
+        this.selfSoundPrecisions = new Map<string, string>();
         this.webviewErrors = [];
     }
 
@@ -584,6 +588,23 @@ vec2 mainSound(int sample, float time) {
         // Push yourself after all your dependencies
         const soundIndices = this.soundFileIndices.get(file) || [];
         const isSoundFile = soundIndices.length > 0;
+        let soundPrecision: string | undefined;
+        if (isSoundFile) {
+            for (const index of soundIndices) {
+                const precision = this.soundIndexPrecisions.get(index);
+                if (!precision) {
+                    continue;
+                }
+                if (soundPrecision && soundPrecision !== precision) {
+                    this.showWarningAtLine(file, `Conflicting #iSound::Format values for sound indices; using "${soundPrecision}".`, lineOffset);
+                    break;
+                }
+                soundPrecision = precision;
+            }
+            if (!soundPrecision) {
+                soundPrecision = this.selfSoundPrecisions.get(file);
+            }
+        }
         buffers.push({
             Name: this.makeName(file),
             File: file,
@@ -601,6 +622,7 @@ vec2 mainSound(int sample, float time) {
             Dependents: [],
             IsSound: usesMainSound || isSoundFile,
             SoundIndices: soundIndices.length > 0 ? soundIndices : undefined,
+            SoundPrecision: soundPrecision,
             UsesKeyboard: usesKeyboard,
             UsesFirstPersonControls: usesFirstPersonControls,
             LineOffset: lineOffset
@@ -648,6 +670,7 @@ vec2 mainSound(int sample, float time) {
         };
 
         let thisTextureSettings: InputTextureSettings | undefined;
+        let selfSoundDeclared = false;
         while (!parser.eof()) {
             const nextObject = parser.next();
             if (nextObject === undefined) {
@@ -923,15 +946,26 @@ vec2 mainSound(int sample, float time) {
                     break;
                 }
 
-                if (!Number.isFinite(nextObject.Index)) {
-                    this.showErrorAtLineAndMessage(file, '#iSound requires an explicit index in [0..9] (use #iSound0 .. #iSound9).', line);
+                const soundIndex = nextObject.Index;
+                if (!Number.isFinite(soundIndex)) {
+                    this.showErrorAtLineAndMessage(file, '#iSound requires an explicit index in [0..9] or "self".', line);
+                    removeLastObject();
+                    break;
+                }
+                if (soundIndex < -1 || soundIndex > 9 || Math.floor(soundIndex) !== soundIndex) {
+                    this.showErrorAtLineAndMessage(file, `#iSound index must be an integer in [0..9] or "self", got "${nextObject.Index}".`, line);
                     removeLastObject();
                     break;
                 }
 
-                const soundIndex = nextObject.Index;
-                if (soundIndex < 0 || soundIndex > 9 || Math.floor(soundIndex) !== soundIndex) {
-                    this.showErrorAtLineAndMessage(file, `#iSound index must be an integer in [0..9], got "${nextObject.Index}".`, line);
+                if (soundIndex === -1) {
+                    const normalizedSelf = nextObject.Path.replace('file://', '');
+                    if (normalizedSelf !== 'self') {
+                        this.showErrorAtLineAndMessage(file, '#iSound without index only supports "self".', line);
+                        removeLastObject();
+                        break;
+                    }
+                    selfSoundDeclared = true;
                     removeLastObject();
                     break;
                 }
@@ -992,6 +1026,38 @@ vec2 mainSound(int sample, float time) {
                 soundShaderFile.Value = mappedSoundFile;
                 soundShaderLine.Value = line;
                 this.registerSoundFile(soundIndex, mappedSoundFile);
+                removeLastObject();
+                break;
+            }
+            case ObjectType.SoundFormat: {
+                const line = parser.line();
+                const soundIndex = nextObject.Index;
+                const value = String(nextObject.Value);
+                const allowed = value === '32bFLOAT' || value === '16bFLOAT' || value === '16bPACK';
+                if (!allowed) {
+                    this.showErrorAtLineAndMessage(file, `#iSound::Format must be "32bFLOAT", "16bFLOAT", or "16bPACK" (got "${value}").`, line);
+                    removeLastObject();
+                    break;
+                }
+
+                if (soundIndex === -1) {
+                    if (!selfSoundDeclared) {
+                        this.showErrorAtLineAndMessage(file, '#iSound::Format requires #iSound "self" in the same file.', line);
+                        removeLastObject();
+                        break;
+                    }
+                    this.selfSoundPrecisions.set(file, value);
+                    removeLastObject();
+                    break;
+                }
+
+                if (soundIndex < 0 || soundIndex > 9 || Math.floor(soundIndex) !== soundIndex) {
+                    this.showErrorAtLineAndMessage(file, `#iSound::Format index must be in [0..9] (got "${nextObject.Index}").`, line);
+                    removeLastObject();
+                    break;
+                }
+
+                this.soundIndexPrecisions.set(soundIndex, value);
                 removeLastObject();
                 break;
             }
