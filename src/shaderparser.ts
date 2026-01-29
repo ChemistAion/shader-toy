@@ -16,6 +16,7 @@ export enum ObjectType {
     Number,
     Value,
     Uniform,
+    Sample,
     Keyboard,
     FirstPersonControls,
     StrictCompatibility,
@@ -80,6 +81,11 @@ type Uniform = {
     Max?: number[],
     Step?: number[]
 };
+type Sample = {
+    Type: ObjectType.Sample,
+    Index: number,
+    Name: string
+};
 type Keyboard = {
     Type: ObjectType.Keyboard
 };
@@ -94,7 +100,7 @@ type ErrorObject = {
     Message: string
 };
 type TextureObject = Texture | TextureMagFilter | TextureMinFilter | TextureWrapMode | TextureType;
-type ParseObject = Include | Vertex | Sound | TextureObject | Uniform | Keyboard | FirstPersonControls | StrictCompatibility;
+type ParseObject = Include | Vertex | Sound | TextureObject | Uniform | Sample | Keyboard | FirstPersonControls | StrictCompatibility;
 
 export class ShaderParser {
     private stream: ShaderStream;
@@ -160,6 +166,22 @@ export class ShaderParser {
                     }
                     else {
                         returnObject = this.getSound(index);
+                    }
+                }
+                break;
+            }
+            if (tokenValue.indexOf('iSample') === 0) {
+                const indexText = tokenValue.substring('iSample'.length);
+                if (indexText.length === 0) {
+                    returnObject = this.makeError('iSample requires an explicit index in [0..9] (use #iSample0 .. #iSample9).');
+                }
+                else {
+                    const index = Number(indexText);
+                    if (!/^[0-9]+$/.test(indexText) || !Number.isFinite(index)) {
+                        returnObject = this.makeError(`Invalid iSample index "${indexText}"`);
+                    }
+                    else {
+                        returnObject = this.getSample(index);
                     }
                 }
                 break;
@@ -241,6 +263,24 @@ export class ShaderParser {
             Path: tokenValue
         };
         return sound;
+    }
+
+    private getSample(index: number): Sample | ErrorObject {
+        const nextToken = this.lexer.next();
+        if (nextToken === undefined) {
+            return this.makeError('Expected identifier after "iSample" but got end-of-file');
+        }
+        if (nextToken.type !== TokenType.Identifier) {
+            return this.makeError(`Expected identifier after "iSample" but got "${nextToken.value}"`);
+        }
+
+        const tokenValue = nextToken.value as string;
+        const sample: Sample = {
+            Type: ObjectType.Sample,
+            Index: index,
+            Name: tokenValue
+        };
+        return sample;
     }
 
     private getTextureObject(previous: Token): Texture | TextureMagFilter | TextureMinFilter | TextureWrapMode | TextureType | ErrorObject {

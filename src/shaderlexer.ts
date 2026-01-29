@@ -75,6 +75,7 @@ export class ShaderLexer {
     private static preprocessor_keywords = [
         'include',
         'iSound',
+        'iSample',
         'iVertex',
         'iKeyboard',
         'iFirstPersonControls',
@@ -87,6 +88,9 @@ export class ShaderLexer {
             return true;
         }
         if (val.indexOf('iSound') === 0) {
+            return true;
+        }
+        if (val.indexOf('iSample') === 0) {
             return true;
         }
         return val.indexOf('iChannel') === 0;

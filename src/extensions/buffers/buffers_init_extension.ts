@@ -33,12 +33,12 @@ export class BuffersInitExtension implements WebviewExtension {
                 pingPongTarget = 'new THREE.WebGLRenderTarget(resolution.x, resolution.y, { type: framebufferType })';
             }
 
-                const defaultVertexShader = `glslUseVersion3
-            ? prepareVertexShader('void main() { gl_Position = vec4(position, 1.0); }')
-            : 'void main() { gl_Position = vec4(position, 1.0); }'`;
-                const glslVersionLine = `...(glslUseVersion3 && THREE.GLSL3 ? { glslVersion: THREE.GLSL3 } : {})`;
+            const defaultVertexShader = `glslUseVersion3
+        ? prepareVertexShader('void main() { gl_Position = vec4(position, 1.0); }')
+        : 'void main() { gl_Position = vec4(position, 1.0); }'`;
+            const glslVersionLine = `...(glslUseVersion3 && THREE.GLSL3 ? { glslVersion: THREE.GLSL3 } : {})`;
 
-                this.content += `\
+            this.content += `\
 buffers.push({
     Name: ${JSON.stringify(buffer.Name)},
     File: ${JSON.stringify(buffer.File)},
@@ -52,6 +52,7 @@ buffers.push({
     PingPongTarget: ${pingPongTarget},
     PingPongChannel: ${buffer.SelfChannel},
     Dependents: ${JSON.stringify(buffer.Dependents)},
+    SampleBindings: ${JSON.stringify(buffer.SampleBindings || [])},
     Shader: ${isSound ? 'null' : `new THREE.ShaderMaterial({
         ${glslVersionLine},
         vertexShader: ${buffer.VertexCode !== undefined ? `prepareVertexShader(document.getElementById(${JSON.stringify(buffer.Name + '_vertex')}).textContent)` : defaultVertexShader},
@@ -90,8 +91,8 @@ buffers.push({
             mouse: { type: 'v2', value: normalizedMouse },
         }
     })`}
+
 });`;
-            bufferIndex++;
         }
     }
 

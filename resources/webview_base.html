@@ -679,6 +679,8 @@
         const audioTimeUniform = (typeof audioTime === 'number' && isFinite(audioTime)) ? audioTime : time;
         let sampleBlockSizeUniform = 0;
         let sampleRingDepthUniform = 0;
+        let sampleRateUniform = 0;
+        let sampleIndexUniform = 0;
         if (window.ShaderToy && window.ShaderToy.audioOutput) {
             if (window.ShaderToy.audioOutput.getSampleBlockSize) {
                 const value = window.ShaderToy.audioOutput.getSampleBlockSize();
@@ -687,6 +689,10 @@
             if (window.ShaderToy.audioOutput.getSampleRingDepth) {
                 const value = window.ShaderToy.audioOutput.getSampleRingDepth();
                 sampleRingDepthUniform = Number.isFinite(value) ? value : 0;
+            }
+            if (audioContext && audioContext.sampleRate) {
+                sampleRateUniform = audioContext.sampleRate;
+                sampleIndexUniform = Math.floor(audioTimeUniform * sampleRateUniform);
             }
         }
 
@@ -716,6 +722,23 @@
             }
             if (buffer.Shader.uniforms['iSampleRingDepth']) {
                 buffer.Shader.uniforms['iSampleRingDepth'].value = sampleRingDepthUniform;
+            }
+
+            if (buffer.SampleBindings && buffer.SampleBindings.length && window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.getSampleFromRing) {
+                for (const binding of buffer.SampleBindings) {
+                    if (!binding || !binding.Name || typeof binding.SoundIndex !== 'number') {
+                        continue;
+                    }
+                    const sample = window.ShaderToy.audioOutput.getSampleFromRing(binding.SoundIndex, sampleIndexUniform);
+                    if (!buffer.Shader.uniforms[binding.Name]) {
+                        buffer.Shader.uniforms[binding.Name] = { value: new THREE.Vector2(0, 0) };
+                    }
+                    if (Array.isArray(sample)) {
+                        buffer.Shader.uniforms[binding.Name].value.set(sample[0] || 0, sample[1] || 0);
+                    } else if (sample && typeof sample === 'object') {
+                        buffer.Shader.uniforms[binding.Name].value.set(sample.x || 0, sample.y || 0);
+                    }
+                }
             }
             buffer.Shader.uniforms['iFrame'].value = frameCounter;
             buffer.Shader.uniforms['iMouse'].value = mouse;

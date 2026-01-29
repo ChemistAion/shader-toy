@@ -221,6 +221,52 @@
         return state.sampleRingDepth || 0;
     };
 
+    const getSoundBufferNameByIndex = function (soundIndex) {
+        const soundBuffers = state.soundBuffers || [];
+        for (const buffer of soundBuffers) {
+            const indices = buffer && buffer.SoundIndices ? buffer.SoundIndices : [];
+            if (indices && indices.indexOf(soundIndex) >= 0) {
+                return buffer.Name;
+            }
+        }
+        return null;
+    };
+
+    root.audioOutput.getSampleFromRing = function (soundIndex, sampleIndex) {
+        if (!Number.isFinite(sampleIndex) || sampleIndex < 0) {
+            return [0, 0];
+        }
+        const bufferName = getSoundBufferNameByIndex(soundIndex);
+        if (!bufferName) {
+            return [0, 0];
+        }
+        const ring = state.sampleRing.get(bufferName);
+        if (!ring || !ring.data) {
+            return [0, 0];
+        }
+
+        const blockSamples = ring.blockWidth * ring.blockHeight;
+        if (blockSamples <= 0) {
+            return [0, 0];
+        }
+
+        const blockIndex = Math.floor(sampleIndex / blockSamples);
+        const offset = sampleIndex - blockIndex * blockSamples;
+        if (offset < 0) {
+            return [0, 0];
+        }
+
+        const ringSlot = blockIndex % ring.ringDepth;
+        const rowOffset = ringSlot * ring.blockHeight;
+        const x = offset % ring.blockWidth;
+        const y = Math.floor(offset / ring.blockWidth);
+        if (y >= ring.blockHeight) {
+            return [0, 0];
+        }
+        const idx = ((rowOffset + y) * ring.width + x) * 4;
+        return [ring.data[idx] || 0, ring.data[idx + 1] || 0];
+    };
+
     const ensureWorklet = function (options) {
         if (state.workletReady || state.workletFailed || state.workletLoading) {
             return;

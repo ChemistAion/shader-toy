@@ -99,6 +99,10 @@ export type UniformDefinition = {
     Max?: number[],
     Step?: number[]
 };
+export type SampleDefinition = {
+    Name: string,
+    SoundIndex: number
+};
 export type BufferDependency = {
     Index: number,
     Channel: number
@@ -119,6 +123,7 @@ export type BufferDefinition = {
     TextureInputs: TextureDefinition[],
     AudioInputs: AudioDefinition[],
     CustomUniforms: UniformDefinition[],
+    SampleBindings?: SampleDefinition[],
     UsesSelf: boolean,
     SelfChannel: number,
     Dependents: BufferDependency[],
