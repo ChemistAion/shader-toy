@@ -71,7 +71,9 @@ export type AudioDefinition = {
     Channel: number,
     LocalPath?: string,
     RemotePath?: string,
-    UserPath: string
+    UserPath: string,
+    FromSound?: boolean,
+    SoundIndex?: number
 };
 export type UniformDefinition = {
     Name: string,
@@ -80,6 +82,10 @@ export type UniformDefinition = {
     Min?: number[],
     Max?: number[],
     Step?: number[]
+};
+export type SampleDefinition = {
+    Name: string,
+    SoundIndex: number
 };
 export type BufferDependency = {
     Index: number,
@@ -101,11 +107,15 @@ export type BufferDefinition = {
     TextureInputs: TextureDefinition[],
     AudioInputs: AudioDefinition[],
     CustomUniforms: UniformDefinition[],
+    SampleBindings?: SampleDefinition[],
     UsesSelf: boolean,
     SelfChannel: number,
     Dependents: BufferDependency[],
     LineOffset: number
     Includes: IncludeDefinition[],
+    IsSound?: boolean,
+    SoundIndices?: number[],
+    SoundPrecision?: string,
     UsesKeyboard?: boolean,
     UsesFirstPersonControls?: boolean,
 };
