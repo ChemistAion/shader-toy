@@ -48,6 +48,7 @@ import { RecordButtonStyleExtension } from './extensions/user_interface/record_b
 import { RecordButtonExtension } from './extensions/user_interface/record_button_extension';
 import { ReloadButtonStyleExtension } from './extensions/user_interface/reload_button_style_extension';
 import { ReloadButtonExtension } from './extensions/user_interface/reload_button_extension';
+import { ShowSoundButtonExtension } from './extensions/user_interface/show_sound_button_extension';
 
 import { DefaultErrorsExtension } from './extensions/user_interface/error_display/default_errors_extension';
 import { DiagnosticsErrorsExtension } from './extensions/user_interface/error_display/diagnostics_errors_extension';
@@ -71,6 +72,9 @@ import { AudioInitExtension } from './extensions/audio/audio_init_extension';
 import { AudioUpdateExtension } from './extensions/audio/audio_update_extension';
 import { AudioPauseExtension } from './extensions/audio/audio_pause_extension';
 import { AudioResumeExtension } from './extensions/audio/audio_resume_extension';
+import { AudioOutputPrecisionExtension } from './extensions/audio/audio_output_precision_extension';
+import { AudioWorkletUrlExtension } from './extensions/audio/audio_worklet_url_extension';
+import { AudioWorkletSourceExtension } from './extensions/audio/audio_worklet_source_extension';
 
 import { UniformsInitExtension } from './extensions/uniforms/uniforms_init_extension';
 import { UniformsUpdateExtension } from './extensions/uniforms/uniforms_update_extension';
@@ -564,10 +568,6 @@ export class WebviewContentProvider {
             const audioInitExtension = new AudioInitExtension(this.buffers, this.context, makeWebviewResource);
             this.webviewAssembler.addWebviewModule(audioInitExtension, '// Audio Init');
             textureInitExtension.addTextureContent(audioInitExtension);
-
-            const audioUpdateExtension = new AudioUpdateExtension();
-            this.webviewAssembler.addWebviewModule(audioUpdateExtension, '// Audio Update');
-
             const audioPauseExtension = new AudioPauseExtension();
             this.webviewAssembler.addWebviewModule(audioPauseExtension, '// Audio Pause');
 
@@ -578,6 +578,21 @@ export class WebviewContentProvider {
             const noAudioExtension = new NoAudioExtension();
             this.webviewAssembler.addWebviewModule(noAudioExtension, '// Audio Init');
         }
+
+        const audioUpdateExtension = new AudioUpdateExtension();
+        this.webviewAssembler.addWebviewModule(audioUpdateExtension, '// Audio Update');
+
+        const audioOutputPrecision = this.context.getConfig<string>('audioOutputPrecision') || '32bFLOAT';
+        const audioOutputPrecisionExtension = new AudioOutputPrecisionExtension(audioOutputPrecision);
+        this.webviewAssembler.addReplaceModule(audioOutputPrecisionExtension, '<!-- Audio Output Precision -->', '<!-- Audio Output Precision -->');
+
+        const audioWorkletUrl = getWebviewResourcePath('webview/audio_worklet_processor.js');
+        const audioWorkletUrlExtension = new AudioWorkletUrlExtension(audioWorkletUrl);
+        this.webviewAssembler.addReplaceModule(audioWorkletUrlExtension, '<!-- Audio Worklet Processor -->', '<!-- Audio Worklet Processor -->');
+
+        const showSoundButton = this.context.getConfig<boolean>('showSoundButton');
+        const showSoundButtonExtension = new ShowSoundButtonExtension(showSoundButton !== false);
+        this.webviewAssembler.addReplaceModule(showSoundButtonExtension, 'const showSoundButton = <!-- Show Sound Button -->;', '<!-- Show Sound Button -->');
 
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Packages
@@ -599,6 +614,12 @@ export class WebviewContentProvider {
 
             const webviewShaderCompile = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/shader_compile.js', getResourceText);
             this.webviewAssembler.addReplaceModule(webviewShaderCompile, '<!-- Webview shader_compile.js -->', '<!-- Webview shader_compile.js -->');
+
+            const audioWorkletSource = new AudioWorkletSourceExtension(getResourceText('webview/audio_worklet_processor.js'));
+            this.webviewAssembler.addReplaceModule(audioWorkletSource, '<!-- Audio Worklet Source -->', '<!-- Audio Worklet Source -->');
+
+            const webviewAudioOutput = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/audio_output.js', getResourceText);
+            this.webviewAssembler.addReplaceModule(webviewAudioOutput, '<!-- Webview audio_output.js -->', '<!-- Webview audio_output.js -->');
 
             const webviewUiControls = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/ui_controls.js', getResourceText);
             this.webviewAssembler.addReplaceModule(webviewUiControls, '<!-- Webview ui_controls.js -->', '<!-- Webview ui_controls.js -->');

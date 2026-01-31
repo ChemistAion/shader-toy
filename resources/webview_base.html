@@ -109,6 +109,8 @@
 <!-- Webview runtime_env.js -->
 <!-- Webview glsl_error_hook.js -->
 <!-- Webview shader_compile.js -->
+<!-- Audio Worklet Source -->
+<!-- Webview audio_output.js -->
 <!-- Webview ui_controls.js -->
 <!-- Webview gl_context.js -->
 <!-- Webview time_input.js -->
@@ -340,6 +342,22 @@
             }
         }
 
+        if (glslUseVersion3 && window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.reloadFromGlobals) {
+            window.ShaderToy.audioOutput.reloadFromGlobals({
+                buffers: buffers,
+                renderer: renderer,
+                gl: gl,
+                glslUseVersion3: glslUseVersion3,
+                prepareFragmentShader: prepareFragmentShader,
+                prepareVertexShader: prepareVertexShader,
+                audioContext: audioContext,
+                precision: audioOutputPrecision,
+                audioWorkletUrl: audioWorkletUrl,
+                showSoundButton: showSoundButton,
+                paused: paused
+            });
+        }
+
         compileAllShaders();
         forceRenderOneFrame = true;
     };
@@ -396,6 +414,32 @@
     // Buffers
     let commonIncludes = [];
     // Includes
+
+    const hasSoundBuffer = buffers.some((buffer) => buffer && buffer.IsSound);
+    const audioOutputPrecision = '<!-- Audio Output Precision -->';
+    const audioWorkletUrl = '<!-- Audio Worklet Processor -->';
+    const showSoundButton = <!-- Show Sound Button -->;
+    if (!glslUseVersion3 && hasSoundBuffer && vscode !== undefined) {
+        vscode.postMessage({
+            command: 'errorMessage',
+            message: 'mainSound requires shader-toy.webglVersion set to "WebGL2".'
+        });
+    }
+    if (glslUseVersion3 && window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.initFromGlobals) {
+        window.ShaderToy.audioOutput.initFromGlobals({
+            buffers: buffers,
+            renderer: renderer,
+            gl: gl,
+            glslUseVersion3: glslUseVersion3,
+            prepareFragmentShader: prepareFragmentShader,
+            prepareVertexShader: prepareVertexShader,
+            audioContext: audioContext,
+            precision: audioOutputPrecision,
+            audioWorkletUrl: audioWorkletUrl,
+            showSoundButton: showSoundButton,
+            paused: paused
+        });
+    }
 
     // WebGL2 inserts more lines into the shader
     if (isWebGL2) {
