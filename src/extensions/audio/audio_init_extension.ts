@@ -16,9 +16,10 @@ export class AudioInitExtension implements WebviewExtension, TextureExtensionExt
     }
 
     private processBuffers(buffers: Types.BufferDefinition[], context: Context, makeAvailableResource: (localUri: string) => string) {
+        const hasSoundBuffer = buffers.some((buffer) => buffer && buffer.IsSound);
         for (const i in buffers) {
             const buffer = buffers[i];
-            if (!buffer || buffer.IsSound || !buffer.Shader) {
+            if (!buffer || buffer.IsSound) {
                 continue;
             }
             const audios =  buffer.AudioInputs;
@@ -252,12 +253,18 @@ message: 'Failed loading audio file: ${audio.UserPath}'
             }
         }
 
-        if (this.content !== '') {
+        if (this.content !== '' || hasSoundBuffer) {
             this.content = `
                     var AudioContext = window.AudioContext || window.webkitAudioContext;
                     var audioContext = (window.ShaderToy && window.ShaderToy.audioContext)
                         ? window.ShaderToy.audioContext
                         : (AudioContext ? new AudioContext() : undefined);
+                    if (audioContext && typeof audioContext.createBuffer !== 'function' && AudioContext) {
+                    audioContext = new AudioContext();
+                }
+                    if (audioContext && AudioContext && !audioContext.audioWorklet) {
+                    audioContext = new AudioContext();
+                }
                     if (!audioContext) {
                     audioContext = { sampleRate: 0 };
                 }
@@ -306,7 +313,7 @@ message: 'Failed loading audio file: ${audio.UserPath}'
         }
         else {
             this.content = `
-                    const audioContext = {
+                    var audioContext = {
                 sampleRate: 0
             };
             `;

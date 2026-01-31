@@ -5,7 +5,7 @@ import { WebviewExtension } from '../webview_extension';
 export class NoAudioExtension implements WebviewExtension {
     public generateContent(): string {
         return `\
-const audioContext = {
+var audioContext = {
     sampleRate: 0
 };`;
     }

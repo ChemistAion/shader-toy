@@ -46,6 +46,8 @@ import { ScreenshotButtonStyleExtension } from './extensions/user_interface/scre
 import { ScreenshotButtonExtension } from './extensions/user_interface/screenshot_button_extension';
 import { RecordButtonStyleExtension } from './extensions/user_interface/record_button_style_extension';
 import { RecordButtonExtension } from './extensions/user_interface/record_button_extension';
+import { SoundButtonStyleExtension } from './extensions/user_interface/sound_button_style_extension';
+import { SoundButtonExtension } from './extensions/user_interface/sound_button_extension';
 import { ReloadButtonStyleExtension } from './extensions/user_interface/reload_button_style_extension';
 import { ReloadButtonExtension } from './extensions/user_interface/reload_button_extension';
 import { ShowSoundButtonExtension } from './extensions/user_interface/show_sound_button_extension';
@@ -174,6 +176,14 @@ export class WebviewContentProvider {
         for (const buffer of this.buffers) {
             if (buffer.UsesKeyboard) {
                 useKeyboard = true;
+            }
+
+            if (buffer.IsSound === true) {
+                useAudio = true;
+            }
+
+            if (buffer.IsSound === true) {
+                useAudio = true;
             }
 
             const audios = buffer.AudioInputs;
@@ -686,6 +696,14 @@ export class WebviewContentProvider {
 
                 const recordButtonExtension = new RecordButtonExtension();
                 this.webviewAssembler.addWebviewModule(recordButtonExtension, '<!-- Record Element -->');
+            }
+            const hasSoundBuffer = this.buffers.some((buffer) => buffer && buffer.IsSound);
+            if (hasSoundBuffer && this.context.getConfig<boolean>('showSoundButton')) {
+                const soundButtonStyleExtension = new SoundButtonStyleExtension(getWebviewResourcePath);
+                this.webviewAssembler.addWebviewModule(soundButtonStyleExtension, '/* Sound Button Style */');
+
+                const soundButtonExtension = new SoundButtonExtension();
+                this.webviewAssembler.addWebviewModule(soundButtonExtension, '<!-- Sound Element -->');
             }
         }
 

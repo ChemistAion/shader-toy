@@ -163,6 +163,11 @@
                     "default": true,
                     "description": "Shows a pause button in the OpenGL viewport which allows to pause the rendering."
                 },
+                "shader-toy.showSoundButton": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Shows a sound button in the OpenGL viewport which allows to toggle audio output."
+                },
                 "shader-toy.pauseWholeRender": {
                     "type": "boolean",
                     "default": true,

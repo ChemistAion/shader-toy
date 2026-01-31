@@ -281,10 +281,22 @@
             return;
         }
         if (!state.audioContext || !state.audioContext.audioWorklet) {
-            state.workletFailed = true;
-            setStats('Worklet: unavailable (no audioWorklet)');
-            postErrorMessage('AudioWorklet is unavailable in this WebView. Audio output is disabled.');
-            return;
+            if (state.audioContext && !state.audioContext.audioWorklet) {
+                try {
+                    const AudioContextCtor = global.AudioContext || global.webkitAudioContext;
+                    if (AudioContextCtor) {
+                        state.audioContext = new AudioContextCtor();
+                    }
+                } catch {
+                    // ignore
+                }
+            }
+            if (!state.audioContext || !state.audioContext.audioWorklet) {
+                state.workletFailed = true;
+                setStats('Worklet: unavailable (no audioWorklet)');
+                postErrorMessage('AudioWorklet is unavailable in this WebView. Audio output is disabled.');
+                return;
+            }
         }
         const url = options && options.audioWorkletUrl ? String(options.audioWorkletUrl) : '';
         if (!url) {
@@ -340,6 +352,14 @@
                 state.workletReady = true;
                 setStats('Worklet: ready');
                 setupWorkletPort();
+                if (state.options && state.options.autoStart !== false && !state.options.paused) {
+                    if (state.audioContext.state !== 'running') {
+                        attachInitialStart();
+                    }
+                    else {
+                        root.audioOutput.start(0);
+                    }
+                }
             } catch {
                 state.workletFailed = true;
                 setStats('Worklet: failed to create node');
@@ -675,6 +695,7 @@
         }
     };
 
+
     const attachGestureResume = function (callback) {
         if (state.gestureHandlerAttached) {
             return;
@@ -722,51 +743,6 @@
         }
     };
 
-    const renderAllBlocks = function (options) {
-        const renderer = options.renderer;
-        const soundBuffers = state.soundBuffers || [];
-        if (!renderer || !soundBuffers.length || !state.audioBuffer || !state.audioContext) {
-            return;
-        }
-        const outputDataL = state.audioBuffer.getChannelData(0);
-        const outputDataR = state.audioBuffer.getChannelData(1);
-        const totalSamples = state.audioBuffer.length;
-        const precisionSummary = getPrecisionSummary(options, soundBuffers);
-        const blockSamples = state.stream.blockSamples || (512 * 512);
-        const numBlocks = Math.ceil(totalSamples / blockSamples);
-        const mixGain = soundBuffers.length > 0 ? 1 / soundBuffers.length : 1;
-
-        const renderStart = global.performance && typeof global.performance.now === 'function'
-            ? global.performance.now()
-            : Date.now();
-
-        for (let i = 0; i < numBlocks; i++) {
-            const baseIndex = i * blockSamples;
-            const remaining = totalSamples - baseIndex;
-            const count = Math.min(blockSamples, remaining);
-
-            outputDataL.fill(0, baseIndex, baseIndex + count);
-            outputDataR.fill(0, baseIndex, baseIndex + count);
-
-            for (const soundBuffer of soundBuffers) {
-                const precisionMode = resolvePrecisionForBuffer(options, soundBuffer);
-                const block = renderSoundBlock(i, options, precisionMode, soundBuffer);
-                if (!block) {
-                    continue;
-                }
-                for (let j = 0; j < count; j++) {
-                    outputDataL[baseIndex + j] += block.left[j] * mixGain;
-                    outputDataR[baseIndex + j] += block.right[j] * mixGain;
-                }
-            }
-        }
-
-        const renderEnd = global.performance && typeof global.performance.now === 'function'
-            ? global.performance.now()
-            : Date.now();
-        const renderSeconds = Math.max(0, renderEnd - renderStart) / 1000;
-        setStats(`Pre-processing time: ${renderSeconds.toFixed(2)}s (${precisionSummary})`);
-    };
 
     const disposeRenderContext = function (soundBufferName) {
         if (!state.renderContexts || state.renderContexts.size === 0) {
@@ -1175,19 +1151,23 @@
         setStatus(`Audio: ${precisionSummary} @ ${state.audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
         resetSampleRings();
 
-        if (!state.workletReady || state.workletFailed) {
+        if (state.workletFailed) {
             state.ready = false;
             setStats('Worklet: unavailable (no audio)');
             postErrorMessage('AudioWorklet is unavailable. Audio output is disabled.');
             return;
         }
 
-        resetStreaming();
-        setStats('Worklet: streaming enabled');
+        if (state.workletReady) {
+            resetStreaming();
+            setStats('Worklet: streaming enabled');
+        } else {
+            setStats('Worklet: loading module');
+        }
         state.ready = true;
         state.started = false;
 
-        if (options.autoStart !== false && !options.paused) {
+        if (state.workletReady && options.autoStart !== false && !options.paused) {
             if (state.audioContext.state !== 'running') {
                 attachInitialStart();
             }
@@ -1271,20 +1251,24 @@
         setStatus(`Audio: ${precisionSummary} @ ${audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
         resetSampleRings();
 
-        if (!state.workletReady || state.workletFailed) {
+        if (state.workletFailed) {
             state.ready = false;
             setStats('Worklet: unavailable (no audio)');
             postErrorMessage('AudioWorklet is unavailable. Audio output is disabled.');
             return;
         }
 
-        resetStreaming();
-        setStats('Worklet: streaming enabled');
+        if (state.workletReady) {
+            resetStreaming();
+            setStats('Worklet: streaming enabled');
+        } else {
+            setStats('Worklet: loading module');
+        }
         state.ready = true;
 
         const shouldStart = state.started || (options.autoStart !== false && !options.paused);
         state.started = false;
-        if (shouldStart) {
+        if (state.workletReady && shouldStart) {
             if (audioContext.state !== 'running') {
                 attachInitialStart();
             }
@@ -1329,6 +1313,10 @@
                         postInfoMessage(autoplayMessage);
                     }
                 });
+                return;
+            }
+
+            if (!state.workletReady && !state.workletFailed) {
                 return;
             }
 

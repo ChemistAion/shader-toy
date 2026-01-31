@@ -67,8 +67,14 @@
             transform: translateX(0%);
             z-index: 1;
         }
-        .rec_base:nth-of-type(2) {
+        #screenshot {
+            top: 0px;
+        }
+        #record {
             top: 60px;
+        }
+        #sound-button {
+            top: 120px;
         }
         
         /* Screenshot Button Style */
@@ -76,6 +82,8 @@
         /* Record Button Style */
 
         /* Reload Button Style */
+
+        /* Sound Button Style */
     </style>
 </head>
 <body>
@@ -85,6 +93,7 @@
         <!-- Pause Element -->
     </div>
     <!-- Screenshot Element -->
+    <!-- Sound Element -->
     <!-- Record Element -->
     <!-- Reload Element -->
 </body>
@@ -121,6 +130,14 @@
     if (typeof acquireVsCodeApi === 'function') {
         vscode = acquireVsCodeApi();
     }
+    if (vscode) {
+        window.vscode = vscode;
+    }
+    let webviewState = vscode && typeof vscode.getState === 'function' ? vscode.getState() : {};
+    if (!webviewState) {
+        webviewState = {};
+    }
+    let audioGestureUnlockedState = !!webviewState.audioGestureUnlocked;
     var compileTimePanel;
 
     let revealError = function(line, file) {
@@ -135,6 +152,10 @@
 
     let currentShader = {};
     // Error Callback
+
+    if (window.ShaderToy) {
+        window.ShaderToy.audioGestureUnlocked = audioGestureUnlockedState;
+    }
 
     // Development feature: Output warnings from third-party libraries
     // console.warn = function (message) {
@@ -164,24 +185,38 @@
     let paused = <!-- Start Paused -->;
     let forceRenderOneFrame = paused;
     let pauseButton = document.getElementById('pause-button');
+    let forcedPauseForGesture = false;
+    let pausedBeforeGesture = paused;
+    const applyPauseState = function(newPaused, notifyExtension) {
+        paused = !!newPaused;
+        if (pauseButton) {
+            pauseButton.checked = paused;
+        }
+        if (!paused) {
+            // Audio Resume
+            if (window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.resume) {
+                window.ShaderToy.audioOutput.resume(true);
+            }
+            pausedTime += clock.getDelta();
+        }
+        else {
+            // Audio Pause
+            if (window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.pause) {
+                window.ShaderToy.audioOutput.pause();
+            }
+        }
+
+        if (notifyExtension && vscode !== undefined) {
+            vscode.postMessage({
+                command: 'setPause',
+                paused: paused
+            });
+        }
+    };
     if (pauseButton) {
         pauseButton.checked = paused;
         pauseButton.onclick = function(){
-            paused = pauseButton.checked;
-            if (!paused) {
-                // Audio Resume
-                pausedTime += clock.getDelta();
-            }
-            else {
-                // Audio Pause
-            }
-
-            if (vscode !== undefined) {
-                vscode.postMessage({
-                    command: 'setPause',
-                    paused: paused
-                });
-            }
+            applyPauseState(pauseButton.checked, true);
         };
     }
     
@@ -198,6 +233,23 @@
             recordButton.addEventListener('click', recordAction);
         }
     }
+
+    {
+        let soundButton = document.getElementById("sound-button");
+        if (soundButton) {
+            let soundEnabled = true;
+            soundButton.classList.add('sound-on');
+            soundButton.addEventListener('click', () => {
+                soundEnabled = !soundEnabled;
+                soundButton.classList.toggle('sound-on', soundEnabled);
+                soundButton.classList.toggle('sound-off', !soundEnabled);
+
+                if (window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.setOutputEnabled) {
+                    window.ShaderToy.audioOutput.setOutputEnabled(soundEnabled);
+                }
+            });
+        }
+    }
     
     {
         let reloadButton = document.getElementById("reload");
@@ -210,24 +262,7 @@
         const message = event.data; // The JSON data our extension sent
         switch (message.command) {
             case 'pause':
-                if (pauseButton) {
-                    pauseButton.checked = !pauseButton.checked;
-                }
-                paused = !paused;
-                if (!paused) {
-                    // Audio Resume
-                    pausedTime += clock.getDelta();
-                }
-                else {
-                    // Audio Pause
-                }
-
-                if (vscode !== undefined) {
-                    vscode.postMessage({
-                        command: 'setPause',
-                        paused: paused
-                    });
-                }
+                applyPauseState(!paused, true);
                 break;
             case 'screenshot':
                 saveScreenshot();
@@ -333,10 +368,11 @@
                 computeSize();
             }
             catch (e) {
+                try { console.error(e); } catch { /* ignore */ }
                 if (vscode) {
                     vscode.postMessage({
                         command: 'errorMessage',
-                        message: 'Hot reload failed during init script.'
+                        message: 'Hot reload failed during init script: ' + (e && (e.stack || e.message) ? (e.stack || e.message) : String(e))
                     });
                 }
             }
@@ -439,6 +475,47 @@
             showSoundButton: showSoundButton,
             paused: paused
         });
+    }
+
+    if (window.ShaderToy && window.ShaderToy.audioGestureUnlocked !== true) {
+        if (glslUseVersion3 && hasSoundBuffer && audioContext && audioContext.state === 'running') {
+            window.ShaderToy.audioGestureUnlocked = true;
+            if (vscode && typeof vscode.setState === 'function') {
+                vscode.setState({ ...webviewState, audioGestureUnlocked: true });
+            }
+        }
+
+        if (glslUseVersion3 && hasSoundBuffer && audioContext && audioContext.state !== 'running') {
+            const gestureAlreadyUnlocked = window.ShaderToy && window.ShaderToy.audioGestureUnlocked === true;
+            if (!gestureAlreadyUnlocked) {
+                if (!paused) {
+                    forcedPauseForGesture = true;
+                    pausedBeforeGesture = false;
+                    applyPauseState(true, true);
+                } else {
+                    pausedBeforeGesture = true;
+                }
+                if (forcedPauseForGesture) {
+                    const resumeFromGesture = () => {
+                        if (!forcedPauseForGesture) {
+                            return;
+                        }
+                        forcedPauseForGesture = false;
+                        if (window.ShaderToy) {
+                            window.ShaderToy.audioGestureUnlocked = true;
+                        }
+                        if (vscode && typeof vscode.setState === 'function') {
+                            vscode.setState({ ...webviewState, audioGestureUnlocked: true });
+                        }
+                        if (!pausedBeforeGesture) {
+                            applyPauseState(false, true);
+                        }
+                    };
+                    window.addEventListener('pointerdown', resumeFromGesture, { once: true });
+                    window.addEventListener('keydown', resumeFromGesture, { once: true });
+                }
+            }
+        }
     }
 
     // WebGL2 inserts more lines into the shader
