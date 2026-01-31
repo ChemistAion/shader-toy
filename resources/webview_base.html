@@ -507,9 +507,13 @@
                         if (vscode && typeof vscode.setState === 'function') {
                             vscode.setState({ ...webviewState, audioGestureUnlocked: true });
                         }
-                        if (!pausedBeforeGesture) {
-                            applyPauseState(false, true);
+                        if (vscode) {
+                            vscode.postMessage({
+                                command: 'infoMessage',
+                                message: 'WebAudio autoplay policy required GESTURE noted;'
+                            });
                         }
+                        // Keep paused; user must explicitly press play.
                     };
                     window.addEventListener('pointerdown', resumeFromGesture, { once: true });
                     window.addEventListener('keydown', resumeFromGesture, { once: true });

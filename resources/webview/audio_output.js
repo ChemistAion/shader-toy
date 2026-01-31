@@ -49,6 +49,7 @@
         ready: false,
         pendingStartAt: null,
         gestureHandlerAttached: false,
+        gestureGranted: false,
         started: false,
         autoplayNotified: false
     };
@@ -712,14 +713,12 @@
     };
 
     const attachInitialStart = function () {
-        const startIfNeeded = () => {
-            if (!state.started) {
-                root.audioOutput.start(0, true);
-            }
+        const markGesture = () => {
+            state.gestureGranted = true;
         };
 
-        attachGestureResume(startIfNeeded);
-        global.addEventListener('focus', startIfNeeded, { once: true });
+        attachGestureResume(markGesture);
+        global.addEventListener('focus', markGesture, { once: true });
         const autoplayMessage = 'Audio output is blocked (due to WebAudio autoplay gesture policy) until you provide a user action to the GLSL-preview.';
         setStatus(autoplayMessage);
         if (!state.autoplayNotified) {
@@ -728,12 +727,11 @@
         }
     };
 
-    const scheduleGestureStart = function (startAt, resumeAndStart) {
+    const scheduleGestureStart = function (startAt) {
         state.pendingStartAt = startAt;
         attachGestureResume(() => {
-            const pending = state.pendingStartAt;
             state.pendingStartAt = null;
-            resumeAndStart(pending ?? 0);
+            state.gestureGranted = true;
         });
         const autoplayMessage = 'Audio output is blocked (due to WebAudio autoplay gesture policy) until you provide a user action to the GLSL-preview.';
         setStatus(autoplayMessage);
@@ -1325,12 +1323,15 @@
         };
 
         if (fromGesture) {
-            resumeAndStart();
             return;
         }
 
         if (state.audioContext.state !== 'running') {
-            scheduleGestureStart(startAt, resumeAndStart);
+            if (state.gestureGranted) {
+                resumeAndStart();
+                return;
+            }
+            scheduleGestureStart(startAt);
             return;
         }
 
@@ -1366,7 +1367,7 @@
             return;
         }
         if (!state.started) {
-            root.audioOutput.start(0, true);
+            root.audioOutput.start(0, false);
             return;
         }
         if (typeof state.audioContext.resume === 'function') {
