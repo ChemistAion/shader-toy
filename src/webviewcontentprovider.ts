@@ -2,6 +2,7 @@
 
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as path from 'path';
 import * as Types from './typenames';
 import { Context } from './context';
 import { BufferProvider } from './bufferprovider';
@@ -92,6 +93,7 @@ export class WebviewContentProvider {
 
     private buffers: Types.BufferDefinition[];
     private commonIncludes: Types.IncludeDefinition[];
+    private webviewErrors: { file: string, line: number, message: string }[];
 
     constructor(context: Context, documentContent: string, documentName: string) {
         this.context = context;
@@ -101,6 +103,208 @@ export class WebviewContentProvider {
 
         this.buffers = [];
         this.commonIncludes = [];
+        this.webviewErrors = [];
+    }
+
+    private buildDirectiveErrorScript(): string {
+        if (!this.webviewErrors || this.webviewErrors.length === 0) {
+            return '';
+        }
+
+        const errorsJson = JSON.stringify(this.webviewErrors);
+        return `
+  (() => {
+      const directiveErrors = ${errorsJson};
+      if (!directiveErrors || directiveErrors.length === 0) {
+          return;
+      }
+      const messageElement = document.getElementById('message');
+      if (!messageElement) {
+          return;
+      }
+      messageElement.innerHTML = '';
+      const header = document.createElement('h3');
+      header.textContent = 'Shader directive errors';
+      messageElement.appendChild(header);
+      const list = document.createElement('ul');
+      for (const err of directiveErrors) {
+          const li = document.createElement('li');
+          const lineNumber = Number(err.line);
+          const hasLine = Number.isFinite(lineNumber) && lineNumber >= 1;
+          if (hasLine && err.file) {
+              const link = document.createElement('a');
+              link.className = 'error';
+              link.setAttribute('unselectable', 'on');
+              link.textContent = 'Line ' + lineNumber;
+              link.onclick = () => {
+                  try {
+                      revealError(lineNumber, err.file);
+                  } catch { /* ignore */ }
+              };
+              li.appendChild(link);
+              li.appendChild(document.createTextNode(': ' + String(err.message) + ' (' + String(err.file) + ')'));
+          }
+          else {
+              li.textContent = String(err.message);
+          }
+          list.appendChild(li);
+      }
+      messageElement.appendChild(list);
+  })();
+  `;
+    }
+
+    public async generateHotReloadPayload(webview: vscode.Webview | undefined, startingState: Types.RenderStartingData): Promise<Types.HotReloadPayload> {
+
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        // Resource Helpers
+        const makeWebviewResource = webview !== undefined
+            ? (localPath: string) => this.context.makeWebviewResource(webview, this.context.makeUri(localPath)).toString()
+            : (localPath: string) => localPath;
+
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        // Feature Check
+        let useKeyboard = false;
+        let useAudio = false;
+        let useUniforms = false;
+        for (const buffer of this.buffers) {
+            if (buffer.UsesKeyboard) {
+                useKeyboard = true;
+            }
+
+            const audios = buffer.AudioInputs;
+            if (audios.length > 0) {
+                useAudio = true;
+            }
+
+            const uniforms = buffer.CustomUniforms;
+            if (uniforms.length > 0) {
+                useUniforms = true;
+            }
+        }
+
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        // Shader Preamble
+        const preambleExtension = new ShaderPreambleExtension();
+
+        let keyboardShaderExtension: KeyboardShaderExtension | undefined;
+        if (useKeyboard) {
+            keyboardShaderExtension = new KeyboardShaderExtension();
+        }
+
+        if (useUniforms) {
+            const uniformsPreambleExtension = new UniformsPreambleExtension(this.buffers);
+            preambleExtension.addPreambleExtension(uniformsPreambleExtension);
+        }
+
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        // Fix up line offsets
+        {
+            const glslPlusThreeJsLineNumbers = 107;
+
+            for (const buffer of this.buffers) {
+                buffer.LineOffset += preambleExtension.getShaderPreambleLineNumbers() + glslPlusThreeJsLineNumbers;
+                if (buffer.UsesKeyboard && keyboardShaderExtension !== undefined) {
+                    buffer.LineOffset += keyboardShaderExtension.getShaderPreambleLineNumbers();
+                }
+            }
+        }
+
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        // Init Script
+        const initScriptParts: string[] = [];
+
+        // Reset buffers/includes before re-initialization.
+        initScriptParts.push('buffers = [];');
+        initScriptParts.push('if (window.ShaderToy) { window.ShaderToy.buffers = buffers; }');
+        initScriptParts.push('commonIncludes = [];');
+
+        // Audio first (buffers init depends on audioContext.sampleRate).
+        if (useAudio) {
+            const audioInitExtension = new AudioInitExtension(this.buffers, this.context, makeWebviewResource);
+            initScriptParts.push(audioInitExtension.generateContent());
+
+            const textureInitExtension = new TexturesInitExtension();
+            await textureInitExtension.init(this.buffers, this.context, makeWebviewResource);
+            textureInitExtension.addTextureContent(audioInitExtension);
+
+            const buffersInitExtension = new BuffersInitExtension(this.buffers);
+            const includesInitExtension = new IncludesInitExtension(this.commonIncludes);
+
+            initScriptParts.push(buffersInitExtension.generateContent());
+            initScriptParts.push(includesInitExtension.generateContent());
+            initScriptParts.push(`if (isWebGL2) {\n    for (let buffer of buffers) {\n        buffer.LineOffset += WEBGL2_EXTRA_SHADER_LINES;\n        if (buffer.VertexLineOffset !== undefined) {\n            buffer.VertexLineOffset += WEBGL2_EXTRA_SHADER_LINES;\n        }\n    }\n}`);
+
+            if (useKeyboard) {
+                const keyboardInit = new KeyboardInitExtension(startingState.Keys);
+                initScriptParts.push(keyboardInit.generateContent());
+
+                const keyboardCallbacks = new KeyboardCallbacksExtension();
+                initScriptParts.push(keyboardCallbacks.generateContent());
+            }
+
+            if (useUniforms) {
+                const uniformsInitExtension = new UniformsInitExtension(this.buffers, startingState.UniformsGui);
+                initScriptParts.push(uniformsInitExtension.generateContent());
+            }
+
+            initScriptParts.push(textureInitExtension.generateContent());
+        }
+        else {
+            const noAudioExtension = new NoAudioExtension();
+            initScriptParts.push(noAudioExtension.generateContent());
+
+            const textureInitExtension = new TexturesInitExtension();
+            await textureInitExtension.init(this.buffers, this.context, makeWebviewResource);
+
+            const buffersInitExtension = new BuffersInitExtension(this.buffers);
+            const includesInitExtension = new IncludesInitExtension(this.commonIncludes);
+
+            initScriptParts.push(buffersInitExtension.generateContent());
+            initScriptParts.push(includesInitExtension.generateContent());
+            initScriptParts.push(`if (isWebGL2) {\n    for (let buffer of buffers) {\n        buffer.LineOffset += WEBGL2_EXTRA_SHADER_LINES;\n        if (buffer.VertexLineOffset !== undefined) {\n            buffer.VertexLineOffset += WEBGL2_EXTRA_SHADER_LINES;\n        }\n    }\n}`);
+
+            if (useKeyboard) {
+                const keyboardInit = new KeyboardInitExtension(startingState.Keys);
+                initScriptParts.push(keyboardInit.generateContent());
+
+                const keyboardCallbacks = new KeyboardCallbacksExtension();
+                initScriptParts.push(keyboardCallbacks.generateContent());
+            }
+
+            if (useUniforms) {
+                const uniformsInitExtension = new UniformsInitExtension(this.buffers, startingState.UniformsGui);
+                initScriptParts.push(uniformsInitExtension.generateContent());
+            }
+
+            initScriptParts.push(textureInitExtension.generateContent());
+        }
+
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        // Shader Scripts
+        const shadersExtension = new ShadersExtension(this.buffers, preambleExtension, keyboardShaderExtension);
+        const includesExtension = new IncludesExtension(this.commonIncludes, preambleExtension);
+
+        const state: Types.HotReloadState = {
+            time: startingState.Time,
+            paused: startingState.Paused,
+            mouse: startingState.Mouse,
+            normalizedMouse: startingState.NormalizedMouse,
+            flyControlPosition: startingState.FlyControlPosition,
+            flyControlRotation: startingState.FlyControlRotation
+        };
+
+        const directiveErrorScript = this.buildDirectiveErrorScript();
+        if (directiveErrorScript) {
+            initScriptParts.push(directiveErrorScript);
+        }
+
+        return {
+            shadersHtml: shadersExtension.generateContent(),
+            includesHtml: includesExtension.generateContent(),
+            initScript: initScriptParts.join('\n'),
+            state
+        };
     }
 
     public async parseShaderTree(generateStandalone: boolean): Promise<string[]> {
@@ -114,36 +318,46 @@ export class WebviewContentProvider {
             {
                 const buffer_provider = new BufferProvider(this.context);
                 await buffer_provider.parseShaderCode(shaderName, shader, this.buffers, this.commonIncludes, generateStandalone);
+                this.webviewErrors = buffer_provider.getWebviewErrors();
             }
 
-            // If final buffer uses feedback we need to add a last pass that renders it to the screen
+            // If final visual buffer uses feedback we need to add a last pass that renders it to the screen
             // because we can not ping-pong the screen
             {
-                const finalBuffer = this.buffers[this.buffers.length - 1];
-                if (finalBuffer.UsesSelf) {
-                    const finalBufferIndex = this.buffers.length - 1;
-                    finalBuffer.Dependents.push({
-                        Index: this.buffers.length,
-                        Channel: 0
-                    });
-                    this.buffers.push({
-                        Name: 'final-blit',
-                        File: 'final-blit',
-                        Code: 'void main() { GLSL_FRAGCOLOR = texture2D(iChannel0, gl_FragCoord.xy / iResolution.xy); }',
-                        TextureInputs: [{
-                            Channel: 0,
-                            File: '',
-                            Buffer: finalBuffer.Name,
-                            BufferIndex: finalBufferIndex,
-                        }],
-                        AudioInputs: [],
-                        CustomUniforms: [],
-                        Includes: [],
-                        UsesSelf: false,
-                        SelfChannel: -1,
-                        Dependents: [],
-                        LineOffset: 0,
-                    });
+                let finalBufferIndex = -1;
+                for (let i = this.buffers.length - 1; i >= 0; i--) {
+                    if (this.buffers[i].IsSound !== true) {
+                        finalBufferIndex = i;
+                        break;
+                    }
+                }
+
+                if (finalBufferIndex >= 0) {
+                    const finalBuffer = this.buffers[finalBufferIndex];
+                    if (finalBuffer.UsesSelf) {
+                        finalBuffer.Dependents.push({
+                            Index: this.buffers.length,
+                            Channel: 0
+                        });
+                        this.buffers.push({
+                            Name: 'final-blit',
+                            File: 'final-blit',
+                            Code: 'void main() { GLSL_FRAGCOLOR = texture2D(iChannel0, gl_FragCoord.xy / iResolution.xy); }',
+                            TextureInputs: [{
+                                Channel: 0,
+                                File: '',
+                                Buffer: finalBuffer.Name,
+                                BufferIndex: finalBufferIndex,
+                            }],
+                            AudioInputs: [],
+                            CustomUniforms: [],
+                            Includes: [],
+                            UsesSelf: false,
+                            SelfChannel: -1,
+                            Dependents: [],
+                            LineOffset: 0,
+                        });
+                    }
                 }
             }
         }
@@ -151,21 +365,26 @@ export class WebviewContentProvider {
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Local Resources
         let localResources: string[] = [];
+        const addIfLocalPath = (candidate: string | undefined) => {
+            if (!candidate || candidate === 'final-blit') {
+                return;
+            }
+
+            const normalized = candidate.replace(/\\/g, '/');
+            if (path.isAbsolute(normalized)) {
+                localResources.push(normalized);
+            }
+        };
         for (const buffer of this.buffers) {
+            addIfLocalPath(buffer.File);
+            addIfLocalPath(buffer.VertexFile);
             for (const texture of buffer.TextureInputs) {
-                if (texture.LocalTexture) {
-                    localResources.push(texture.LocalTexture);
-                }
+                addIfLocalPath(texture.LocalTexture);
             }
             for (const audio of buffer.AudioInputs) {
-                if (audio.LocalPath) {
-                    localResources.push(audio.LocalPath);
-                }
+                addIfLocalPath(audio.LocalPath);
             }
         }
-        localResources = localResources.filter(function (elem, index, self) {
-            return index === self.indexOf(elem);
-        });
         localResources = removeDuplicates(localResources);
 
         return localResources;
@@ -505,6 +724,14 @@ export class WebviewContentProvider {
         }
         else {
             errorsExtension = new DefaultErrorsExtension();
+        }
+
+        const directiveErrorScript = this.buildDirectiveErrorScript();
+        if (directiveErrorScript) {
+            const directiveErrorsExtension: WebviewExtension = {
+                generateContent: () => directiveErrorScript
+            };
+            this.webviewAssembler.addWebviewModule(directiveErrorsExtension, '// Error Callback');
         }
 
         if (glslVersionSetting === 'WebGL2') {

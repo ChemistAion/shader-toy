@@ -10,7 +10,10 @@ import { removeDuplicates } from './utility';
 
 type Webview = {
     Panel: vscode.WebviewPanel,
-    OnDidDispose: () => void
+    OnDidDispose: () => void,
+    HasHtml?: boolean,
+    LocalResources?: string[],
+    RootDocument?: vscode.TextDocument
 };
 type StaticWebview = Webview & {
     Document: vscode.TextDocument
@@ -43,17 +46,19 @@ export class ShaderToyManager {
             this.context.activeEditor = vscode.window.activeTextEditor;
         }
 
-        if (this.webviewPanel) {
-            this.webviewPanel.Panel.dispose();
+        if (!this.webviewPanel) {
+            const newWebviewPanel = this.createWebview('GLSL Preview', undefined);
+            this.webviewPanel = {
+                Panel: newWebviewPanel,
+                OnDidDispose: () => {
+                    this.webviewPanel = undefined;
+                }
+            };
+            newWebviewPanel.onDidDispose(this.webviewPanel.OnDidDispose);
         }
-        const newWebviewPanel = this.createWebview('GLSL Preview', undefined);
-        this.webviewPanel = {
-            Panel: newWebviewPanel,
-            OnDidDispose: () => {
-                this.webviewPanel = undefined;
-            }
-        };
-        newWebviewPanel.onDidDispose(this.webviewPanel.OnDidDispose);
+        else {
+            this.webviewPanel.Panel.reveal(undefined, true);
+        }
         if (this.context.activeEditor !== undefined) {
             this.webviewPanel = await this.updateWebview(this.webviewPanel, this.context.activeEditor.document);
         }
@@ -111,15 +116,22 @@ export class ShaderToyManager {
 
     public onDocumentEvent = async (document: vscode.TextDocument) => {
         if (this.context.getConfig<boolean>('reloadAutomatically')) {
-            const staticWebview = this.staticWebviews.find((webview: StaticWebview) => { return webview.Document === document; });
-            const isActiveDocument = this.context.activeEditor !== undefined && document === this.context.activeEditor.document;
-            if (isActiveDocument || staticWebview !== undefined) {
-                if (this.webviewPanel !== undefined && this.context.activeEditor !== undefined) {
-                    this.webviewPanel = await this.updateWebview(this.webviewPanel, this.context.activeEditor.document);
-                }
+            const changedFile = this.normalizePath(document.fileName);
 
-                this.staticWebviews.map((staticWebview: StaticWebview) => this.updateWebview(staticWebview, staticWebview.Document));
+            if (this.webviewPanel !== undefined && this.webviewPanel.LocalResources !== undefined) {
+                if (this.webviewPanel.LocalResources.includes(changedFile)) {
+                    const rootDocument = this.webviewPanel.RootDocument ?? document;
+                    this.webviewPanel = await this.updateWebview(this.webviewPanel, rootDocument);
+                }
             }
+
+            this.staticWebviews.forEach((staticWebview: StaticWebview) => {
+                const resources = staticWebview.LocalResources || [];
+                if (resources.includes(changedFile)) {
+                    const rootDocument = staticWebview.RootDocument ?? staticWebview.Document;
+                    this.updateWebview(staticWebview, rootDocument);
+                }
+            });
         }
     };
 
@@ -158,13 +170,23 @@ export class ShaderToyManager {
     };
 
     private createWebview = (title: string, localResourceRoots: vscode.Uri[] | undefined) => {
-        if (localResourceRoots !== undefined) {
-            const extensionRoot = vscode.Uri.file(this.context.getVscodeExtensionContext().extensionPath);
-            localResourceRoots.push(extensionRoot);
+        const resourceRoots: vscode.Uri[] = [];
+        const extensionRoot = vscode.Uri.file(this.context.getVscodeExtensionContext().extensionPath);
+        resourceRoots.push(extensionRoot);
+        if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length) {
+            for (const folder of vscode.workspace.workspaceFolders) {
+                resourceRoots.push(folder.uri);
+            }
         }
-        const options: vscode.WebviewOptions = {
+        if (localResourceRoots && localResourceRoots.length) {
+            for (const root of localResourceRoots) {
+                resourceRoots.push(root);
+            }
+        }
+        const options: vscode.WebviewPanelOptions & vscode.WebviewOptions = {
             enableScripts: true,
-            localResourceRoots: localResourceRoots
+            localResourceRoots: removeDuplicates(resourceRoots.map((uri) => uri.toString())).map((uri) => vscode.Uri.parse(uri)),
+            retainContextWhenHidden: true
         };
         const newWebviewPanel = vscode.window.createWebviewPanel(
             'shadertoy',
@@ -257,6 +279,9 @@ export class ShaderToyManager {
                 case 'setPause':
                     this.startingData.Paused = message.paused;
                     return;
+                case 'clearDiagnostics':
+                    this.context.clearDiagnostics();
+                    return;
                 case 'updateMouse':
                     this.startingData.Mouse = message.mouse;
                     this.startingData.NormalizedMouse = message.normalizedMouse;
@@ -309,6 +334,9 @@ export class ShaderToyManager {
                 case 'errorMessage':
                     vscode.window.showErrorMessage(message.message);
                     return;
+                case 'infoMessage':
+                    vscode.window.showInformationMessage(message.message);
+                    return;
                 }
             },
             undefined,
@@ -321,30 +349,24 @@ export class ShaderToyManager {
         this.context.clearDiagnostics();
         const webviewContentProvider = new WebviewContentProvider(this.context, document.getText(), document.fileName);
         const localResources = await webviewContentProvider.parseShaderTree(false);
+        const allResources = [document.fileName, ...localResources].map((resource) => this.normalizePath(resource));
+        webviewPanel.LocalResources = removeDuplicates(allResources);
+        webviewPanel.RootDocument = document;
 
-        let localResourceRoots: string[] = [];
-        for (const localResource of localResources) {
-            const localResourceRoot = path.dirname(localResource);
-            localResourceRoots.push(localResourceRoot);
-        }
-        localResourceRoots = removeDuplicates(localResourceRoots);
-
-        // Recreate webview if allowed resource roots are not part of the current resource roots
-        const previousLocalResourceRoots = webviewPanel.Panel.webview.options.localResourceRoots || [];
-        const previousHadLocalResourceRoot = (localResourceRootAsUri: string) => {
-            const foundElement = previousLocalResourceRoots.find(uri => uri.toString() === localResourceRootAsUri);
-            return foundElement !== undefined;
-        };
-        const previousHadAllLocalResourceRoots = localResourceRoots.every(localResourceRoot => previousHadLocalResourceRoot(vscode.Uri.file(localResourceRoot).toString()));
-        if (!previousHadAllLocalResourceRoots) {
-            const localResourceRootsUri = localResourceRoots.map(localResourceRoot => vscode.Uri.file(localResourceRoot));
-            const newWebviewPanel = this.createWebview(webviewPanel.Panel.title, localResourceRootsUri);
-            webviewPanel.Panel.dispose();
-            newWebviewPanel.onDidDispose(webviewPanel.OnDidDispose);
-            webviewPanel.Panel = newWebviewPanel;
+        // Keep webview resource roots stable to preserve gesture state.
+        if (webviewPanel.HasHtml) {
+            const payload = await webviewContentProvider.generateHotReloadPayload(webviewPanel.Panel.webview, this.startingData);
+            webviewPanel.Panel.webview.postMessage({ command: 'hotReload', payload });
+            return webviewPanel;
         }
 
         webviewPanel.Panel.webview.html = await webviewContentProvider.generateWebviewContent(webviewPanel.Panel.webview, this.startingData);
+        webviewPanel.HasHtml = true;
         return webviewPanel;
     };
+
+    private normalizePath(input: string): string {
+        const normalized = path.normalize(input).replace(/\\/g, '/');
+        return normalized.toLowerCase();
+    }
 }

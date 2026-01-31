@@ -28,6 +28,22 @@ export class RenderStartingData {
     UniformsGui: UniformsGuiStartingData = { Open: false, Values: new Map<string, number[]>() };
 }
 
+export type HotReloadState = {
+    time: number;
+    paused: boolean;
+    mouse: Mouse;
+    normalizedMouse: NormalizedMouse;
+    flyControlPosition: Position;
+    flyControlRotation: Quaternion;
+};
+
+export type HotReloadPayload = {
+    shadersHtml: string;
+    includesHtml: string;
+    initScript: string;
+    state: HotReloadState;
+};
+
 export enum TextureMagFilter {
     Linear  = 'Linear',
     Nearest = 'Nearest',

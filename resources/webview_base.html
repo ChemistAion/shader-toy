@@ -230,8 +230,119 @@
             case 'screenshot':
                 saveScreenshot();
                 break;
+            case 'hotReload':
+                if (window.ShaderToy && window.ShaderToy.hotReload) {
+                    window.ShaderToy.hotReload(message.payload);
+                }
+                break;
         }
     });
+
+    function replaceScriptTags(selector, html) {
+        const existing = document.querySelectorAll(selector);
+        existing.forEach((node) => node.parentNode && node.parentNode.removeChild(node));
+        if (!html) {
+            return;
+        }
+        const container = document.createElement('div');
+        container.innerHTML = html;
+        const scripts = Array.from(container.querySelectorAll('script'));
+        for (const script of scripts) {
+            document.body.appendChild(script);
+        }
+    }
+
+    window.ShaderToy = window.ShaderToy || {};
+    window.ShaderToy.hotReload = function(payload) {
+        if (!payload) {
+            return;
+        }
+
+        if (vscode) {
+            vscode.postMessage({ command: 'clearDiagnostics' });
+        }
+
+        const messageElement = document.getElementById('message');
+        if (messageElement) {
+            messageElement.innerHTML = '';
+        }
+
+        if (payload.state) {
+            if (typeof payload.state.time === 'number') {
+                startingTime = payload.state.time;
+                time = payload.state.time;
+            }
+            if (typeof payload.state.paused === 'boolean') {
+                paused = payload.state.paused;
+            }
+            if (payload.state.mouse) {
+                mouse = new THREE.Vector4(payload.state.mouse.x, payload.state.mouse.y, payload.state.mouse.z, payload.state.mouse.w);
+            }
+            if (payload.state.normalizedMouse) {
+                normalizedMouse = new THREE.Vector2(payload.state.normalizedMouse.x, payload.state.normalizedMouse.y);
+            }
+            if (payload.state.flyControlPosition) {
+                controlState.position.set(payload.state.flyControlPosition[0], payload.state.flyControlPosition[1], payload.state.flyControlPosition[2]);
+            }
+            if (payload.state.flyControlRotation) {
+                controlState.quaternion.set(payload.state.flyControlRotation[0], payload.state.flyControlRotation[1], payload.state.flyControlRotation[2], payload.state.flyControlRotation[3]);
+            }
+            if (!paused) {
+                pausedTime = 0.0;
+            }
+
+            if (window.ShaderToy && window.ShaderToy.audioOutput) {
+                if (paused && window.ShaderToy.audioOutput.pause) {
+                    window.ShaderToy.audioOutput.pause();
+                }
+
+                if (!paused && window.ShaderToy.audioOutput.resume) {
+                    window.ShaderToy.audioOutput.resume(true);
+                }
+            }
+        }
+
+        replaceScriptTags("script[data-shadertoy='include']", payload.includesHtml);
+        replaceScriptTags("script[data-shadertoy='shader']", payload.shadersHtml);
+
+        if (payload.initScript) {
+            try {
+                if (buffers && buffers.length) {
+                    for (const buffer of buffers) {
+                        try {
+                            if (buffer.Shader && buffer.Shader.dispose) {
+                                buffer.Shader.dispose();
+                            }
+                        } catch { /* ignore */ }
+                        try {
+                            if (buffer.Target && buffer.Target.dispose) {
+                                buffer.Target.dispose();
+                            }
+                        } catch { /* ignore */ }
+                        try {
+                            if (buffer.PingPongTarget && buffer.PingPongTarget.dispose) {
+                                buffer.PingPongTarget.dispose();
+                            }
+                        } catch { /* ignore */ }
+                    }
+                }
+
+                (0, eval)(payload.initScript);
+                computeSize();
+            }
+            catch (e) {
+                if (vscode) {
+                    vscode.postMessage({
+                        command: 'errorMessage',
+                        message: 'Hot reload failed during init script.'
+                    });
+                }
+            }
+        }
+
+        compileAllShaders();
+        forceRenderOneFrame = true;
+    };
 
     // GLSL version selection
     // Values: 'Default' | 'WebGL2'
@@ -329,53 +440,57 @@
     let camera = new THREE.OrthographicCamera(-resolution.x / 2.0, resolution.x / 2.0, resolution.y / 2.0, -resolution.y / 2.0, 1, 1000);
     camera.position.set(0, 0, 10);
 
-    // Run every shader once to check for compile errors
-    let compileTimeStart = performance.now();
-    let failed=0;
     const failedBufferNames = new Set();
-    for (let include of commonIncludes) {
-        currentShader = {
-            Name: include.Name,
-            File: include.File,
-            // add for wrapper lines inserted by compileFragShader
-            LineOffset: <!-- Preamble Line Numbers --> + 2 + (isWebGL2 ? WEBGL2_EXTRA_SHADER_LINES : 0)
-        };
-        // Test Compile Included Files
-    }
-
-    for (let buffer of buffers) {
-        if (buffer.VertexShaderElementId !== undefined) {
+    function compileAllShaders() {
+        // Run every shader once to check for compile errors
+        let compileTimeStart = performance.now();
+        let failed = 0;
+        failedBufferNames.clear();
+        for (let include of commonIncludes) {
             currentShader = {
-                Name: buffer.Name + ' (vertex)',
-                File: buffer.VertexFile,
-                LineOffset: buffer.VertexLineOffset
+                Name: include.Name,
+                File: include.File,
+                // add for wrapper lines inserted by compileFragShader
+                LineOffset: <!-- Preamble Line Numbers --> + 2 + (isWebGL2 ? WEBGL2_EXTRA_SHADER_LINES : 0)
             };
+            // Test Compile Included Files
+        }
 
-            const vertexSource = prepareVertexShader(document.getElementById(buffer.VertexShaderElementId).textContent);
-            if (!compileVertShader(gl, vertexSource)) {
-                failed++;
-                failedBufferNames.add(buffer.Name);
-                continue;
+        for (let buffer of buffers) {
+            if (buffer.VertexShaderElementId !== undefined) {
+                currentShader = {
+                    Name: buffer.Name + ' (vertex)',
+                    File: buffer.VertexFile,
+                    LineOffset: buffer.VertexLineOffset
+                };
+
+                const vertexSource = prepareVertexShader(document.getElementById(buffer.VertexShaderElementId).textContent);
+                if (!compileVertShader(gl, vertexSource)) {
+                    failed++;
+                    failedBufferNames.add(buffer.Name);
+                    continue;
+                }
+            }
+            currentShader = {
+                Name: buffer.Name,
+                File: buffer.File,
+                LineOffset: buffer.LineOffset
+            };
+            quad.material = buffer.Shader;
+            renderer.setRenderTarget(buffer.Target);
+            renderer.render(scene, camera);
+        }
+        currentShader = {};
+        let compileTimeEnd = performance.now();
+        let compileTime = compileTimeEnd - compileTimeStart;
+        if (compileTimePanel !== undefined) {
+            for (let i = 0; i < 200; i++) {
+                compileTimePanel.update(compileTime, 200);
             }
         }
-        currentShader = {
-            Name: buffer.Name,
-            File: buffer.File,
-            LineOffset: buffer.LineOffset
-        };
-        quad.material = buffer.Shader;
-        renderer.setRenderTarget(buffer.Target);
-        renderer.render(scene, camera);
-    }
-    currentShader = {};
-    let compileTimeEnd = performance.now();
-    let compileTime = compileTimeEnd - compileTimeStart;
-    if (compileTimePanel !== undefined) {
-        for (let i = 0; i < 200; i++) {
-            compileTimePanel.update(compileTime, 200);
-        }
     }
 
+    compileAllShaders();
     computeSize();
     render();
 

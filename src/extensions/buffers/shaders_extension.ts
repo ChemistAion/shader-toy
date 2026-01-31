@@ -22,7 +22,7 @@ export class ShadersExtension implements WebviewExtension {
                 }
             }
             this.content += `\
-<script id='${buffer.Name}' type='x-shader/x-fragment'>
+<script data-shadertoy='shader' id='${buffer.Name}' type='x-shader/x-fragment'>
 ${preamble}
 ${keyboardShaderExtension !== undefined ? keyboardShaderExtension.getShaderPreamble() : ''}
 #line 1 0
@@ -31,7 +31,7 @@ ${buffer.Code}
 
             if (buffer.VertexCode !== undefined) {
                 this.content += `\
-<script id='${buffer.Name}_vertex' type='x-shader/x-vertex'>
+<script data-shadertoy='shader' id='${buffer.Name}_vertex' type='x-shader/x-vertex'>
 ${preamble}
 ${keyboardShaderExtension !== undefined ? keyboardShaderExtension.getShaderPreamble() : ''}
 ${buffer.VertexCode}
