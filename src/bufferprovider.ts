@@ -1102,7 +1102,7 @@ vec2 mainSound(int sampleIndex, float sampleTime) {
                 } else {
                     sampleBindings.push({ Name: nextObject.Name, SoundIndex: nextObject.Index });
                 }
-                replaceLastObject(`uniform vec2 ${nextObject.Name};`);
+                replaceLastObject(`uniform sampler2D ${nextObject.Name};`);
                 break;
             }
             case ObjectType.Keyboard:

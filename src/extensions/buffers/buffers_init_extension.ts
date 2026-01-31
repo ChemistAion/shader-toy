@@ -12,16 +12,33 @@ export class BuffersInitExtension implements WebviewExtension {
     }
 
     private processBuffers(buffers: Types.BufferDefinition[]) {
+        let lastVisualIndex = -1;
+        for (let i = buffers.length - 1; i >= 0; i--) {
+            if (buffers[i].IsSound !== true) {
+                lastVisualIndex = i;
+                break;
+            }
+        }
+
+        let bufferIndex = 0;
         for (const buffer of buffers) {
-            // Create a RenderTarget for all but the final buffer
+            const isSound = buffer.IsSound === true;
+
+            // Create a RenderTarget for all but the final visual buffer
             let target = 'null';
             let pingPongTarget = 'null';
-            if (buffer !== buffers[buffers.length - 1]) {
+            if (!isSound && bufferIndex !== lastVisualIndex) {
                 target = 'new THREE.WebGLRenderTarget(resolution.x, resolution.y, { type: framebufferType })';
             }
-            if (buffer.UsesSelf) {
+            if (!isSound && buffer.UsesSelf) {
                 pingPongTarget = 'new THREE.WebGLRenderTarget(resolution.x, resolution.y, { type: framebufferType })';
             }
+
+            const defaultVertexShader = `glslUseVersion3 ? prepareVertexShader('void main() { gl_Position = vec4(position, 1.0); }') : 'void main() { gl_Position = vec4(position, 1.0); }'`;
+            const glslVersionLine = `...(glslUseVersion3 && THREE.GLSL3 ? { glslVersion: THREE.GLSL3 } : {})`;
+            const sampleUniforms = (buffer.SampleBindings || [])
+                .map((binding) => `\n            ${binding.Name}: { type: 't' },`)
+                .join('');
 
             this.content += `\
 buffers.push({
@@ -31,14 +48,18 @@ buffers.push({
     VertexFile: ${buffer.VertexFile !== undefined ? `'${buffer.VertexFile}'` : 'undefined'},
     VertexLineOffset: ${buffer.VertexLineOffset !== undefined ? `${buffer.VertexLineOffset}` : 'undefined'},
     VertexShaderElementId: ${buffer.VertexCode !== undefined ? `'${buffer.Name}_vertex'` : 'undefined'},
+    IsSound: ${buffer.IsSound ? 'true' : 'false'},
+    SoundIndices: ${buffer.SoundIndices ? JSON.stringify(buffer.SoundIndices) : 'undefined'},
+    SoundPrecision: ${buffer.SoundPrecision !== undefined ? JSON.stringify(buffer.SoundPrecision) : 'undefined'},
     Target: ${target},
     ChannelResolution: Array(10).fill(new THREE.Vector3(0,0,0)),
     PingPongTarget: ${pingPongTarget},
     PingPongChannel: ${buffer.SelfChannel},
     Dependents: ${JSON.stringify(buffer.Dependents)},
-    Shader: new THREE.ShaderMaterial({
-        glslVersion: glslUseVersion3 ? THREE.GLSL3 : THREE.GLSL1,
-        vertexShader: ${buffer.VertexCode !== undefined ? `prepareVertexShader(document.getElementById(${JSON.stringify(buffer.Name + '_vertex')}).textContent)` : 'undefined'},
+    SampleBindings: ${JSON.stringify(buffer.SampleBindings || [])},
+    Shader: ${isSound ? 'null' : `new THREE.ShaderMaterial({
+        ${glslVersionLine},
+        vertexShader: ${buffer.VertexCode !== undefined ? `prepareVertexShader(document.getElementById(${JSON.stringify(buffer.Name + '_vertex')}).textContent)` : defaultVertexShader},
         fragmentShader: prepareFragmentShader(document.getElementById(${JSON.stringify(buffer.Name)}).textContent),
         depthWrite: false,
         depthTest: false,
@@ -54,6 +75,20 @@ buffers.push({
 
             iDate: { type: 'v4', value: date },
             iSampleRate: { type: 'f', value: audioContext.sampleRate },
+            iAudioTime: { type: 'f', value: 0.0 },
+            iSampleBlockSize: { type: 'i', value: 512 * 512 },
+            iSampleRingDepth: { type: 'i', value: 0 },
+            iSoundIndex: { type: 'i', value: -1 },
+            iSampleRing0: { type: 't' },
+            iSampleRing1: { type: 't' },
+            iSampleRing2: { type: 't' },
+            iSampleRing3: { type: 't' },
+            iSampleRing4: { type: 't' },
+            iSampleRing5: { type: 't' },
+            iSampleRing6: { type: 't' },
+            iSampleRing7: { type: 't' },
+            iSampleRing8: { type: 't' },
+            iSampleRing9: { type: 't' },
 
             iChannel0: { type: 't' },
             iChannel1: { type: 't' },
@@ -65,13 +100,15 @@ buffers.push({
             iChannel7: { type: 't' },
             iChannel8: { type: 't' },
             iChannel9: { type: 't' },
+            ${sampleUniforms}
 
             resolution: { type: 'v2', value: resolution },
             time: { type: 'f', value: 0.0 },
             mouse: { type: 'v2', value: normalizedMouse },
         }
-    })
+    })`}
 });`;
+            bufferIndex += 1;
         }
     }
 

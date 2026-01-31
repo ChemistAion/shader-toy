@@ -5,7 +5,8 @@ import { WebviewExtension } from '../webview_extension';
 export class AudioUpdateExtension implements WebviewExtension {
     public generateContent(): string {
         return `\
-for (let audio of audios) {
+    const audios = (window.ShaderToy && window.ShaderToy.audios) ? window.ShaderToy.audios : [];
+    for (let audio of audios) {
     const analyserLeft = audio.AnalyserLeft || audio.Analyser;
     const analyserRight = audio.AnalyserRight || audio.Analyser;
     if (!analyserLeft || !analyserRight) {
@@ -41,6 +42,49 @@ for (let audio of audios) {
     }
 
     audio.Texture.needsUpdate = true;
-}`;
+}
+
+if (window.ShaderToy && window.ShaderToy.audioOutput && typeof window.ShaderToy.audioOutput.getSampleRingTexture === 'function') {
+    const audioOutput = window.ShaderToy.audioOutput;
+    const audioTime = audioOutput.getAudioTime ? audioOutput.getAudioTime() : null;
+    const sampleBlockSize = audioOutput.getSampleBlockSize ? audioOutput.getSampleBlockSize() : null;
+    const sampleRingDepth = audioOutput.getSampleRingDepth ? audioOutput.getSampleRingDepth() : null;
+
+    if (buffers && buffers.length) {
+        for (const buffer of buffers) {
+            if (!buffer || buffer.IsSound || !buffer.Shader || !buffer.Shader.uniforms) {
+                continue;
+            }
+            const uniforms = buffer.Shader.uniforms;
+            if (uniforms.iAudioTime && audioTime !== null) {
+                uniforms.iAudioTime.value = audioTime;
+            }
+            if (uniforms.iSampleBlockSize && sampleBlockSize !== null) {
+                uniforms.iSampleBlockSize.value = sampleBlockSize;
+            }
+            if (uniforms.iSampleRingDepth && sampleRingDepth !== null) {
+                uniforms.iSampleRingDepth.value = sampleRingDepth;
+            }
+            for (let i = 0; i < 10; i++) {
+                const uniformName = 'iSampleRing' + i;
+                if (uniforms[uniformName]) {
+                    uniforms[uniformName].value = audioOutput.getSampleRingTexture(i);
+                }
+            }
+            if (Array.isArray(buffer.SampleBindings)) {
+                for (const binding of buffer.SampleBindings) {
+                    if (!binding || !binding.Name) {
+                        continue;
+                    }
+                    const uniform = uniforms[binding.Name];
+                    if (uniform) {
+                        uniform.value = audioOutput.getSampleRingTexture(binding.SoundIndex);
+                    }
+                }
+            }
+        }
+    }
+}
+`;
     }
 }

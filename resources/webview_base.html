@@ -501,6 +501,9 @@
         }
 
         for (let buffer of buffers) {
+            if (buffer.IsSound || !buffer.Shader) {
+                continue;
+            }
             if (buffer.VertexShaderElementId !== undefined) {
                 currentShader = {
                     Name: buffer.Name + ' (vertex)',
@@ -581,6 +584,9 @@
             if (failedBufferNames.has(buffer.Name)) {
                 continue;
             }
+            if (buffer.IsSound || !buffer.Shader) {
+                continue;
+            }
             buffer.Shader.uniforms['iResolution'].value = resolution;
             buffer.Shader.uniforms['iTimeDelta'].value = deltaTime;
             buffer.Shader.uniforms['iTime'].value = time;
@@ -609,6 +615,9 @@
         }
 
         for (let buffer of buffers) {
+            if (buffer.IsSound) {
+                continue;
+            }
             if (buffer.PingPongTarget) {
                 [buffer.PingPongTarget, buffer.Target] = [buffer.Target, buffer.PingPongTarget];
                 buffer.Shader.uniforms[`iChannel${buffer.PingPongChannel}`].value = buffer.PingPongTarget.texture;
@@ -656,6 +665,9 @@
         canvas.style.top = `${(window.innerHeight - resolution.y*zoom) / 2}px`;
 
         for (let buffer of buffers) {
+            if (buffer.IsSound) {
+                continue;
+            }
             if (buffer.Target) {
                 buffer.Target.setSize(resolution.x, resolution.y);
             }
@@ -696,6 +708,9 @@
             renderer.setSize(forcedScreenshotResolution[0], forcedScreenshotResolution[1], false);
             
             for (let buffer of buffers) {
+                if (buffer.IsSound || !buffer.Shader) {
+                    continue;
+                }
                 buffer.Shader.uniforms['iResolution'].value = new THREE.Vector3(forcedScreenshotResolution[0], forcedScreenshotResolution[1], 1);
                 buffer.Shader.uniforms['resolution'].value = new THREE.Vector3(forcedScreenshotResolution[0], forcedScreenshotResolution[1], 1);
 

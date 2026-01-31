@@ -511,6 +511,9 @@ function loadDDSTexture(url, bufferIndex, channelIndex, onLoad, onError) {
 
         for (const i in buffers) {
             const buffer = buffers[i];
+            if (!buffer || buffer.IsSound || !buffer.Shader) {
+                continue;
+            }
             const textures =  buffer.TextureInputs;
             for (const texture of textures) {
                 const channel = texture.Channel;

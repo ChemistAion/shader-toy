@@ -14,6 +14,9 @@ export class UniformsUpdateExtension implements WebviewExtension {
     private processBuffers(buffers: Types.BufferDefinition[]) {
         for (const i in buffers) {
             const buffer = buffers[i];
+            if (buffer.IsSound) {
+                continue;
+            }
             const uniforms = buffer.CustomUniforms;
             for (const uniform of uniforms) {
                 let uniform_access = `buffers[${i}].UniformValues.${uniform.Name}`;

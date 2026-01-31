@@ -505,6 +505,13 @@
                 blockOffset: { type: 'f', value: 0 }
             }
         };
+        if (buffer && Array.isArray(buffer.SampleBindings)) {
+            for (const binding of buffer.SampleBindings) {
+                if (binding && binding.Name) {
+                    materialOptions.uniforms[binding.Name] = { type: 't' };
+                }
+            }
+        }
         if (options.glslUseVersion3 && global.THREE.GLSL3) {
             materialOptions.glslVersion = global.THREE.GLSL3;
         }
@@ -958,6 +965,17 @@
                 const uniformName = `iSampleRing${i}`;
                 if (ctx.material.uniforms[uniformName]) {
                     ctx.material.uniforms[uniformName].value = root.audioOutput.getSampleRingTexture(i);
+                }
+            }
+            if (soundBuffer && Array.isArray(soundBuffer.SampleBindings)) {
+                for (const binding of soundBuffer.SampleBindings) {
+                    if (!binding || !binding.Name) {
+                        continue;
+                    }
+                    const uniform = ctx.material.uniforms[binding.Name];
+                    if (uniform) {
+                        uniform.value = root.audioOutput.getSampleRingTexture(binding.SoundIndex);
+                    }
                 }
             }
         }

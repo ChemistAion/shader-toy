@@ -31,6 +31,20 @@ uniform sampler2D   iChannel8;
 uniform sampler2D   iChannel9;
 uniform sampler2D   iKeyboard;
 uniform float       iSampleRate;
+uniform float       iAudioTime;
+uniform int         iSampleBlockSize;
+uniform int         iSampleRingDepth;
+uniform int         iSoundIndex;
+uniform sampler2D   iSampleRing0;
+uniform sampler2D   iSampleRing1;
+uniform sampler2D   iSampleRing2;
+uniform sampler2D   iSampleRing3;
+uniform sampler2D   iSampleRing4;
+uniform sampler2D   iSampleRing5;
+uniform sampler2D   iSampleRing6;
+uniform sampler2D   iSampleRing7;
+uniform sampler2D   iSampleRing8;
+uniform sampler2D   iSampleRing9;
 
 #define iGlobalTime iTime
 #define iGlobalFrame iFrame

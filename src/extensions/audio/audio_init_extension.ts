@@ -18,6 +18,9 @@ export class AudioInitExtension implements WebviewExtension, TextureExtensionExt
     private processBuffers(buffers: Types.BufferDefinition[], context: Context, makeAvailableResource: (localUri: string) => string) {
         for (const i in buffers) {
             const buffer = buffers[i];
+            if (!buffer || buffer.IsSound || !buffer.Shader) {
+                continue;
+            }
             const audios =  buffer.AudioInputs;
             for (const j in audios) {
                 const audio = audios[j];
