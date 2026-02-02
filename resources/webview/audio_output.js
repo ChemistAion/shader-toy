@@ -388,7 +388,7 @@
 
     const resolvePrecision = function (options) {
         const precisionRaw = String(options.precision || '32bFLOAT');
-        const precision = (precisionRaw === '32bFLOAT' || precisionRaw === '16bFLOAT' || precisionRaw === '16bPACK')
+        const precision = (precisionRaw === '32bFLOAT' || precisionRaw === '16bFLOAT' || precisionRaw === '16bPACK' || precisionRaw === '8bPACK')
             ? precisionRaw
             : '32bFLOAT';
         const gl = options.gl;
@@ -400,6 +400,9 @@
         const supportsFloat = isWebGL2 && !!extColorFloat;
         const supportsHalfFloat = isWebGL2 && (!!extColorFloat || !!extColorHalfFloat);
 
+        if (precision === '8bPACK') {
+            return '8bPACK';
+        }
         if (precision === '32bFLOAT' && supportsFloat) {
             return '32bFLOAT';
         }
@@ -412,19 +415,10 @@
         return '16bPACK';
     };
 
-    const resolvePrecisionForBuffer = function (options, soundBuffer) {
-        const precision = soundBuffer && soundBuffer.SoundPrecision ? soundBuffer.SoundPrecision : options.precision;
-        if (precision === undefined || precision === null) {
-            return resolvePrecision(options);
-        }
-        const localOptions = Object.assign({}, options, { precision: precision });
-        return resolvePrecision(localOptions);
-    };
-
     const getPrecisionSummary = function (options, soundBuffers) {
         const precisions = new Set();
         for (const soundBuffer of soundBuffers || []) {
-            precisions.add(resolvePrecisionForBuffer(options, soundBuffer));
+            precisions.add(resolvePrecision(options));
         }
         if (precisions.size === 0) {
             return resolvePrecision(options);
@@ -437,7 +431,7 @@
 
     const reportPrecisionFallback = function (options, resolvedPrecision, label) {
         const requestedRaw = String(options.precision || '32bFLOAT');
-        const requested = (requestedRaw === '32bFLOAT' || requestedRaw === '16bFLOAT' || requestedRaw === '16bPACK')
+        const requested = (requestedRaw === '32bFLOAT' || requestedRaw === '16bFLOAT' || requestedRaw === '16bPACK' || requestedRaw === '8bPACK')
             ? requestedRaw
             : '32bFLOAT';
         if (requested === resolvedPrecision) {
@@ -485,6 +479,17 @@
     vec2 vl = mod(v, 256.0) / 255.0;
     vec2 vh = floor(v / 256.0) / 255.0;
     GLSL_FRAGCOLOR = vec4(vl.x, vh.x, vl.y, vh.y);
+}` : (precisionMode === '8bPACK') ? `
+    uniform float blockOffset;
+
+    void main() {
+    float sampleTime = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0) / iSampleRate;
+    float sampleIndex = (blockOffset * iSampleRate) + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0);
+    int sampleIndexInt = int(sampleIndex);
+    vec2 y = mainSound(sampleIndexInt, sampleTime);
+    vec2 v  = floor((0.5 + 0.5 * y) * 255.0 + 0.5);
+    vec2 vl = v / 255.0;
+    GLSL_FRAGCOLOR = vec4(vl.x, vl.y, 0.0, 1.0);
 }` : `
     uniform float blockOffset;
 
@@ -541,13 +546,6 @@
                 blockOffset: { type: 'f', value: 0 }
             }
         };
-        if (buffer && Array.isArray(buffer.SampleBindings)) {
-            for (const binding of buffer.SampleBindings) {
-                if (binding && binding.Name) {
-                    materialOptions.uniforms[binding.Name] = { type: 't' };
-                }
-            }
-        }
         if (options.glslUseVersion3 && global.THREE.GLSL3) {
             materialOptions.glslVersion = global.THREE.GLSL3;
         }
@@ -820,7 +818,7 @@
         const mesh = new global.THREE.Mesh(new global.THREE.PlaneGeometry(2, 2), material);
         scene.add(mesh);
 
-        const pixels = (precisionMode === '16bPACK')
+        const pixels = (precisionMode === '16bPACK' || precisionMode === '8bPACK')
             ? new Uint8Array(WIDTH * HEIGHT * 4)
             : new Float32Array(WIDTH * HEIGHT * 4);
 
@@ -859,7 +857,7 @@
                     textureTypeName = String(texType);
                 }
             }
-            const readbackType = (precisionMode === '16bPACK') ? 'Uint8Array' : 'Float32Array';
+            const readbackType = (precisionMode === '16bPACK' || precisionMode === '8bPACK') ? 'Uint8Array' : 'Float32Array';
             const bytesPerComponent = (precisionMode === '32bFLOAT') ? 4 : (precisionMode === '16bFLOAT' ? 2 : 1);
             const targetBytes = WIDTH * HEIGHT * 4 * bytesPerComponent;
             const audioBlockBytes = samplesPerBlock * 2 * 4;
@@ -956,17 +954,6 @@
                     ctx.material.uniforms[uniformName].value = root.audioOutput.getSampleRingTexture(i);
                 }
             }
-            if (soundBuffer && Array.isArray(soundBuffer.SampleBindings)) {
-                for (const binding of soundBuffer.SampleBindings) {
-                    if (!binding || !binding.Name) {
-                        continue;
-                    }
-                    const uniform = ctx.material.uniforms[binding.Name];
-                    if (uniform) {
-                        uniform.value = root.audioOutput.getSampleRingTexture(binding.SoundIndex);
-                    }
-                }
-            }
         }
 
         const previousShader = global.currentShader;
@@ -997,6 +984,12 @@
                 const pixelIndex = j * 4;
                 left[j] = (ctx.pixels[pixelIndex + 0] + 256 * ctx.pixels[pixelIndex + 1]) / 65535 * 2 - 1;
                 right[j] = (ctx.pixels[pixelIndex + 2] + 256 * ctx.pixels[pixelIndex + 3]) / 65535 * 2 - 1;
+            }
+        } else if (precisionMode === '8bPACK') {
+            for (let j = 0; j < ctx.samplesPerBlock; j++) {
+                const pixelIndex = j * 4;
+                left[j] = (ctx.pixels[pixelIndex + 0] / 255) * 2 - 1;
+                right[j] = (ctx.pixels[pixelIndex + 1] / 255) * 2 - 1;
             }
         } else {
             for (let j = 0; j < ctx.samplesPerBlock; j++) {
@@ -1057,7 +1050,7 @@
             let mixedRight = null;
 
             for (const soundBuffer of soundBuffers) {
-                const precisionMode = resolvePrecisionForBuffer(options, soundBuffer);
+                const precisionMode = resolvePrecision(options);
                 const block = renderSoundBlock(state.stream.nextBlock, options, precisionMode, soundBuffer);
                 if (!block) {
                     continue;
@@ -1152,14 +1145,7 @@
         const precisionMode = resolvePrecision(options);
         const precisionSummary = getPrecisionSummary(options, soundBuffers);
         reportPrecisionFallback(options, precisionMode);
-        for (const soundBuffer of soundBuffers) {
-            if (!soundBuffer || !soundBuffer.SoundPrecision) {
-                continue;
-            }
-            const localOptions = Object.assign({}, options, { precision: soundBuffer.SoundPrecision });
-            const bufferPrecision = resolvePrecision(localOptions);
-            reportPrecisionFallback(localOptions, bufferPrecision, soundBuffer.Name);
-        }
+        
         const blockSeconds = (512 * 512) / state.audioContext.sampleRate;
         setStatus(`Audio: ${precisionSummary} @ ${state.audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
         resetSampleRings();
@@ -1252,14 +1238,7 @@
         const precisionMode = resolvePrecision(options);
         const precisionSummary = getPrecisionSummary(options, soundBuffers);
         reportPrecisionFallback(options, precisionMode);
-        for (const soundBuffer of soundBuffers) {
-            if (!soundBuffer || !soundBuffer.SoundPrecision) {
-                continue;
-            }
-            const localOptions = Object.assign({}, options, { precision: soundBuffer.SoundPrecision });
-            const bufferPrecision = resolvePrecision(localOptions);
-            reportPrecisionFallback(localOptions, bufferPrecision, soundBuffer.Name);
-        }
+
         const blockSeconds = (512 * 512) / audioContext.sampleRate;
         setStatus(`Audio: ${precisionSummary} @ ${audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
         resetSampleRings();

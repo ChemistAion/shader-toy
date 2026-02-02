@@ -16,7 +16,6 @@ export enum ObjectType {
     Number,
     Value,
     Uniform,
-    SoundFormat,
     Keyboard,
     FirstPersonControls,
     StrictCompatibility,
@@ -34,11 +33,6 @@ type Sound = {
     Type: ObjectType.Sound,
     Index: number,
     Path: string
-};
-type SoundFormat = {
-    Type: ObjectType.SoundFormat,
-    Index: number,
-    Value: string
 };
 type Texture = {
     Type: ObjectType.Texture,
@@ -100,7 +94,7 @@ type ErrorObject = {
     Message: string
 };
 type TextureObject = Texture | TextureMagFilter | TextureMinFilter | TextureWrapMode | TextureType;
-type ParseObject = Include | Vertex | Sound | SoundFormat | TextureObject | Uniform | Keyboard | FirstPersonControls | StrictCompatibility;
+type ParseObject = Include | Vertex | Sound | TextureObject | Uniform | Keyboard | FirstPersonControls | StrictCompatibility;
 
 export class ShaderParser {
     private stream: ShaderStream;
@@ -111,6 +105,15 @@ export class ShaderParser {
         this.stream = new ShaderStream(content);
         this.lexer = new ShaderLexer(this.stream);
         this.lastObjectRange = undefined;
+    }
+
+    private consumeSoundFormatTokens() {
+        const punctuation = this.lexer.next();
+        if (!punctuation) {
+            return;
+        }
+        this.lexer.next();
+        this.lexer.next();
     }
     
     public mutate(destRange: LineRange, source: string) {
@@ -161,8 +164,8 @@ export class ShaderParser {
                 if (indexText.length === 0) {
                     const index = -1;
                     if (hasFormat) {
-                        this.lexer.next();
-                        returnObject = this.getSoundFormat(index);
+                        this.consumeSoundFormatTokens();
+                        returnObject = this.makeError('iSound::Format is no longer supported. Use shader-toy.audioOutputPrecision instead.');
                     }
                     else {
                         returnObject = this.getSound(index);
@@ -173,12 +176,14 @@ export class ShaderParser {
                     if (!/^[0-9]+$/.test(indexText) || !Number.isFinite(index)) {
                         returnObject = this.makeError(`Invalid iSound index "${indexText}"`);
                     }
-                    else if (hasFormat) {
-                        this.lexer.next();
-                        returnObject = this.getSoundFormat(index);
-                    }
                     else {
+                        if (hasFormat) {
+                            this.consumeSoundFormatTokens();
+                            returnObject = this.makeError('iSound::Format is no longer supported. Use shader-toy.audioOutputPrecision instead.');
+                        }
+                        else {
                         returnObject = this.getSound(index);
+                        }
                     }
                 }
                 break;
@@ -269,31 +274,6 @@ export class ShaderParser {
         return sound;
     }
 
-    private getSoundFormat(index: number): SoundFormat | ErrorObject {
-        const formatToken = this.lexer.next();
-        if (formatToken === undefined) {
-            return this.makeError('Expected identifier after "iSound::" but got end-of-file');
-        }
-        if (formatToken.type !== TokenType.Identifier || formatToken.value !== 'Format') {
-            return this.makeError(`Expected "Format" after "iSound::" but got "${formatToken.value}"`);
-        }
-
-        const valueToken = this.lexer.next();
-        if (valueToken === undefined) {
-            return this.makeError('Expected string after "iSound::Format" but got end-of-file');
-        }
-        if (valueToken.type !== TokenType.String) {
-            return this.makeError(`Expected string after "iSound::Format" but got "${valueToken.value}"`);
-        }
-
-        const tokenValue = valueToken.value as string;
-        const soundFormat: SoundFormat = {
-            Type: ObjectType.SoundFormat,
-            Index: index,
-            Value: tokenValue
-        };
-        return soundFormat;
-    }
 
 
     private getTextureObject(previous: Token): Texture | TextureMagFilter | TextureMinFilter | TextureWrapMode | TextureType | ErrorObject {

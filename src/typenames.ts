@@ -126,7 +126,6 @@ export type BufferDefinition = {
     Includes: IncludeDefinition[],
     IsSound?: boolean,
     SoundIndices?: number[],
-    SoundPrecision?: string,
     UsesKeyboard?: boolean,
     UsesFirstPersonControls?: boolean,
 };
