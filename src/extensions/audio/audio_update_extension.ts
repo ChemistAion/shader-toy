@@ -71,17 +71,6 @@ if (window.ShaderToy && window.ShaderToy.audioOutput && typeof window.ShaderToy.
                     uniforms[uniformName].value = audioOutput.getSampleRingTexture(i);
                 }
             }
-            if (Array.isArray(buffer.SampleBindings)) {
-                for (const binding of buffer.SampleBindings) {
-                    if (!binding || !binding.Name) {
-                        continue;
-                    }
-                    const uniform = uniforms[binding.Name];
-                    if (uniform) {
-                        uniform.value = audioOutput.getSampleRingTexture(binding.SoundIndex);
-                    }
-                }
-            }
         }
     }
 }

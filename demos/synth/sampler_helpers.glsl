@@ -7,7 +7,7 @@
 // Notes:
 // - sample indices are absolute (not wrapped) in the audio timeline.
 // - out-of-range samples are clamped to silence by the helper.
-// - #iSampleN bindings provide the ring texture for sound N (sampler2D).
+// - iSampleRingN provides the ring texture for sound N (sampler2D).
 // - "sh" is a short internal prefix (sampler_helpers) used throughout these
 //   helpers to keep names grouped and avoid collisions with user symbols or
 //   common GLSL names.

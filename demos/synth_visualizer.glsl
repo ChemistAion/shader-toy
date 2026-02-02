@@ -19,7 +19,7 @@
 // ...or, with echo effect:
 // #iSound1 "file://synth/echo_iSound.glsl"
 #iSound2 "file://synth/rain_iSound.glsl"
-#iChannel0 "sound1"
+#iChannel0 "sound"
 
 void mainImage( out vec4 fragColor, in vec2 fragCoord )
 {

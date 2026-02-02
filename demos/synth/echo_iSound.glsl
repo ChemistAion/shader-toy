@@ -1,4 +1,4 @@
-// Demo for iSampleN + ring-buffer sampling helpers.
+// Demo for iSampleRingN + ring-buffer sampling helpers.
 // History window (current ring):
 //   maxHistorySamples = iSampleRingDepth * iSampleBlockSize
 //   iSampleRingDepth = 4
@@ -12,12 +12,9 @@
 // Ring-buffer sampler helpers
 #include "sampler_helpers.glsl"
 
-// Direct sample binding (ring texture for sound 0)
-#iSample0 s0
-
 vec2 mainSound(int sampleIndex, float sampleTime) {
     // Dry signal from current sample
-    vec2 dry = shSampleRing(s0, sampleIndex);
+    vec2 dry = shSampleRing(iSampleRing0, sampleIndex);
 
     // Echo taps: ~0.333s, 0.666s, 0.999s
     int delaySamples1 = int(0.333 * iSampleRate);

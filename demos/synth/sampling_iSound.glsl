@@ -1,4 +1,4 @@
-// Demo showcasing iSample bindings and sample-index math.
+// Demo showcasing iSampleRingN sampling and sample-index math.
 
 // Sound source to be sampled
 #iSound0 "file://synth/supersaw_iSound.glsl"
@@ -6,11 +6,8 @@
 // Ring-buffer sampler + index helpers
 #include "sampler_helpers.glsl"
 
-// Direct sample binding (ring texture for sound 0)
-#iSample0 s0
-
 vec2 mainSound(int sampleIndex, float sampleTime) {
-    vec2 dry = shSampleRing(s0, sampleIndex);
+    vec2 dry = shSampleRing(iSampleRing0, sampleIndex);
 
     // Undersampling: every 4th sample.
     int undersampleIndex = sampleIndex / 4;

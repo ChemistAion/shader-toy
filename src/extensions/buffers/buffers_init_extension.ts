@@ -36,10 +36,6 @@ export class BuffersInitExtension implements WebviewExtension {
 
             const defaultVertexShader = `glslUseVersion3 ? prepareVertexShader('void main() { gl_Position = vec4(position, 1.0); }') : 'void main() { gl_Position = vec4(position, 1.0); }'`;
             const glslVersionLine = `...(glslUseVersion3 && THREE.GLSL3 ? { glslVersion: THREE.GLSL3 } : {})`;
-            const sampleUniforms = (buffer.SampleBindings || [])
-                .map((binding) => `\n            ${binding.Name}: { type: 't' },`)
-                .join('');
-
             this.content += `\
 buffers.push({
     Name: ${JSON.stringify(buffer.Name)},
@@ -56,7 +52,6 @@ buffers.push({
     PingPongTarget: ${pingPongTarget},
     PingPongChannel: ${buffer.SelfChannel},
     Dependents: ${JSON.stringify(buffer.Dependents)},
-    SampleBindings: ${JSON.stringify(buffer.SampleBindings || [])},
     Shader: ${isSound ? 'null' : `new THREE.ShaderMaterial({
         ${glslVersionLine},
         vertexShader: ${buffer.VertexCode !== undefined ? `prepareVertexShader(document.getElementById(${JSON.stringify(buffer.Name + '_vertex')}).textContent)` : defaultVertexShader},
@@ -100,7 +95,6 @@ buffers.push({
             iChannel7: { type: 't' },
             iChannel8: { type: 't' },
             iChannel9: { type: 't' },
-            ${sampleUniforms}
 
             resolution: { type: 'v2', value: resolution },
             time: { type: 'f', value: 0.0 },

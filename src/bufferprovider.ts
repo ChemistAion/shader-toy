@@ -206,7 +206,6 @@ export class BufferProvider {
         const pendingTextures: InputTexture[] = [];
         const pendingTextureSettings = new Map<ChannelId, InputTextureSettings>();
         const pendingUniforms: Types.UniformDefinition[] = [];
-        const pendingSamples: Types.SampleDefinition[] = [];
         const includes: Types.IncludeDefinition[] = [];
         const boxedUsesKeyboard: Types.BoxedValue<boolean> = { Value: false };
         const boxedFirstPersonControls: Types.BoxedValue<boolean> = { Value: false };
@@ -224,7 +223,6 @@ export class BufferProvider {
             pendingTextures,
             pendingTextureSettings,
             pendingUniforms,
-            pendingSamples,
             includes,
             commonIncludes,
             boxedUsesKeyboard,
@@ -269,7 +267,6 @@ export class BufferProvider {
                 const vertexPendingTextures: InputTexture[] = [];
                 const vertexPendingTextureSettings = new Map<ChannelId, InputTextureSettings>();
                 const vertexPendingUniforms: Types.UniformDefinition[] = [];
-                const vertexPendingSamples: Types.SampleDefinition[] = [];
                 const vertexIncludes: Types.IncludeDefinition[] = [];
                 const vertexUsesKeyboard: Types.BoxedValue<boolean> = { Value: false };
                 const vertexUsesFirstPersonControls: Types.BoxedValue<boolean> = { Value: false };
@@ -287,7 +284,6 @@ export class BufferProvider {
                     vertexPendingTextures,
                     vertexPendingTextureSettings,
                     vertexPendingUniforms,
-                    vertexPendingSamples,
                     vertexIncludes,
                     commonIncludes,
                     vertexUsesKeyboard,
@@ -304,7 +300,6 @@ export class BufferProvider {
         const textures: Types.TextureDefinition[] = [];
         const audios: Types.AudioDefinition[] = [];
         const uniforms: Types.UniformDefinition[] = [];
-        const sampleBindings: Types.SampleDefinition[] = [];
         const usesKeyboard = boxedUsesKeyboard.Value;
         const usesFirstPersonControls = boxedFirstPersonControls.Value;
 
@@ -318,21 +313,20 @@ export class BufferProvider {
             const normalizedPath = depFile.trim().toLowerCase();
             const soundMatch = normalizedPath.match(/^sound(?:\/\/)?(\d+)$/);
             if (soundMatch) {
-                const soundIndex = Number(soundMatch[1]);
-                if (!Number.isFinite(soundIndex) || soundIndex < 0 || soundIndex > 9 || Math.floor(soundIndex) !== soundIndex) {
-                    this.showErrorAtLineAndMessage(file, '#iChannel sound index must be an integer in [0..9].', pendingTexture.Line ?? 1);
-                    continue;
-                }
+                this.showErrorAtLineAndMessage(file, '#iChannel sound source must be "sound" (no index).', pendingTexture.Line ?? 1);
+                continue;
+            }
+            if (normalizedPath === 'sound') {
                 audios.push({
                     Channel: channel,
-                    UserPath: userPath || `sound${soundIndex}`,
+                    UserPath: userPath || 'sound',
                     FromSound: true,
-                    SoundIndex: soundIndex
+                    SoundIndex: undefined
                 });
                 continue;
             }
-            if (normalizedPath === 'sound' || normalizedPath.startsWith('sound://')) {
-                this.showErrorAtLineAndMessage(file, '#iChannel requires explicit sound index (use "sound0" .. "sound9").', pendingTexture.Line ?? 1);
+            if (normalizedPath.startsWith('sound://')) {
+                this.showErrorAtLineAndMessage(file, '#iChannel sound source must be "sound" (no index).', pendingTexture.Line ?? 1);
                 continue;
             }
 
@@ -438,12 +432,6 @@ export class BufferProvider {
         for (const pendingUniform of pendingUniforms) {
             const uniform = Object.create(pendingUniform);
             uniforms.push(uniform);
-        }
-
-        // Transfer sample bindings
-        for (const pendingSample of pendingSamples) {
-            const sample = Object.create(pendingSample);
-            sampleBindings.push(sample);
         }
 
         {
@@ -618,7 +606,6 @@ vec2 mainSound(int sampleIndex, float sampleTime) {
             TextureInputs: textures,
             AudioInputs: audios,
             CustomUniforms: uniforms,
-            SampleBindings: sampleBindings.length > 0 ? sampleBindings : undefined,
             UsesSelf: false,
             SelfChannel: -1,
             Dependents: [],
@@ -643,7 +630,6 @@ vec2 mainSound(int sampleIndex, float sampleTime) {
         textures: InputTexture[],
         textureSettings: Map<ChannelId, InputTextureSettings>,
         uniforms: Types.UniformDefinition[],
-        sampleBindings: Types.SampleDefinition[],
         includes: Types.IncludeDefinition[],
         sharedIncludes: Types.IncludeDefinition[],
         usesKeyboard: Types.BoxedValue<boolean>,
@@ -696,26 +682,24 @@ vec2 mainSound(int sampleIndex, float sampleTime) {
                 const normalizedPath = userPath.trim().toLowerCase();
                 const soundMatch = normalizedPath.match(/^sound(?:\/\/)?(\d+)$/);
                 if (soundMatch) {
-                    const soundIndex = Number(soundMatch[1]);
-                    if (!Number.isFinite(soundIndex) || soundIndex < 0 || soundIndex > 9 || Math.floor(soundIndex) !== soundIndex) {
-                        this.showErrorAtLineAndMessage(file, '#iChannel sound index must be an integer in [0..9].', line);
-                        removeLastObject();
-                        break;
-                    }
+                    this.showErrorAtLineAndMessage(file, '#iChannel sound source must be "sound" (no index).', line);
+                    removeLastObject();
+                    break;
+                }
+                if (normalizedPath === 'sound') {
                     const texture: InputTexture = {
                         Channel: nextObject.Index,
                         Local: true,
                         UserPath: userPath,
-                        Path: `sound${soundIndex}`,
-                        SoundIndex: soundIndex,
+                        Path: 'sound',
                         Line: line
                     };
                     textures.push(texture);
                     removeLastObject();
                     break;
                 }
-                if (normalizedPath === 'sound' || normalizedPath.startsWith('sound://')) {
-                    this.showErrorAtLineAndMessage(file, '#iChannel requires explicit sound index (use "sound0" .. "sound9").', line);
+                if (normalizedPath.startsWith('sound://')) {
+                    this.showErrorAtLineAndMessage(file, '#iChannel sound source must be "sound" (no index).', line);
                     removeLastObject();
                     break;
                 }
@@ -826,7 +810,6 @@ vec2 mainSound(int sampleIndex, float sampleTime) {
                             textures,
                             textureSettings,
                             uniforms,
-                            sampleBindings,
                             includes,
                             sharedIncludes,
                             usesKeyboard,
@@ -979,7 +962,9 @@ vec2 mainSound(int sampleIndex, float sampleTime) {
                     break;
                 }
                 if (normalized === 'self') {
-                    this.showErrorAtLineAndMessage(file, '#iSound "self" is not supported; use an explicit file path.', line);
+                    soundShaderFile.Value = file;
+                    soundShaderLine.Value = line;
+                    this.registerSoundFile(soundIndex, file);
                     removeLastObject();
                     break;
                 }
@@ -1087,24 +1072,6 @@ vec2 mainSound(int sampleIndex, float sampleTime) {
                 }
                 removeLastObject();
                 break;
-            case ObjectType.Sample: {
-                const line = parser.line();
-                if (nextObject.Index < 0 || nextObject.Index > 9) {
-                    this.showErrorAtLineAndMessage(file, '#iSample index must be in [0..9].', line);
-                    removeLastObject();
-                    break;
-                }
-
-                const existing = sampleBindings.find((binding) => binding.Name === nextObject.Name);
-                if (existing) {
-                    this.showWarningAtLine(file, `#iSample name "${nextObject.Name}" was specified multiple times; the last one wins.`, line);
-                    existing.SoundIndex = nextObject.Index;
-                } else {
-                    sampleBindings.push({ Name: nextObject.Name, SoundIndex: nextObject.Index });
-                }
-                replaceLastObject(`uniform sampler2D ${nextObject.Name};`);
-                break;
-            }
             case ObjectType.Keyboard:
                 usesKeyboard.Value = true;
                 removeLastObject();
