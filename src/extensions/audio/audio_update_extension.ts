@@ -48,6 +48,7 @@ if (window.ShaderToy && window.ShaderToy.audioOutput && typeof window.ShaderToy.
     const audioOutput = window.ShaderToy.audioOutput;
     const audioTime = audioOutput.getAudioTime ? audioOutput.getAudioTime() : null;
     const sampleBlockSize = audioOutput.getSampleBlockSize ? audioOutput.getSampleBlockSize() : null;
+    const sampleRingBlockSize = audioOutput.getSampleRingBlockSize ? audioOutput.getSampleRingBlockSize() : null;
     const sampleRingDepth = audioOutput.getSampleRingDepth ? audioOutput.getSampleRingDepth() : null;
 
     if (buffers && buffers.length) {
@@ -61,6 +62,9 @@ if (window.ShaderToy && window.ShaderToy.audioOutput && typeof window.ShaderToy.
             }
             if (uniforms.iSampleBlockSize && sampleBlockSize !== null) {
                 uniforms.iSampleBlockSize.value = sampleBlockSize;
+            }
+            if (uniforms.iSampleRingBlockSize && sampleRingBlockSize !== null) {
+                uniforms.iSampleRingBlockSize.value = sampleRingBlockSize;
             }
             if (uniforms.iSampleRingDepth && sampleRingDepth !== null) {
                 uniforms.iSampleRingDepth.value = sampleRingDepth;

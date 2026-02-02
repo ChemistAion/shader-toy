@@ -188,10 +188,6 @@ export class ShaderParser {
                 }
                 break;
             }
-            if (tokenValue.indexOf('iSample') === 0) {
-                returnObject = this.makeError('iSample is no longer supported. Use iSampleRingN samplers instead.');
-                break;
-            }
             returnObject = this.getTextureObject(nextToken);
             break;
         case 'iKeyboard':

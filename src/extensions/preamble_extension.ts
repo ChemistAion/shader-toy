@@ -33,6 +33,7 @@ uniform sampler2D   iKeyboard;
 uniform float       iSampleRate;
 uniform float       iAudioTime;
 uniform int         iSampleBlockSize;
+uniform int         iSampleRingBlockSize;
 uniform int         iSampleRingDepth;
 uniform int         iSoundIndex;
 uniform sampler2D   iSampleRing0;

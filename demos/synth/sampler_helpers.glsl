@@ -1,13 +1,14 @@
 // Helper functions for sampling iSampleRing textures and working with sample indices.
 // Requires:
 //   iSampleRate (float)
-//   iSampleRingDepth (int), iSampleBlockSize (int)
+//   iSampleRingDepth (int), iSampleRingBlockSize (int)
 //   iSampleRing0..iSampleRing9 (sampler2D)
 //
 // Notes:
 // - sample indices are absolute (not wrapped) in the audio timeline.
 // - out-of-range samples are clamped to silence by the helper.
 // - iSampleRingN provides the ring texture for sound N (sampler2D).
+// - ring history is populated per block, so sub-block delays may read silence.
 // - "sh" is a short internal prefix (sampler_helpers) used throughout these
 //   helpers to keep names grouped and avoid collisions with user symbols or
 //   common GLSL names.
@@ -15,16 +16,16 @@
 #define shSampleRingZero vec2(0.0)
 
 vec2 shSampleRing(sampler2D ringTex, int sampleIndexAbsolute) {
-    if (iSampleRingDepth <= 0 || iSampleBlockSize <= 0) {
+    if (iSampleRingDepth <= 0 || iSampleRingBlockSize <= 0) {
         return shSampleRingZero;
     }
-    float blockSize = float(iSampleBlockSize);
+    float blockSize = float(iSampleRingBlockSize);
     int blockDim = int(floor(sqrt(blockSize)));
     if (blockDim <= 0) {
         return shSampleRingZero;
     }
-    int blockIndex = sampleIndexAbsolute / iSampleBlockSize;
-    int blockOffset = sampleIndexAbsolute - blockIndex * iSampleBlockSize;
+    int blockIndex = sampleIndexAbsolute / iSampleRingBlockSize;
+    int blockOffset = sampleIndexAbsolute - blockIndex * iSampleRingBlockSize;
     int ringSlot = blockIndex % iSampleRingDepth;
     if (ringSlot < 0) {
         ringSlot += iSampleRingDepth;
@@ -47,15 +48,15 @@ float shSampleTimeFromIndex(int sampleIndex) {
 }
 
 int shSampleBlockIndex(int sampleIndex) {
-    return (iSampleBlockSize > 0) ? (sampleIndex / iSampleBlockSize) : 0;
+    return (iSampleRingBlockSize > 0) ? (sampleIndex / iSampleRingBlockSize) : 0;
 }
 
 int shSampleBlockOffset(int sampleIndex) {
-    return (iSampleBlockSize > 0) ? (sampleIndex - (sampleIndex / iSampleBlockSize) * iSampleBlockSize) : 0;
+    return (iSampleRingBlockSize > 0) ? (sampleIndex - (sampleIndex / iSampleRingBlockSize) * iSampleRingBlockSize) : 0;
 }
 
 int shSampleBlockStart(int sampleIndex) {
-    return shSampleBlockIndex(sampleIndex) * iSampleBlockSize;
+    return shSampleBlockIndex(sampleIndex) * iSampleRingBlockSize;
 }
 
 vec2 shSampleLerp(vec2 a, vec2 b, float t) {

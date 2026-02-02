@@ -23,14 +23,16 @@
         stream: {
             active: false,
             nextBlock: 0,
-            blockSamples: 512 * 512,
+            blockSamples: 256 * 256,
             renderedBlocks: 0,
             lastNeed: 0
         },
+        renderBlockWidth: 256,
+        renderBlockHeight: 256,
         sampleRing: new Map(),
         sampleRingDepth: 4,
-        sampleRingBlockWidth: 512,
-        sampleRingBlockHeight: 512,
+        sampleRingBlockWidth: 64,
+        sampleRingBlockHeight: 64,
         analysis: {
             enabled: true,
             windowSize: 2048,
@@ -215,7 +217,15 @@
     };
 
     root.audioOutput.getSampleBlockSize = function () {
-        return state.stream.blockSamples || (512 * 512);
+        return state.stream.blockSamples || (256 * 256);
+    };
+
+    root.audioOutput.getSampleRingBlockSize = function () {
+        const blockWidth = state.sampleRingBlockWidth || 0;
+        const blockHeight = state.sampleRingBlockHeight || 0;
+        return (blockWidth > 0 && blockHeight > 0)
+            ? (blockWidth * blockHeight)
+            : 0;
     };
 
     root.audioOutput.getSampleRingDepth = function () {
@@ -465,14 +475,16 @@
             return null;
         }
 
-        const samplesPerBlock = 512 * 512;
+        const samplesPerBlock = (state.renderBlockWidth || 256) * (state.renderBlockHeight || 256);
+        const ringBlockSamples = (state.sampleRingBlockWidth || 0) * (state.sampleRingBlockHeight || 0);
+        const renderBlockDim = state.renderBlockWidth || 256;
 
         const footer = (precisionMode === '16bPACK') ? `
     uniform float blockOffset;
 
     void main() {
-    float sampleTime = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0) / iSampleRate;
-    float sampleIndex = (blockOffset * iSampleRate) + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0);
+    float sampleTime = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * ${renderBlockDim}.0) / iSampleRate;
+    float sampleIndex = (blockOffset * iSampleRate) + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * ${renderBlockDim}.0);
     int sampleIndexInt = int(sampleIndex);
     vec2 y = mainSound(sampleIndexInt, sampleTime);
     vec2 v  = floor((0.5 + 0.5 * y) * 65536.0);
@@ -483,8 +495,8 @@
     uniform float blockOffset;
 
     void main() {
-    float sampleTime = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0) / iSampleRate;
-    float sampleIndex = (blockOffset * iSampleRate) + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0);
+    float sampleTime = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * ${renderBlockDim}.0) / iSampleRate;
+    float sampleIndex = (blockOffset * iSampleRate) + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * ${renderBlockDim}.0);
     int sampleIndexInt = int(sampleIndex);
     vec2 y = mainSound(sampleIndexInt, sampleTime);
     vec2 v  = floor((0.5 + 0.5 * y) * 255.0 + 0.5);
@@ -494,8 +506,8 @@
     uniform float blockOffset;
 
     void main() {
-    float sampleTime = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0) / iSampleRate;
-    float sampleIndex = (blockOffset * iSampleRate) + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0);
+    float sampleTime = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * ${renderBlockDim}.0) / iSampleRate;
+    float sampleIndex = (blockOffset * iSampleRate) + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * ${renderBlockDim}.0);
     int sampleIndexInt = int(sampleIndex);
     vec2 y = mainSound(sampleIndexInt, sampleTime);
     GLSL_FRAGCOLOR = vec4(y, 0.0, 1.0);
@@ -531,6 +543,7 @@
                 iSampleRate: { type: 'f', value: sampleRate },
                 iAudioTime: { type: 'f', value: 0 },
                 iSampleBlockSize: { type: 'i', value: samplesPerBlock },
+                iSampleRingBlockSize: { type: 'i', value: ringBlockSamples || 0 },
                 iSampleRingDepth: { type: 'i', value: state.sampleRingDepth || 0 },
                 iSoundIndex: { type: 'i', value: 0 },
                 iSampleRing0: { type: 't' },
@@ -784,8 +797,8 @@
             return null;
         }
 
-        const WIDTH = 512;
-        const HEIGHT = 512;
+        const WIDTH = state.renderBlockWidth || 256;
+        const HEIGHT = state.renderBlockHeight || 256;
         const samplesPerBlock = WIDTH * HEIGHT;
 
         const existing = state.renderContexts.get(soundBuffer.Name);
@@ -882,8 +895,8 @@
         }
 
         const ringDepth = Math.max(1, Math.floor(state.sampleRingDepth || 4));
-        const blockWidth = state.sampleRingBlockWidth || 512;
-        const blockHeight = state.sampleRingBlockHeight || 512;
+        const blockWidth = state.sampleRingBlockWidth || 64;
+        const blockHeight = state.sampleRingBlockHeight || 64;
         const width = blockWidth;
         const height = blockHeight * ringDepth;
         const data = new Float32Array(width * height * 4);
@@ -897,6 +910,7 @@
             ringDepth,
             blockWidth,
             blockHeight,
+            blockSamples: blockWidth * blockHeight,
             width,
             height,
             data,
@@ -907,24 +921,28 @@
         return ring;
     };
 
-    const writeSampleRing = function (soundBufferName, blockIndex, left, right) {
+    const writeSampleRing = function (soundBufferName, blockStartSample, left, right) {
         const ring = ensureSampleRing(soundBufferName);
         if (!ring || !left || !right) {
             return;
         }
-        const ringSlot = Math.max(0, Math.floor(blockIndex)) % ring.ringDepth;
-        const rowOffset = ringSlot * ring.blockHeight;
         const width = ring.width;
         const blockWidth = ring.blockWidth;
         const blockHeight = ring.blockHeight;
+        const blockSamples = ring.blockSamples;
         const data = ring.data;
 
         for (let j = 0; j < left.length; j++) {
-            const x = j % blockWidth;
-            const y = Math.floor(j / blockWidth);
+            const absoluteSample = blockStartSample + j;
+            const ringBlockIndex = Math.floor(absoluteSample / blockSamples);
+            const blockOffset = absoluteSample - (ringBlockIndex * blockSamples);
+            const ringSlot = ringBlockIndex % ring.ringDepth;
+            const x = blockOffset - (Math.floor(blockOffset / blockWidth) * blockWidth);
+            const y = Math.floor(blockOffset / blockWidth);
             if (y >= blockHeight) {
-                break;
+                continue;
             }
+            const rowOffset = ringSlot * blockHeight;
             const outY = rowOffset + y;
             const idx = (outY * width + x) * 4;
             data[idx + 0] = left[j];
@@ -932,7 +950,7 @@
             data[idx + 2] = 0;
             data[idx + 3] = 1;
         }
-        ring.writeIndex = blockIndex;
+        ring.writeIndex = Math.floor((blockStartSample + left.length - 1) / blockSamples);
         ring.texture.needsUpdate = true;
     };
 
@@ -947,6 +965,16 @@
             const soundIndexValue = soundIndices && soundIndices.length ? soundIndices[0] : 0;
             if (ctx.material.uniforms.iSoundIndex) {
                 ctx.material.uniforms.iSoundIndex.value = soundIndexValue;
+            }
+            if (ctx.material.uniforms.iSampleBlockSize) {
+                ctx.material.uniforms.iSampleBlockSize.value = ctx.samplesPerBlock;
+            }
+            if (ctx.material.uniforms.iSampleRingBlockSize) {
+                const ringBlockSize = root.audioOutput.getSampleRingBlockSize();
+                ctx.material.uniforms.iSampleRingBlockSize.value = ringBlockSize;
+            }
+            if (ctx.material.uniforms.iSampleRingDepth) {
+                ctx.material.uniforms.iSampleRingDepth.value = state.sampleRingDepth || 0;
             }
             for (let i = 0; i < 10; i++) {
                 const uniformName = `iSampleRing${i}`;
@@ -999,7 +1027,8 @@
             }
         }
 
-        writeSampleRing(soundBuffer.Name, blockIndex, left, right);
+        const blockStartSample = blockIndex * ctx.samplesPerBlock;
+        writeSampleRing(soundBuffer.Name, blockStartSample, left, right);
 
         global.currentShader = previousShader;
         return { left, right };
@@ -1116,6 +1145,11 @@
         state.soundBuffer = soundBuffers[0] || null;
         disposeRenderContext();
         state.sampleRing = new Map();
+        for (const soundBuffer of soundBuffers) {
+            if (soundBuffer && soundBuffer.Name) {
+                ensureSampleRing(soundBuffer.Name);
+            }
+        }
 
         const audioContext = resolveAudioContext(options.audioContext);
         if (!audioContext) {
@@ -1146,7 +1180,7 @@
         const precisionSummary = getPrecisionSummary(options, soundBuffers);
         reportPrecisionFallback(options, precisionMode);
         
-        const blockSeconds = (512 * 512) / state.audioContext.sampleRate;
+        const blockSeconds = (state.stream.blockSamples || (256 * 256)) / state.audioContext.sampleRate;
         setStatus(`Audio: ${precisionSummary} @ ${state.audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
         resetSampleRings();
 
@@ -1207,6 +1241,11 @@
         state.soundBuffer = soundBuffers[0] || null;
         disposeRenderContext();
         state.sampleRing = new Map();
+        for (const soundBuffer of soundBuffers) {
+            if (soundBuffer && soundBuffer.Name) {
+                ensureSampleRing(soundBuffer.Name);
+            }
+        }
 
         const audioContext = state.audioContext || resolveAudioContext(options.audioContext);
         if (!audioContext) {
@@ -1239,7 +1278,7 @@
         const precisionSummary = getPrecisionSummary(options, soundBuffers);
         reportPrecisionFallback(options, precisionMode);
 
-        const blockSeconds = (512 * 512) / audioContext.sampleRate;
+        const blockSeconds = (state.stream.blockSamples || (256 * 256)) / audioContext.sampleRate;
         setStatus(`Audio: ${precisionSummary} @ ${audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
         resetSampleRings();
 
