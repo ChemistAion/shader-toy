@@ -6,11 +6,11 @@
 // Ring-buffer sampler + index helpers
 #include "sampler_helpers.glsl"
 
-// Direct sample binding (current sample at iAudioTime)
+// Direct sample binding (ring texture for sound 0)
 #iSample0 s0
 
 vec2 mainSound(int sampleIndex, float sampleTime) {
-    vec2 dry = s0;
+    vec2 dry = shSampleRing(s0, sampleIndex);
 
     // Undersampling: every 4th sample.
     int undersampleIndex = sampleIndex / 4;

@@ -12,12 +12,12 @@
 // Ring-buffer sampler helpers
 #include "sampler_helpers.glsl"
 
-// Direct sample binding (current sample at iAudioTime)
+// Direct sample binding (ring texture for sound 0)
 #iSample0 s0
 
 vec2 mainSound(int sampleIndex, float sampleTime) {
     // Dry signal from current sample
-    vec2 dry = s0;
+    vec2 dry = shSampleRing(s0, sampleIndex);
 
     // Echo taps: ~0.333s, 0.666s, 0.999s
     int delaySamples1 = int(0.333 * iSampleRate);

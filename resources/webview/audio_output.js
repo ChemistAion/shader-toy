@@ -498,6 +498,21 @@
 
         const source = `${shaderElement.textContent}\n${footer}`;
         const prepared = options.prepareFragmentShader ? options.prepareFragmentShader(source, options.glslUseVersion3) : source;
+        try {
+            if (options.gl && root.shaderCompile && root.shaderCompile.compileFragShader) {
+                const header = options.glslUseVersion3
+                    ? '#version 300 es\nprecision highp float;\n'
+                    : 'precision highp float;\n';
+                const ok = root.shaderCompile.compileFragShader(options.gl, `${header}${prepared}`);
+                if (!ok) {
+                    postErrorMessage(`Sound shader "${buffer.Name}" failed to compile; audio stopped.`);
+                    root.audioOutput.stop();
+                    return null;
+                }
+            }
+        } catch {
+            // ignore compile probe errors
+        }
         const vertexSource = 'void main() { gl_Position = vec4(position, 1.0); }';
         const preparedVertex = options.prepareVertexShader
             ? options.prepareVertexShader(vertexSource, options.glslUseVersion3)
