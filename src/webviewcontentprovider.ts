@@ -73,6 +73,7 @@ import { AudioUpdateExtension } from './extensions/audio/audio_update_extension'
 import { AudioPauseExtension } from './extensions/audio/audio_pause_extension';
 import { AudioResumeExtension } from './extensions/audio/audio_resume_extension';
 import { AudioOutputPrecisionExtension } from './extensions/audio/audio_output_precision_extension';
+import { AudioBlockSizeExtension } from './extensions/audio/audio_block_size_extension';
 import { AudioWorkletUrlExtension } from './extensions/audio/audio_worklet_url_extension';
 import { AudioWorkletSourceExtension } from './extensions/audio/audio_worklet_source_extension';
 
@@ -585,6 +586,10 @@ export class WebviewContentProvider {
         const audioOutputPrecision = this.context.getConfig<string>('audioOutputPrecision') || '32bFLOAT';
         const audioOutputPrecisionExtension = new AudioOutputPrecisionExtension(audioOutputPrecision);
         this.webviewAssembler.addReplaceModule(audioOutputPrecisionExtension, '<!-- Audio Output Precision -->', '<!-- Audio Output Precision -->');
+
+        const audioBlockSize = this.context.getConfig<number>('audioBlockSize') || 65536;
+        const audioBlockSizeExtension = new AudioBlockSizeExtension(audioBlockSize);
+        this.webviewAssembler.addReplaceModule(audioBlockSizeExtension, '<!-- Audio Block Size -->', '<!-- Audio Block Size -->');
 
         const audioWorkletUrl = getWebviewResourcePath('webview/audio_worklet_processor.js');
         const audioWorkletUrlExtension = new AudioWorkletUrlExtension(audioWorkletUrl);
