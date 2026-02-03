@@ -58,7 +58,8 @@
         workletStats: {
             queueFrames: 0,
             underruns: 0
-        }
+        },
+        poolWarningAt: 0
     };
 
     const DEFAULT_BLOCK_DIM = 256;
@@ -673,6 +674,73 @@
         state.gainNode.gain.value = (state.enabled && state.outputPrimed) ? state.outputGain : 0;
     };
 
+    const ensureDebugOverlay = function () {
+        if (!global.document || !global.document.getElementById) {
+            return null;
+        }
+        let overlay = global.document.getElementById('audio-debug-overlay');
+        if (!overlay) {
+            overlay = global.document.createElement('div');
+            overlay.id = 'audio-debug-overlay';
+            overlay.style.position = 'absolute';
+            overlay.style.left = '8px';
+            overlay.style.bottom = '8px';
+            overlay.style.zIndex = '4';
+            overlay.style.pointerEvents = 'none';
+            overlay.style.whiteSpace = 'pre-line';
+            overlay.style.fontFamily = 'Consolas, monospace';
+            overlay.style.fontSize = '12px';
+            overlay.style.color = '#cfe8ff';
+            overlay.style.background = 'rgba(0, 0, 0, 0.65)';
+            overlay.style.padding = '6px 8px';
+            overlay.style.borderRadius = '4px';
+            overlay.style.maxWidth = '70%';
+            overlay.style.boxShadow = '0 1px 4px rgba(0, 0, 0, 0.4)';
+            global.document.body.appendChild(overlay);
+        }
+        return overlay;
+    };
+
+    const renderAudioDebugOverlay = function () {
+        const overlay = ensureDebugOverlay();
+        if (!overlay) {
+            return;
+        }
+
+        const lines = [];
+        const poolFree = state.bufferPool ? state.bufferPool.free.length : 0;
+        const poolTotal = state.bufferPool ? state.bufferPool.total : 0;
+        const blockSamples = state.stream ? state.stream.blockSamples : 0;
+        const blockSeconds = (state.audioContext && blockSamples)
+            ? (blockSamples / state.audioContext.sampleRate)
+            : 0;
+
+        lines.push(`Audio ready: ${state.ready ? 'yes' : 'no'} | started: ${state.started ? 'yes' : 'no'} | enabled: ${state.enabled ? 'yes' : 'no'}`);
+        lines.push(`Worklet: ${state.workletFailed ? 'failed' : (state.workletReady ? 'ready' : (state.workletLoading ? 'loading' : 'idle'))} | output: ${state.outputUsesWorklet ? 'worklet' : 'none'}`);
+        if (state.audioContext) {
+            lines.push(`Sample rate: ${state.audioContext.sampleRate} Hz | block: ${blockSamples} samples (${blockSeconds.toFixed(3)}s)`);
+        }
+        lines.push(`Pool: ${poolFree}/${poolTotal} | rendered blocks: ${state.stream ? state.stream.renderedBlocks : 0} | last need: ${state.stream ? state.stream.lastNeed : 0}`);
+        if (state.workletStats) {
+            lines.push(`Worklet queue: ${state.workletStats.queueFrames} frames | underruns: ${state.workletStats.underruns}`);
+        }
+        if (state.precisionDetails) {
+            lines.push(state.precisionDetails);
+        }
+        if (state.debugDetails && state.debugDetails.length) {
+            lines.push(...state.debugDetails);
+        }
+        if (state.statusLine) {
+            lines.push(state.statusLine);
+        }
+        if (state.statsLine) {
+            lines.push(state.statsLine);
+        }
+
+        overlay.textContent = lines.join('\n');
+        overlay.style.display = lines.length ? 'block' : 'none';
+    };
+
     root.audioOutput.enable = function () {
         state.enabled = true;
         applyOutputGain();
@@ -766,15 +834,18 @@
 
     const renderStatus = function () {
         // Stats overlay intentionally disabled (kept only as stateful data).
+        renderAudioDebugOverlay();
     };
 
     const setStatus = function (message) {
         state.statusMessage = message;
         state.statusLine = message;
+        renderAudioDebugOverlay();
     };
 
     const setStats = function (message) {
         state.statsLine = message;
+        renderAudioDebugOverlay();
     };
 
     const getVscodeApi = function () {
@@ -879,6 +950,14 @@
                 try { ctx.target.dispose(); } catch { /* ignore */ }
                 try { ctx.material.dispose(); } catch { /* ignore */ }
                 try { ctx.mesh.geometry.dispose(); } catch { /* ignore */ }
+                if (ctx.readback && ctx.readback.pbo && ctx.renderer && ctx.renderer.getContext) {
+                    try {
+                        const gl = ctx.renderer.getContext();
+                        if (gl && gl.deleteBuffer) {
+                            gl.deleteBuffer(ctx.readback.pbo);
+                        }
+                    } catch { /* ignore */ }
+                }
                 state.renderContexts.delete(soundBufferName);
             }
             return;
@@ -888,6 +967,14 @@
             try { ctx.target.dispose(); } catch { /* ignore */ }
             try { ctx.material.dispose(); } catch { /* ignore */ }
             try { ctx.mesh.geometry.dispose(); } catch { /* ignore */ }
+            if (ctx.readback && ctx.readback.pbo && ctx.renderer && ctx.renderer.getContext) {
+                try {
+                    const gl = ctx.renderer.getContext();
+                    if (gl && gl.deleteBuffer) {
+                        gl.deleteBuffer(ctx.readback.pbo);
+                    }
+                } catch { /* ignore */ }
+            }
             state.renderContexts.delete(name);
         }
     };
@@ -1106,7 +1193,85 @@
         }
         renderer.setRenderTarget(ctx.target);
         renderer.render(ctx.scene, ctx.camera);
-        renderer.readRenderTargetPixels(ctx.target, 0, 0, ctx.width, ctx.height, ctx.pixels);
+        const usePboReadback = (() => {
+            if (!renderer || !renderer.getContext || precisionMode === '16bFLOAT') {
+                return false;
+            }
+            const gl = renderer.getContext();
+            if (!gl || typeof global.WebGL2RenderingContext === 'undefined' || !(gl instanceof global.WebGL2RenderingContext)) {
+                return false;
+            }
+            if (!gl.PIXEL_PACK_BUFFER || !gl.getBufferSubData) {
+                return false;
+            }
+
+            const byteLength = ctx.pixels ? ctx.pixels.byteLength : 0;
+            if (!byteLength) {
+                return false;
+            }
+
+            const readType = (precisionMode === '32bFLOAT') ? gl.FLOAT : gl.UNSIGNED_BYTE;
+            if (!ctx.readback || ctx.readback.byteLength !== byteLength || ctx.readback.type !== readType) {
+                if (ctx.readback && ctx.readback.pbo) {
+                    try { gl.deleteBuffer(ctx.readback.pbo); } catch { /* ignore */ }
+                }
+                const pbo = gl.createBuffer();
+                if (!pbo) {
+                    return false;
+                }
+                gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
+                gl.bufferData(gl.PIXEL_PACK_BUFFER, byteLength, gl.STREAM_READ);
+                gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+                ctx.readback = { pbo, byteLength, type: readType };
+            }
+
+            const pbo = ctx.readback && ctx.readback.pbo ? ctx.readback.pbo : null;
+            if (!pbo) {
+                return false;
+            }
+
+            gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
+            try {
+                gl.readPixels(0, 0, ctx.width, ctx.height, gl.RGBA, readType, 0);
+            } catch {
+                gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+                return false;
+            }
+            let fence = null;
+            try {
+                fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+            } catch {
+                gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+                return false;
+            }
+            gl.flush();
+
+            let status = gl.clientWaitSync(fence, 0, 0);
+            if (status !== gl.ALREADY_SIGNALED && status !== gl.CONDITION_SATISFIED) {
+                status = gl.clientWaitSync(fence, gl.SYNC_FLUSH_COMMANDS_BIT, 1000000);
+            }
+            if (status === gl.WAIT_FAILED) {
+                try { gl.deleteSync(fence); } catch { /* ignore */ }
+                gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+                return false;
+            }
+
+            try {
+                gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, ctx.pixels);
+            } catch {
+                try { gl.deleteSync(fence); } catch { /* ignore */ }
+                gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+                return false;
+            }
+
+            try { gl.deleteSync(fence); } catch { /* ignore */ }
+            gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+            return true;
+        })();
+
+        if (!usePboReadback) {
+            renderer.readRenderTargetPixels(ctx.target, 0, 0, ctx.width, ctx.height, ctx.pixels);
+        }
         renderer.setRenderTarget(previousTarget);
 
         const left = new Float32Array(ctx.samplesPerBlock);
@@ -1182,6 +1347,7 @@
         const blockSamples = state.stream.blockSamples || (DEFAULT_BLOCK_DIM * DEFAULT_BLOCK_DIM);
         ensureBufferPool(blockSamples);
         const pool = state.bufferPool;
+        let renderedBlocks = 0;
         const startSample = Number.isFinite(baseSample)
             ? Math.max(0, Math.floor(baseSample))
             : (state.stream.nextBlock * blockSamples);
@@ -1190,7 +1356,7 @@
         for (let i = 0; i < blocks; i++) {
             const buffer = pool && pool.free.length ? pool.free.pop() : null;
             if (!buffer) {
-                postInfoMessage('Audio buffer pool exhausted; lowering render-ahead.');
+                state.poolWarningAt = Date.now();
                 break;
             }
             const mixedLeft = new Float32Array(buffer, 0, blockSamples);
@@ -1214,6 +1380,7 @@
 
             state.stream.nextBlock = blockIndex + 1;
             state.stream.renderedBlocks += 1;
+            renderedBlocks += 1;
             try {
                 state.workletNode.port.postMessage(
                     { type: 'push', buffer, frames: blockSamples, baseSample: blockStartSample, layout: 'planarLR' },
