@@ -193,6 +193,17 @@
                     "default": 512,
                     "description": "Size of the domain used for four transformation when using audio as an input."
                 },
+                "shader-toy.audioOutputPrecision": {
+                    "type": "string",
+                    "default": "32bFLOAT",
+                    "enum": [
+                        "32bFLOAT",
+                        "16bFLOAT",
+                        "16bPACK",
+                        "8bPACK"
+                    ],
+                    "description": "Precision for audio render targets. FLOAT modes require WebGL2; PACK modes use RGBA8 packing."
+                },
                 "shader-toy.testCompileIncludedFiles": {
                     "type": "boolean",
                     "default": true,

@@ -206,7 +206,6 @@ export class BufferProvider {
         const pendingTextures: InputTexture[] = [];
         const pendingTextureSettings = new Map<ChannelId, InputTextureSettings>();
         const pendingUniforms: Types.UniformDefinition[] = [];
-        const pendingSamples: Types.SampleDefinition[] = [];
         const includes: Types.IncludeDefinition[] = [];
         const boxedUsesKeyboard: Types.BoxedValue<boolean> = { Value: false };
         const boxedFirstPersonControls: Types.BoxedValue<boolean> = { Value: false };
@@ -224,7 +223,6 @@ export class BufferProvider {
             pendingTextures,
             pendingTextureSettings,
             pendingUniforms,
-            pendingSamples,
             includes,
             commonIncludes,
             boxedUsesKeyboard,
@@ -269,7 +267,6 @@ export class BufferProvider {
                 const vertexPendingTextures: InputTexture[] = [];
                 const vertexPendingTextureSettings = new Map<ChannelId, InputTextureSettings>();
                 const vertexPendingUniforms: Types.UniformDefinition[] = [];
-                const vertexPendingSamples: Types.SampleDefinition[] = [];
                 const vertexIncludes: Types.IncludeDefinition[] = [];
                 const vertexUsesKeyboard: Types.BoxedValue<boolean> = { Value: false };
                 const vertexUsesFirstPersonControls: Types.BoxedValue<boolean> = { Value: false };
@@ -287,7 +284,6 @@ export class BufferProvider {
                     vertexPendingTextures,
                     vertexPendingTextureSettings,
                     vertexPendingUniforms,
-                    vertexPendingSamples,
                     vertexIncludes,
                     commonIncludes,
                     vertexUsesKeyboard,
@@ -304,7 +300,6 @@ export class BufferProvider {
         const textures: Types.TextureDefinition[] = [];
         const audios: Types.AudioDefinition[] = [];
         const uniforms: Types.UniformDefinition[] = [];
-        const sampleBindings: Types.SampleDefinition[] = [];
         const usesKeyboard = boxedUsesKeyboard.Value;
         const usesFirstPersonControls = boxedFirstPersonControls.Value;
 
@@ -438,12 +433,6 @@ export class BufferProvider {
         for (const pendingUniform of pendingUniforms) {
             const uniform = Object.create(pendingUniform);
             uniforms.push(uniform);
-        }
-
-        // Transfer sample bindings
-        for (const pendingSample of pendingSamples) {
-            const sample = Object.create(pendingSample);
-            sampleBindings.push(sample);
         }
 
         {
@@ -618,7 +607,6 @@ vec2 mainSound(int sampleIndex, float sampleTime) {
             TextureInputs: textures,
             AudioInputs: audios,
             CustomUniforms: uniforms,
-            SampleBindings: sampleBindings.length > 0 ? sampleBindings : undefined,
             UsesSelf: false,
             SelfChannel: -1,
             Dependents: [],
@@ -643,7 +631,6 @@ vec2 mainSound(int sampleIndex, float sampleTime) {
         textures: InputTexture[],
         textureSettings: Map<ChannelId, InputTextureSettings>,
         uniforms: Types.UniformDefinition[],
-        sampleBindings: Types.SampleDefinition[],
         includes: Types.IncludeDefinition[],
         sharedIncludes: Types.IncludeDefinition[],
         usesKeyboard: Types.BoxedValue<boolean>,
@@ -826,7 +813,6 @@ vec2 mainSound(int sampleIndex, float sampleTime) {
                             textures,
                             textureSettings,
                             uniforms,
-                            sampleBindings,
                             includes,
                             sharedIncludes,
                             usesKeyboard,
@@ -1087,24 +1073,6 @@ vec2 mainSound(int sampleIndex, float sampleTime) {
                 }
                 removeLastObject();
                 break;
-            case ObjectType.Sample: {
-                const line = parser.line();
-                if (nextObject.Index < 0 || nextObject.Index > 9) {
-                    this.showErrorAtLineAndMessage(file, '#iSample index must be in [0..9].', line);
-                    removeLastObject();
-                    break;
-                }
-
-                const existing = sampleBindings.find((binding) => binding.Name === nextObject.Name);
-                if (existing) {
-                    this.showWarningAtLine(file, `#iSample name "${nextObject.Name}" was specified multiple times; the last one wins.`, line);
-                    existing.SoundIndex = nextObject.Index;
-                } else {
-                    sampleBindings.push({ Name: nextObject.Name, SoundIndex: nextObject.Index });
-                }
-                replaceLastObject(`uniform vec2 ${nextObject.Name};`);
-                break;
-            }
             case ObjectType.Keyboard:
                 usesKeyboard.Value = true;
                 removeLastObject();

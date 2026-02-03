@@ -29,8 +29,8 @@
         },
         sampleRing: new Map(),
         sampleRingDepth: 4,
-        sampleRingBlockWidth: 512,
-        sampleRingBlockHeight: 512,
+        sampleRingBlockWidth: 64,
+        sampleRingBlockHeight: 64,
         analysis: {
             enabled: true,
             windowSize: 2048,
@@ -217,6 +217,12 @@
         return state.stream.blockSamples || (512 * 512);
     };
 
+    root.audioOutput.getSampleRingBlockSize = function () {
+        const width = state.sampleRingBlockWidth || 0;
+        const height = state.sampleRingBlockHeight || 0;
+        return width * height;
+    };
+
     root.audioOutput.getSampleRingDepth = function () {
         return state.sampleRingDepth || 0;
     };
@@ -367,7 +373,7 @@
 
     const resolvePrecision = function (options) {
         const precisionRaw = String(options.precision || '32bFLOAT');
-        const precision = (precisionRaw === '32bFLOAT' || precisionRaw === '16bFLOAT' || precisionRaw === '16bPACK')
+        const precision = (precisionRaw === '32bFLOAT' || precisionRaw === '16bFLOAT' || precisionRaw === '16bPACK' || precisionRaw === '8bPACK')
             ? precisionRaw
             : '32bFLOAT';
         const gl = options.gl;
@@ -379,6 +385,9 @@
         const supportsFloat = isWebGL2 && !!extColorFloat;
         const supportsHalfFloat = isWebGL2 && (!!extColorFloat || !!extColorHalfFloat);
 
+        if (precision === '8bPACK') {
+            return '8bPACK';
+        }
         if (precision === '32bFLOAT' && supportsFloat) {
             return '32bFLOAT';
         }
@@ -416,7 +425,7 @@
 
     const reportPrecisionFallback = function (options, resolvedPrecision, label) {
         const requestedRaw = String(options.precision || '32bFLOAT');
-        const requested = (requestedRaw === '32bFLOAT' || requestedRaw === '16bFLOAT' || requestedRaw === '16bPACK')
+        const requested = (requestedRaw === '32bFLOAT' || requestedRaw === '16bFLOAT' || requestedRaw === '16bPACK' || requestedRaw === '8bPACK')
             ? requestedRaw
             : '32bFLOAT';
         if (requested === resolvedPrecision) {
@@ -464,6 +473,17 @@
     vec2 vl = mod(v, 256.0) / 255.0;
     vec2 vh = floor(v / 256.0) / 255.0;
     GLSL_FRAGCOLOR = vec4(vl.x, vh.x, vl.y, vh.y);
+}` : (precisionMode === '8bPACK') ? `
+    uniform float blockOffset;
+
+    void main() {
+    float sampleTime = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0) / iSampleRate;
+    float sampleIndex = (blockOffset * iSampleRate) + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0);
+    int sampleIndexInt = int(sampleIndex);
+    vec2 y = mainSound(sampleIndexInt, sampleTime);
+    vec2 v = floor((0.5 + 0.5 * y) * 255.0);
+    vec2 vn = v / 255.0;
+    GLSL_FRAGCOLOR = vec4(vn.x, vn.y, 0.0, 1.0);
 }` : `
     uniform float blockOffset;
 
@@ -490,6 +510,7 @@
                 iSampleRate: { type: 'f', value: sampleRate },
                 iAudioTime: { type: 'f', value: 0 },
                 iSampleBlockSize: { type: 'i', value: samplesPerBlock },
+                iSampleRingBlockSize: { type: 'i', value: (state.sampleRingBlockWidth || 0) * (state.sampleRingBlockHeight || 0) },
                 iSampleRingDepth: { type: 'i', value: state.sampleRingDepth || 0 },
                 iSoundIndex: { type: 'i', value: 0 },
                 iSampleRing0: { type: 't' },
@@ -824,7 +845,7 @@
         const mesh = new global.THREE.Mesh(new global.THREE.PlaneGeometry(2, 2), material);
         scene.add(mesh);
 
-        const pixels = (precisionMode === '16bPACK')
+        const pixels = (precisionMode === '16bPACK' || precisionMode === '8bPACK')
             ? new Uint8Array(WIDTH * HEIGHT * 4)
             : new Float32Array(WIDTH * HEIGHT * 4);
 
@@ -863,7 +884,7 @@
                     textureTypeName = String(texType);
                 }
             }
-            const readbackType = (precisionMode === '16bPACK') ? 'Uint8Array' : 'Float32Array';
+            const readbackType = (precisionMode === '16bPACK' || precisionMode === '8bPACK') ? 'Uint8Array' : 'Float32Array';
             const bytesPerComponent = (precisionMode === '32bFLOAT') ? 4 : (precisionMode === '16bFLOAT' ? 2 : 1);
             const targetBytes = WIDTH * HEIGHT * 4 * bytesPerComponent;
             const audioBlockBytes = samplesPerBlock * 2 * 4;
@@ -990,6 +1011,12 @@
                 const pixelIndex = j * 4;
                 left[j] = (ctx.pixels[pixelIndex + 0] + 256 * ctx.pixels[pixelIndex + 1]) / 65535 * 2 - 1;
                 right[j] = (ctx.pixels[pixelIndex + 2] + 256 * ctx.pixels[pixelIndex + 3]) / 65535 * 2 - 1;
+            }
+        } else if (precisionMode === '8bPACK') {
+            for (let j = 0; j < ctx.samplesPerBlock; j++) {
+                const pixelIndex = j * 4;
+                left[j] = (ctx.pixels[pixelIndex + 0] / 255) * 2 - 1;
+                right[j] = (ctx.pixels[pixelIndex + 1] / 255) * 2 - 1;
             }
         } else {
             for (let j = 0; j < ctx.samplesPerBlock; j++) {
