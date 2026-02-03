@@ -1178,10 +1178,10 @@
         const soundBuffers = state.soundBuffers || [];
         const precisionSummary = getPrecisionSummary(options, soundBuffers);
         const mixGain = soundBuffers.length > 0 ? 1 / soundBuffers.length : 1;
-        ensureBufferPool(blockSamples);
-        const pool = state.bufferPool;
         const blocks = Math.max(0, Math.floor(count || 0));
         const blockSamples = state.stream.blockSamples || (DEFAULT_BLOCK_DIM * DEFAULT_BLOCK_DIM);
+        ensureBufferPool(blockSamples);
+        const pool = state.bufferPool;
         const startSample = Number.isFinite(baseSample)
             ? Math.max(0, Math.floor(baseSample))
             : (state.stream.nextBlock * blockSamples);

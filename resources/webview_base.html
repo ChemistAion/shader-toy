@@ -283,9 +283,9 @@
         }
         const container = document.createElement('div');
         container.innerHTML = html;
-        const scripts = Array.from(container.querySelectorAll('script'));
-        for (const script of scripts) {
-            document.body.appendChild(script);
+        const nodes = Array.from(container.childNodes);
+        for (const node of nodes) {
+            document.body.appendChild(node);
         }
     }
 
@@ -339,8 +339,8 @@
             }
         }
 
-        replaceScriptTags("script[data-shadertoy='include']", payload.includesHtml);
-        replaceScriptTags("script[data-shadertoy='shader']", payload.shadersHtml);
+        replaceScriptTags("[data-shadertoy='include']", payload.includesHtml);
+        replaceScriptTags("[data-shadertoy='shader']", payload.shadersHtml);
 
         if (payload.initScript) {
             try {
@@ -453,9 +453,11 @@
 
     const hasSoundBuffer = buffers.some((buffer) => buffer && buffer.IsSound);
     const audioOutputPrecision = '<!-- Audio Output Precision -->';
-    const audioBlockSize = <!-- Audio Block Size -->;
+    const audioBlockSizeRaw = '<!-- Audio Block Size -->';
+    const audioBlockSize = Number(audioBlockSizeRaw) || 65536;
     const audioWorkletUrl = '<!-- Audio Worklet Processor -->';
-    const showSoundButton = <!-- Show Sound Button -->;
+    const showSoundButtonRaw = '<!-- Show Sound Button -->';
+    const showSoundButton = showSoundButtonRaw !== 'false';
     if (!glslUseVersion3 && hasSoundBuffer && vscode !== undefined) {
         vscode.postMessage({
             command: 'errorMessage',
@@ -472,7 +474,6 @@
             prepareVertexShader: prepareVertexShader,
             audioContext: audioContext,
             precision: audioOutputPrecision,
-                blockSize: audioBlockSize,
             blockSize: audioBlockSize,
             audioWorkletUrl: audioWorkletUrl,
             showSoundButton: showSoundButton,

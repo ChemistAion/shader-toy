@@ -607,7 +607,7 @@ export class WebviewContentProvider {
 
         const showSoundButton = this.context.getConfig<boolean>('showSoundButton');
         const showSoundButtonExtension = new ShowSoundButtonExtension(showSoundButton !== false);
-        this.webviewAssembler.addReplaceModule(showSoundButtonExtension, 'const showSoundButton = <!-- Show Sound Button -->;', '<!-- Show Sound Button -->');
+        this.webviewAssembler.addReplaceModule(showSoundButtonExtension, "const showSoundButtonRaw = '<!-- Show Sound Button -->';", '<!-- Show Sound Button -->');
 
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Packages
