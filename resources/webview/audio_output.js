@@ -58,6 +58,7 @@
     };
 
     const DEFAULT_BLOCK_DIM = 256;
+    const DEFAULT_POOL_COUNT = 6;
 
     root.audioOutput.state = state;
 
@@ -185,6 +186,13 @@
                 } else {
                     const count = Math.max(0, Math.floor(message.count || 0));
                     requestBlocks(count);
+                }
+            }
+            if (message.type === 'recycle' && message.buffer && state.bufferPool) {
+                try {
+                    state.bufferPool.free.push(message.buffer);
+                } catch {
+                    // ignore
                 }
             }
             if (message.type === 'analysis') {
@@ -474,6 +482,36 @@
         state.renderBlockWidth = dim;
         state.renderBlockHeight = dim;
         state.stream.blockSamples = blockSamples;
+        ensureBufferPool(blockSamples);
+    };
+
+    const resetBufferPool = function () {
+        state.bufferPool = {
+            free: [],
+            total: 0,
+            blockBytes: 0
+        };
+    };
+
+    const ensureBufferPool = function (blockSamples) {
+        const samples = Number.isFinite(blockSamples) ? Math.max(1, Math.floor(blockSamples)) : 0;
+        if (samples <= 0) {
+            return;
+        }
+        if (!state.bufferPool) {
+            resetBufferPool();
+        }
+        const pool = state.bufferPool;
+        const blockBytes = samples * 2 * 4;
+        if (pool.blockBytes !== blockBytes) {
+            resetBufferPool();
+        }
+        const freshPool = state.bufferPool;
+        while (freshPool.free.length + freshPool.total < DEFAULT_POOL_COUNT) {
+            freshPool.free.push(new ArrayBuffer(blockBytes));
+            freshPool.total += 1;
+        }
+        freshPool.blockBytes = blockBytes;
     };
 
     const getPrecisionSummary = function (options, soundBuffers) {
@@ -1095,6 +1133,7 @@
         state.stream.lastNeed = 0;
         state.statsLine = undefined;
         state.outputPrimed = false;
+        resetBufferPool();
         renderStatus();
         if (state.workletNode) {
             try {
@@ -1127,6 +1166,8 @@
         const soundBuffers = state.soundBuffers || [];
         const precisionSummary = getPrecisionSummary(options, soundBuffers);
         const mixGain = soundBuffers.length > 0 ? 1 / soundBuffers.length : 1;
+        ensureBufferPool(blockSamples);
+        const pool = state.bufferPool;
         const blocks = Math.max(0, Math.floor(count || 0));
         const blockSamples = state.stream.blockSamples || (DEFAULT_BLOCK_DIM * DEFAULT_BLOCK_DIM);
         const startSample = Number.isFinite(baseSample)
@@ -1135,8 +1176,15 @@
         state.stream.lastNeed = blocks;
         const blockSeconds = blockSamples / state.audioContext.sampleRate;
         for (let i = 0; i < blocks; i++) {
-            let mixedLeft = null;
-            let mixedRight = null;
+            const buffer = pool && pool.free.length ? pool.free.pop() : null;
+            if (!buffer) {
+                postInfoMessage('Audio buffer pool exhausted; lowering render-ahead.');
+                break;
+            }
+            const mixedLeft = new Float32Array(buffer, 0, blockSamples);
+            const mixedRight = new Float32Array(buffer, blockSamples * 4, blockSamples);
+            mixedLeft.fill(0);
+            mixedRight.fill(0);
             const blockStartSample = startSample + (i * blockSamples);
             const blockIndex = Math.floor(blockStartSample / blockSamples);
 
@@ -1146,26 +1194,18 @@
                 if (!block) {
                     continue;
                 }
-                if (!mixedLeft || !mixedRight) {
-                    mixedLeft = new Float32Array(block.left.length);
-                    mixedRight = new Float32Array(block.right.length);
-                }
                 for (let j = 0; j < block.left.length; j++) {
                     mixedLeft[j] += block.left[j] * mixGain;
                     mixedRight[j] += block.right[j] * mixGain;
                 }
             }
 
-            if (!mixedLeft || !mixedRight) {
-                break;
-            }
-
             state.stream.nextBlock = blockIndex + 1;
             state.stream.renderedBlocks += 1;
             try {
                 state.workletNode.port.postMessage(
-                    { type: 'push', left: mixedLeft.buffer, right: mixedRight.buffer, frames: blockSamples, baseSample: blockStartSample },
-                    [mixedLeft.buffer, mixedRight.buffer]
+                    { type: 'push', buffer, frames: blockSamples, baseSample: blockStartSample, layout: 'planarLR' },
+                    [buffer]
                 );
             } catch {
                 // ignore
@@ -1176,10 +1216,12 @@
             }
         }
 
+        const poolFree = state.bufferPool ? state.bufferPool.free.length : 0;
+        const poolTotal = state.bufferPool ? state.bufferPool.total : 0;
         const workletState = state.workletFailed
             ? 'failed'
             : (state.workletReady ? 'ready' : (state.workletLoading ? 'loading' : 'idle'));
-        setStats(`Streaming: block ${blockSeconds.toFixed(3)}s, rendered ${state.stream.renderedBlocks}, need ${state.stream.lastNeed}, sources ${soundBuffers.length}, precision ${precisionSummary}, worklet ${workletState}`);
+        setStats(`Streaming: block ${blockSeconds.toFixed(3)}s, rendered ${state.stream.renderedBlocks}, need ${state.stream.lastNeed}, sources ${soundBuffers.length}, precision ${precisionSummary}, pool ${poolFree}/${poolTotal}, worklet ${workletState}`);
     };
 
     const requestBlocksFromNeed = function (wantBaseSample, framesWanted) {

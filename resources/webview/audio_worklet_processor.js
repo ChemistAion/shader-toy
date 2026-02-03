@@ -33,11 +33,23 @@ class ShaderToyStreamProcessor extends AudioWorkletProcessor {
                 }
             }
             if (message.type === 'push') {
+                if (message.buffer) {
+                    const frames = Number.isFinite(message.frames) ? Math.max(0, Math.floor(message.frames)) : 0;
+                    if (frames > 0) {
+                        const buf = message.buffer;
+                        const left = new Float32Array(buf, 0, frames);
+                        const right = new Float32Array(buf, frames * 4, frames);
+                        this.queue.push({ buf, left, right, frames, p: 0 });
+                        this.queueFrames += frames;
+                        this.needInFlight = false;
+                    }
+                    return;
+                }
                 const left = message.left ? new Float32Array(message.left) : null;
                 const right = message.right ? new Float32Array(message.right) : null;
                 if (left && right) {
                     const frames = Number.isFinite(message.frames) ? Math.max(0, Math.floor(message.frames)) : left.length;
-                    this.queue.push({ left, right, frames: frames || left.length });
+                    this.queue.push({ left, right, frames: frames || left.length, p: 0 });
                     this.queueFrames += frames || left.length;
                     this.needInFlight = false;
                 }
@@ -92,7 +104,7 @@ class ShaderToyStreamProcessor extends AudioWorkletProcessor {
                 break;
             }
 
-            const remaining = this.current.left.length - this.offset;
+            const remaining = (this.current.frames || this.current.left.length) - this.offset;
             const count = Math.min(remaining, frames - frameIndex);
 
             if (channels >= 1) {
@@ -143,6 +155,13 @@ class ShaderToyStreamProcessor extends AudioWorkletProcessor {
             this.offset += count;
             this.queueFrames = Math.max(0, this.queueFrames - count);
             if (this.offset >= this.current.left.length) {
+                if (this.current.buf) {
+                    try {
+                        this.port.postMessage({ type: 'recycle', buffer: this.current.buf }, [this.current.buf]);
+                    } catch {
+                        // ignore
+                    }
+                }
                 this.current = null;
                 this.offset = 0;
             }
