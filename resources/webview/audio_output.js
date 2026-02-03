@@ -57,6 +57,8 @@
         autoplayNotified: false
     };
 
+    const DEFAULT_BLOCK_DIM = 256;
+
     root.audioOutput.state = state;
 
     root.audioOutput.init = function (options) {
@@ -219,7 +221,7 @@
     };
 
     root.audioOutput.getSampleBlockSize = function () {
-        return state.stream.blockSamples || (256 * 256);
+        return state.stream.blockSamples || (DEFAULT_BLOCK_DIM * DEFAULT_BLOCK_DIM);
     };
 
     root.audioOutput.getSampleRingBlockSize = function () {
@@ -425,6 +427,29 @@
             return '16bFLOAT';
         }
         return '16bPACK';
+    };
+
+    const applyRenderBlockSize = function (options) {
+        const requestedRaw = options && Number.isFinite(options.blockSize) ? Math.floor(options.blockSize) : 0;
+        let dim = DEFAULT_BLOCK_DIM;
+        let blockSamples = dim * dim;
+
+        if (requestedRaw > 0) {
+            const rootDim = Math.floor(Math.sqrt(requestedRaw));
+            if (rootDim * rootDim === requestedRaw) {
+                dim = Math.max(1, rootDim);
+                blockSamples = dim * dim;
+                if (blockSamples % 128 !== 0) {
+                    postInfoMessage(`Audio block size ${blockSamples} is not a multiple of 128; AudioWorklet may underrun.`);
+                }
+            } else {
+                postInfoMessage(`Audio block size ${requestedRaw} must be a perfect square (e.g., 65536). Using ${blockSamples}.`);
+            }
+        }
+
+        state.renderBlockWidth = dim;
+        state.renderBlockHeight = dim;
+        state.stream.blockSamples = blockSamples;
     };
 
     const getPrecisionSummary = function (options, soundBuffers) {
@@ -1135,6 +1160,8 @@
             return;
         }
 
+        applyRenderBlockSize(options);
+
         const soundBuffers = options.buffers.filter((buffer) => buffer && buffer.IsSound);
         if (!soundBuffers.length) {
             root.audioOutput.stop();
@@ -1187,7 +1214,7 @@
         const precisionSummary = getPrecisionSummary(options, soundBuffers);
         reportPrecisionFallback(options, precisionMode);
         
-        const blockSeconds = (state.stream.blockSamples || (256 * 256)) / state.audioContext.sampleRate;
+        const blockSeconds = (state.stream.blockSamples || (DEFAULT_BLOCK_DIM * DEFAULT_BLOCK_DIM)) / state.audioContext.sampleRate;
         setStatus(`Audio: ${precisionSummary} @ ${state.audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
         resetSampleRings();
 
@@ -1229,6 +1256,8 @@
             postErrorMessage('mainSound requires shader-toy.webglVersion set to "WebGL2".');
             return;
         }
+
+        applyRenderBlockSize(options);
 
         const soundBuffers = options.buffers.filter((buffer) => buffer && buffer.IsSound);
 
@@ -1286,7 +1315,7 @@
         const precisionSummary = getPrecisionSummary(options, soundBuffers);
         reportPrecisionFallback(options, precisionMode);
 
-        const blockSeconds = (state.stream.blockSamples || (256 * 256)) / audioContext.sampleRate;
+        const blockSeconds = (state.stream.blockSamples || (DEFAULT_BLOCK_DIM * DEFAULT_BLOCK_DIM)) / audioContext.sampleRate;
         setStatus(`Audio: ${precisionSummary} @ ${audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
         resetSampleRings();
 
@@ -1341,7 +1370,7 @@
                     state.started = true;
                     if (state.statusMessage && state.statusMessage.indexOf('Audio output is blocked') >= 0) {
                         const precisionMode = getPrecisionSummary(state.options || {}, state.soundBuffers || []);
-                        const blockSeconds = (512 * 512) / state.audioContext.sampleRate;
+                        const blockSeconds = (state.stream.blockSamples || (DEFAULT_BLOCK_DIM * DEFAULT_BLOCK_DIM)) / state.audioContext.sampleRate;
                         const durationSeconds = Number.isFinite(state.options.durationSeconds) ? state.options.durationSeconds : 180;
                         setStatus(`Audio: ${precisionMode} @ ${state.audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
                     }

@@ -209,6 +209,11 @@
                     ],
                     "description": "Precision for #iSound GPU audio output per channel (L/R): 32bFLOAT / 16bFLOAT use RGBA32F.xy / RGBA16F.xy framebuffers (WebGL2 extensions required); 16bPACK (fallback when FLOAT ext-s are unavailable) packs each sample into two UNORM bytes and stores them in RGBA8.xy/.zw (L/R), 8bPACK stores one UNORM byte per channel in RGBA8.x/y; the PACK formats are decoded back to float in the range [-1, +1]."
                 },
+                "shader-toy.audioBlockSize": {
+                    "type": "number",
+                    "default": 65536,
+                    "description": "Audio GPU block size in samples (must be a multiple of 128). Lower values reduce latency but increase MessagePort traffic."
+                },
                 "shader-toy.testCompileIncludedFiles": {
                     "type": "boolean",
                     "default": true,
