@@ -13,6 +13,7 @@ class ShaderToyStreamProcessor extends AudioWorkletProcessor {
         this.underruns = 0;
         this.requestCooldown = 0;
         this.targetBlocks = 4;
+        this.statsCountdown = Math.floor(sampleRate / 10);
         this.analysis = {
             enabled: false,
             window: 2048,
@@ -171,6 +172,16 @@ class ShaderToyStreamProcessor extends AudioWorkletProcessor {
             this.requestCooldown -= 1;
         }
         this.playheadSample += frames;
+
+        this.statsCountdown -= frames;
+        if (this.statsCountdown <= 0) {
+            this.statsCountdown += Math.floor(sampleRate / 10);
+            this.port.postMessage({
+                type: 'stats',
+                queueFrames: this.queueFrames,
+                underruns: this.underruns
+            });
+        }
 
         const lowWater = this.lowWaterFrames || 256;
         const targetFrames = this.targetFrames || ((this.blockSize > 0) ? (this.blockSize * 4) : 1024);

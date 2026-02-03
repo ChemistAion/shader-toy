@@ -54,7 +54,11 @@
         gestureHandlerAttached: false,
         gestureGranted: false,
         started: false,
-        autoplayNotified: false
+        autoplayNotified: false,
+        workletStats: {
+            queueFrames: 0,
+            underruns: 0
+        }
     };
 
     const DEFAULT_BLOCK_DIM = 256;
@@ -200,6 +204,14 @@
                 state.analysis.rmsR = Number.isFinite(message.rmsR) ? message.rmsR : 0;
                 if (Number.isFinite(message.windowSize)) {
                     state.analysis.windowSize = message.windowSize;
+                }
+            }
+            if (message.type === 'stats') {
+                if (Number.isFinite(message.queueFrames)) {
+                    state.workletStats.queueFrames = Math.max(0, Math.floor(message.queueFrames));
+                }
+                if (Number.isFinite(message.underruns)) {
+                    state.workletStats.underruns = Math.max(0, Math.floor(message.underruns));
                 }
             }
         };
@@ -1218,10 +1230,12 @@
 
         const poolFree = state.bufferPool ? state.bufferPool.free.length : 0;
         const poolTotal = state.bufferPool ? state.bufferPool.total : 0;
+        const workletQueue = state.workletStats ? state.workletStats.queueFrames : 0;
+        const workletUnderruns = state.workletStats ? state.workletStats.underruns : 0;
         const workletState = state.workletFailed
             ? 'failed'
             : (state.workletReady ? 'ready' : (state.workletLoading ? 'loading' : 'idle'));
-        setStats(`Streaming: block ${blockSeconds.toFixed(3)}s, rendered ${state.stream.renderedBlocks}, need ${state.stream.lastNeed}, sources ${soundBuffers.length}, precision ${precisionSummary}, pool ${poolFree}/${poolTotal}, worklet ${workletState}`);
+        setStats(`Streaming: block ${blockSeconds.toFixed(3)}s, rendered ${state.stream.renderedBlocks}, need ${state.stream.lastNeed}, sources ${soundBuffers.length}, precision ${precisionSummary}, pool ${poolFree}/${poolTotal}, queue ${workletQueue}, underruns ${workletUnderruns}, worklet ${workletState}`);
     };
 
     const requestBlocksFromNeed = function (wantBaseSample, framesWanted) {
