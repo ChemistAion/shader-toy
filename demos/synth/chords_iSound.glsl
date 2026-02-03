@@ -5,6 +5,12 @@
 
 #include "common.glsl"
 
+// Self-sampling source
+#iSound0 "self"
+
+// Ring-buffer sampler helpers
+#include "sampler_helpers.glsl"
+
 // From https://www.shadertoy.com/view/llByWR
 float sawtooth(float time, float x) {
     // Smooth harsh attack
@@ -52,5 +58,15 @@ vec2 mainSound(int samp, float time) {
 		result.y += sawtooth(repeat, (time + offsetRight) * noteFreq(notes[i])) * amplitudes[i];
 	}
     
-	return result / float(notes.length());
+	vec2 dry = result / float(notes.length());
+
+	// Echo taps: 0.333s, 0.666s, 0.999s
+	int delaySamples1 = int(0.333 * iSampleRate);
+	int delaySamples2 = int(0.666 * iSampleRate);
+	int delaySamples3 = int(0.999 * iSampleRate);
+	vec2 echo1 = sampleSound(0, samp - delaySamples1) * 0.6;
+	vec2 echo2 = sampleSound(0, samp - delaySamples2) * 0.4;
+	vec2 echo3 = sampleSound(0, samp - delaySamples3) * 0.2;
+
+	return dry + echo1 + echo2 + echo3;
 }

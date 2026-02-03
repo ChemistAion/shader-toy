@@ -12,6 +12,7 @@
         gainNode: null,
         gainConnected: false,
         outputGain: 0.5,
+        outputPrimed: false,
         workletNode: null,
         workletReady: false,
         workletLoading: false,
@@ -30,7 +31,7 @@
         renderBlockWidth: 256,
         renderBlockHeight: 256,
         sampleRing: new Map(),
-        sampleRingDepth: 4,
+        sampleRingDepth: 16,
         sampleRingBlockWidth: 64,
         sampleRingBlockHeight: 64,
         analysis: {
@@ -61,6 +62,7 @@
     root.audioOutput.init = function (options) {
         state.initialized = true;
         state.options = options || {};
+        state.outputPrimed = false;
     };
 
     const disconnectSafe = function (node) {
@@ -569,7 +571,7 @@
         if (!state.gainNode) {
             return;
         }
-        state.gainNode.gain.value = state.enabled ? state.outputGain : 0;
+        state.gainNode.gain.value = (state.enabled && state.outputPrimed) ? state.outputGain : 0;
     };
 
     root.audioOutput.enable = function () {
@@ -1040,6 +1042,7 @@
         state.stream.renderedBlocks = 0;
         state.stream.lastNeed = 0;
         state.statsLine = undefined;
+        state.outputPrimed = false;
         renderStatus();
         if (state.workletNode) {
             try {
@@ -1107,6 +1110,10 @@
                 );
             } catch {
                 // ignore
+            }
+            if (!state.outputPrimed) {
+                state.outputPrimed = true;
+                applyOutputGain();
             }
         }
 
@@ -1199,6 +1206,7 @@
         }
         state.ready = true;
         state.started = false;
+        state.outputPrimed = false;
 
         if (state.workletReady && options.autoStart !== false && !options.paused) {
             if (state.audioContext.state !== 'running') {
@@ -1296,6 +1304,7 @@
             setStats('Worklet: loading module');
         }
         state.ready = true;
+        state.outputPrimed = false;
 
         const shouldStart = state.started || (options.autoStart !== false && !options.paused);
         state.started = false;
