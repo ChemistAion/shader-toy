@@ -12,8 +12,8 @@ type Webview = {
     Panel: vscode.WebviewPanel,
     OnDidDispose: () => void,
     HasHtml?: boolean,
-    LocalResources?: string[],
-    RootDocument?: vscode.TextDocument
+    RootDocument?: vscode.TextDocument,
+    LocalResources?: string[]
 };
 type StaticWebview = Webview & {
     Document: vscode.TextDocument
@@ -65,6 +65,7 @@ export class ShaderToyManager {
         else {
             vscode.window.showErrorMessage('Select a TextEditor to show GLSL Preview.');
         }
+
     };
 
     public showStaticPreview = async () => {
@@ -87,6 +88,7 @@ export class ShaderToyManager {
                 const staticWebview = this.staticWebviews[this.staticWebviews.length - 1];
                 this.staticWebviews[this.staticWebviews.length - 1] = await this.updateWebview(staticWebview, vscode.window.activeTextEditor.document);
                 newWebviewPanel.onDidDispose(onDidDispose);
+
             }
         }
     };
@@ -353,7 +355,28 @@ export class ShaderToyManager {
         webviewPanel.LocalResources = removeDuplicates(allResources);
         webviewPanel.RootDocument = document;
 
-        // Keep webview resource roots stable to preserve gesture state.
+        let localResourceRoots: string[] = [];
+        for (const localResource of localResources) {
+            const localResourceRoot = path.dirname(localResource);
+            localResourceRoots.push(localResourceRoot);
+        }
+        localResourceRoots = removeDuplicates(localResourceRoots);
+
+        // Recreate webview if allowed resource roots are not part of the current resource roots
+        const previousLocalResourceRoots = webviewPanel.Panel.webview.options.localResourceRoots || [];
+        const previousHadLocalResourceRoot = (localResourceRootAsUri: string) => {
+            const foundElement = previousLocalResourceRoots.find(uri => uri.toString() === localResourceRootAsUri);
+            return foundElement !== undefined;
+        };
+        const previousHadAllLocalResourceRoots = localResourceRoots.every(localResourceRoot => previousHadLocalResourceRoot(vscode.Uri.file(localResourceRoot).toString()));
+        if (!previousHadAllLocalResourceRoots) {
+            const localResourceRootsUri = localResourceRoots.map(localResourceRoot => vscode.Uri.file(localResourceRoot));
+            const newWebviewPanel = this.createWebview(webviewPanel.Panel.title, localResourceRootsUri);
+            webviewPanel.Panel.dispose();
+            newWebviewPanel.onDidDispose(webviewPanel.OnDidDispose);
+            webviewPanel.Panel = newWebviewPanel;
+            webviewPanel.HasHtml = false;
+        }
         if (webviewPanel.HasHtml) {
             const payload = await webviewContentProvider.generateHotReloadPayload(webviewPanel.Panel.webview, this.startingData);
             webviewPanel.Panel.webview.postMessage({ command: 'hotReload', payload });

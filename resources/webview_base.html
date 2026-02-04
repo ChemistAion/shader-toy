@@ -487,12 +487,14 @@
     let camera = new THREE.OrthographicCamera(-resolution.x / 2.0, resolution.x / 2.0, resolution.y / 2.0, -resolution.y / 2.0, 1, 1000);
     camera.position.set(0, 0, 10);
 
-    const failedBufferNames = new Set();
+    // Run every shader once to check for compile errors
+    let failed = 0;
+    let failedBufferNames = new Set();
+
     function compileAllShaders() {
-        // Run every shader once to check for compile errors
         let compileTimeStart = performance.now();
-        let failed = 0;
-        failedBufferNames.clear();
+        failed = 0;
+        failedBufferNames = new Set();
         for (let include of commonIncludes) {
             currentShader = {
                 Name: include.Name,
@@ -504,6 +506,9 @@
         }
 
         for (let buffer of buffers) {
+            if (buffer.IsSound || !buffer.Shader) {
+                continue;
+            }
             if (buffer.VertexShaderElementId !== undefined) {
                 currentShader = {
                     Name: buffer.Name + ' (vertex)',
@@ -536,6 +541,138 @@
             }
         }
     }
+
+    function replaceScriptTags(selector, html) {
+        try {
+            const existing = Array.from(document.querySelectorAll(selector));
+            for (const el of existing) {
+                if (el && el.parentNode) {
+                    el.parentNode.removeChild(el);
+                }
+            }
+            if (!html) {
+                return;
+            }
+            const container = document.createElement('div');
+            container.innerHTML = html;
+            const scripts = Array.from(container.querySelectorAll('script'));
+            for (const script of scripts) {
+                document.body.appendChild(script);
+            }
+        } catch (e) {
+            if (vscode) {
+                vscode.postMessage({
+                    command: 'errorMessage',
+                    message: 'Hot reload failed to replace shader scripts.'
+                });
+            }
+        }
+    }
+
+    window.ShaderToy = window.ShaderToy || {};
+    window.ShaderToy.hotReload = function (payload) {
+        if (!payload) {
+            return;
+        }
+
+        if (vscode) {
+            vscode.postMessage({
+                command: 'clearDiagnostics'
+            });
+        }
+
+        const messageElement = document.getElementById('message');
+        if (messageElement) {
+            messageElement.innerHTML = '';
+        }
+
+        if (payload.state) {
+            if (typeof payload.state.time === 'number') {
+                startingTime = payload.state.time;
+                time = payload.state.time;
+            }
+            if (typeof payload.state.paused === 'boolean') {
+                paused = payload.state.paused;
+            }
+            if (payload.state.mouse) {
+                mouse = new THREE.Vector4(payload.state.mouse.x, payload.state.mouse.y, payload.state.mouse.z, payload.state.mouse.w);
+            }
+            if (payload.state.normalizedMouse) {
+                normalizedMouse = new THREE.Vector2(payload.state.normalizedMouse.x, payload.state.normalizedMouse.y);
+            }
+            if (payload.state.flyControlPosition) {
+                controlState.position.set(payload.state.flyControlPosition[0], payload.state.flyControlPosition[1], payload.state.flyControlPosition[2]);
+            }
+            if (payload.state.flyControlRotation) {
+                controlState.quaternion.set(payload.state.flyControlRotation[0], payload.state.flyControlRotation[1], payload.state.flyControlRotation[2], payload.state.flyControlRotation[3]);
+            }
+            if (!paused) {
+                pausedTime = 0.0;
+            }
+
+            if (window.ShaderToy && window.ShaderToy.audioOutput) {
+                if (paused && window.ShaderToy.audioOutput.pause) {
+                    window.ShaderToy.audioOutput.pause();
+                }
+                if (!paused && window.ShaderToy.audioOutput.resume) {
+                    window.ShaderToy.audioOutput.resume(true);
+                }
+            }
+        }
+
+        replaceScriptTags("script[data-shadertoy='include']", payload.includesHtml);
+        replaceScriptTags("script[data-shadertoy='shader']", payload.shadersHtml);
+
+        if (payload.initScript) {
+            try {
+                if (buffers && buffers.length) {
+                    for (const buffer of buffers) {
+                        try {
+                            if (buffer.Shader && buffer.Shader.dispose) {
+                                buffer.Shader.dispose();
+                            }
+                        } catch { /* ignore */ }
+                        try {
+                            if (buffer.Target && buffer.Target.dispose) {
+                                buffer.Target.dispose();
+                            }
+                        } catch { /* ignore */ }
+                        try {
+                            if (buffer.PingPongTarget && buffer.PingPongTarget.dispose) {
+                                buffer.PingPongTarget.dispose();
+                            }
+                        } catch { /* ignore */ }
+                    }
+                }
+                (0, eval)(payload.initScript);
+            } catch (e) {
+                if (vscode) {
+                    vscode.postMessage({
+                        command: 'errorMessage',
+                        message: 'Hot reload failed during init script.'
+                    });
+                }
+            }
+        }
+
+        if (glslUseVersion3 && window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.reloadFromGlobals) {
+            window.ShaderToy.audioOutput.reloadFromGlobals({
+                buffers: buffers,
+                renderer: renderer,
+                gl: gl,
+                glslUseVersion3: glslUseVersion3,
+                prepareFragmentShader: prepareFragmentShader,
+                prepareVertexShader: prepareVertexShader,
+                audioContext: audioContext,
+                precision: audioOutputPrecision,
+                showSoundButton: showSoundButton,
+                paused: paused
+            });
+        }
+
+        compileAllShaders();
+        forceRenderOneFrame = true;
+    };
 
     compileAllShaders();
     computeSize();
@@ -601,152 +738,149 @@
             renderer.setRenderTarget(buffer.Target);
             renderer.render(scene, camera);
         }
-        
-        // Uniforms Update
+        currentShader = {};
+        let compileTimeEnd = performance.now();
+        let compileTime = compileTimeEnd - compileTimeStart;
+        if (compileTimePanel !== undefined) {
+            for (let i = 0; i < 200; i++) {
+                compileTimePanel.update(compileTime, 200);
+            }
+        }
+    }
 
-        // Keyboard Update
+    function replaceScriptTags(selector, html) {
+        try {
+            const existing = Array.from(document.querySelectorAll(selector));
+            for (const el of existing) {
+                if (el && el.parentNode) {
+                    el.parentNode.removeChild(el);
+                }
+            }
+            if (!html) {
+                return;
+            }
+            const container = document.createElement('div');
+            container.innerHTML = html;
+            const scripts = Array.from(container.querySelectorAll('script'));
+            for (const script of scripts) {
+                document.body.appendChild(script);
+            }
+        } catch (e) {
+            if (vscode) {
+                vscode.postMessage({
+                    command: 'errorMessage',
+                    message: 'Hot reload failed to replace shader scripts.'
+                });
+            }
+        }
+    }
 
-        if (mouse.w > 0.0) {
-            mouse.w = -mouse.w;
-            updateMouse();
+    window.ShaderToy = window.ShaderToy || {};
+    window.ShaderToy.hotReload = function (payload) {
+        if (!payload) {
+            return;
         }
 
-        for (let buffer of buffers) {
-            if (buffer.PingPongTarget) {
-                [buffer.PingPongTarget, buffer.Target] = [buffer.Target, buffer.PingPongTarget];
-                buffer.Shader.uniforms[`iChannel${buffer.PingPongChannel}`].value = buffer.PingPongTarget.texture;
-                for (let dependent of buffer.Dependents) {
-                    const dependentBuffer = buffers[dependent.Index];
-                    dependentBuffer.Shader.uniforms[`iChannel${dependent.Channel}`].value = buffer.Target.texture;
+        if (vscode) {
+            vscode.postMessage({
+                command: 'clearDiagnostics'
+            });
+        }
+
+        const messageElement = document.getElementById('message');
+        if (messageElement) {
+            messageElement.innerHTML = '';
+        }
+
+        if (payload.state) {
+            if (typeof payload.state.time === 'number') {
+                startingTime = payload.state.time;
+                time = payload.state.time;
+            }
+            if (typeof payload.state.paused === 'boolean') {
+                paused = payload.state.paused;
+            }
+            if (payload.state.mouse) {
+                mouse = new THREE.Vector4(payload.state.mouse.x, payload.state.mouse.y, payload.state.mouse.z, payload.state.mouse.w);
+            }
+            if (payload.state.normalizedMouse) {
+                normalizedMouse = new THREE.Vector2(payload.state.normalizedMouse.x, payload.state.normalizedMouse.y);
+            }
+            if (payload.state.flyControlPosition) {
+                controlState.position.set(payload.state.flyControlPosition[0], payload.state.flyControlPosition[1], payload.state.flyControlPosition[2]);
+            }
+            if (payload.state.flyControlRotation) {
+                controlState.quaternion.set(payload.state.flyControlRotation[0], payload.state.flyControlRotation[1], payload.state.flyControlRotation[2], payload.state.flyControlRotation[3]);
+            }
+            if (!paused) {
+                pausedTime = 0.0;
+            }
+
+            if (window.ShaderToy && window.ShaderToy.audioOutput) {
+                if (paused && window.ShaderToy.audioOutput.pause) {
+                    window.ShaderToy.audioOutput.pause();
+                }
+                if (!paused && window.ShaderToy.audioOutput.resume) {
+                    window.ShaderToy.audioOutput.resume(true);
                 }
             }
         }
 
-        if (offlineRecording) {
-            recorder.capture(canvas);
-        }
+        replaceScriptTags("script[data-shadertoy='include']", payload.includesHtml);
+        replaceScriptTags("script[data-shadertoy='shader']", payload.shadersHtml);
 
-        frameCounter++;
-    }
-    function forceAspectRatio(width, height) {
-        // Forced aspect ratio
-        let forcedAspects = [<!-- Forced Aspect -->];
-        let forcedAspectRatio = forcedAspects[0] / forcedAspects[1];
-        let aspectRatio = width / height;
-
-        if (forcedAspectRatio <= 0 || !isFinite(forcedAspectRatio)) {
-            let resolution = new THREE.Vector3(width, height, 1.0);
-            return resolution;
-        }
-        else if (aspectRatio < forcedAspectRatio) {
-            let resolution = new THREE.Vector3(width, Math.floor(width / forcedAspectRatio), 1);
-            return resolution;
-        }
-        else {
-            let resolution = new THREE.Vector3(Math.floor(height * forcedAspectRatio), height, 1);
-            return resolution;
-        }
-    }
-    function computeSize() {
-        
-        let forcedResolutions = [<!-- Forced Resolution -->];
-        let zoom = forcedResolutions[0] > 0 ? 1.0/window.devicePixelRatio : 1.0;
-        canvas.style.zoom = zoom;
-
-        // Compute forced aspect ratio and align canvas
-        resolution = forceAspectRatio(window.innerWidth, window.innerHeight);
-        canvas.style.left = `${(window.innerWidth - resolution.x*zoom) / 2}px`;
-        canvas.style.top = `${(window.innerHeight - resolution.y*zoom) / 2}px`;
-
-        for (let buffer of buffers) {
-            if (buffer.Target) {
-                buffer.Target.setSize(resolution.x, resolution.y);
-            }
-            if (buffer.PingPongTarget) {
-                buffer.PingPongTarget.setSize(resolution.x, resolution.y);
+        if (payload.initScript) {
+            try {
+                if (buffers && buffers.length) {
+                    for (const buffer of buffers) {
+                        try {
+                            if (buffer.Shader && buffer.Shader.dispose) {
+                                buffer.Shader.dispose();
+                            }
+                        } catch { /* ignore */ }
+                        try {
+                            if (buffer.Target && buffer.Target.dispose) {
+                                buffer.Target.dispose();
+                            }
+                        } catch { /* ignore */ }
+                        try {
+                            if (buffer.PingPongTarget && buffer.PingPongTarget.dispose) {
+                                buffer.PingPongTarget.dispose();
+                            }
+                        } catch { /* ignore */ }
+                    }
+                }
+                (0, eval)(payload.initScript);
+            } catch (e) {
+                if (vscode) {
+                    vscode.postMessage({
+                        command: 'errorMessage',
+                        message: 'Hot reload failed during init script.'
+                    });
+                }
             }
         }
-        renderer.setSize(resolution.x, resolution.y, false);
-        
-        // Update Camera and Mesh
-        quad.geometry = new THREE.PlaneGeometry(resolution.x, resolution.y);
-        camera.left = -resolution.x / 2.0;
-        camera.right = resolution.x / 2.0;
-        camera.top = resolution.y / 2.0;
-        camera.bottom = -resolution.y / 2.0;
-        camera.updateProjectionMatrix();
 
-        // Reset iFrame on resize for shaders that rely on first-frame setups
-        frameCounter = 0;
-    }
-    function saveScreenshot() {
-        let doSaveScreenshot = () => {
-            renderer.domElement.toBlob(function(blob){
-                let a = document.createElement('a');
-                let url = URL.createObjectURL(blob);
-                a.href = url;
-                a.download = 'shadertoy.png';
-                a.click();
-            }, 'image/png', 1.0);
-        };
-
-        let forcedScreenshotResolution = [<!-- Forced Screenshot Resolution -->];
-        if (forcedScreenshotResolution[0] <= 0 || forcedScreenshotResolution[1] <= 0) {
-            renderer.render(scene, camera);
-            doSaveScreenshot();
+        if (glslUseVersion3 && window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.reloadFromGlobals) {
+            window.ShaderToy.audioOutput.reloadFromGlobals({
+                buffers: buffers,
+                renderer: renderer,
+                gl: gl,
+                glslUseVersion3: glslUseVersion3,
+                prepareFragmentShader: prepareFragmentShader,
+                prepareVertexShader: prepareVertexShader,
+                audioContext: audioContext,
+                precision: audioOutputPrecision,
+                showSoundButton: showSoundButton,
+                paused: paused
+            });
         }
-        else {
-            renderer.setSize(forcedScreenshotResolution[0], forcedScreenshotResolution[1], false);
-            
-            for (let buffer of buffers) {
-                buffer.Shader.uniforms['iResolution'].value = new THREE.Vector3(forcedScreenshotResolution[0], forcedScreenshotResolution[1], 1);
-                buffer.Shader.uniforms['resolution'].value = new THREE.Vector3(forcedScreenshotResolution[0], forcedScreenshotResolution[1], 1);
 
-                quad.material = buffer.Shader;
-                renderer.setRenderTarget(buffer.Target);
-                renderer.render(scene, camera);
-            }
+        compileAllShaders();
+        forceRenderOneFrame = true;
+    };
 
-            doSaveScreenshot();
-            renderer.setSize(resolution.x, resolution.y, false);
-        }
-    }
-    function recordAction() {
-        if (typeof CCapture !== 'undefined') {
-            recordCCapture();
-        } else {
-            recordMediaRecorder();
-        }
-    }
-    function recordCCapture() {
-        let maxDuration = <!-- Record Max Duration -->;
-        let targetFrameRate = <!-- Record Target Framerate -->;
-        let format = <!-- Record Offline Format -->;
-        let quality = <!-- Record Offline Quality -->;
-        let extension = format == "png" || format == "jpg" ? "tar" : format;
-
-        let recordButton = document.getElementById("record");
-        if (recorder == null) {
-            recordButton.classList.add('recording');
-
-            offlineRecording = true;
-            recorder = new CCapture( {
-                format: format,
-                quality: quality,
-                timeLimit: maxDuration,
-                framerate: targetFrameRate,
-            } );
-            recorder.start();
-        }
-        else {
-            recordButton.classList.remove('recording');
-
-            recorder.stop();
-            recorder.save((blob) => {
-                let a = document.createElement('a');
-                let url = URL.createObjectURL(blob);
-                a.href = url;
-                a.download = `shadertoy.${extension}`;
+    compileAllShaders();
                 a.click();
             } );
             recorder = null;
