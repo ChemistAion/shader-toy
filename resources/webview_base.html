@@ -44,6 +44,21 @@
             z-index: 2;
             position: absolute;
         }
+        #debug-overlay {
+            font-family: Consolas;
+            font-size: 11px;
+            color: #e6e6e6;
+            background-color: rgba(0, 0, 0, 0.7);
+            white-space: pre;
+            padding: 6px 8px;
+            border-radius: 4px;
+            z-index: 4;
+            position: absolute;
+            left: 8px;
+            top: 8px;
+            max-width: 80vw;
+            pointer-events: none;
+        }
 
         #dat_gui_container {
             position: absolute;
@@ -80,6 +95,7 @@
 </head>
 <body>
     <div id="message"></div>
+    <div id="debug-overlay"></div>
     <div id="dat_gui_container"></div>
     <div id="container">
         <!-- Pause Element -->
@@ -122,6 +138,7 @@
         vscode = acquireVsCodeApi();
     }
     var compileTimePanel;
+    const debugOverlay = document.getElementById('debug-overlay');
 
     let revealError = function(line, file) {
         if (vscode) {
@@ -160,6 +177,40 @@
             + today.getMilliseconds() * 0.001;
     };
     updateDate();
+
+    let updateDebugOverlay = function() {
+        if (!debugOverlay) {
+            return;
+        }
+        const lines = [];
+        const audioOutput = window.ShaderToy && window.ShaderToy.audioOutput;
+        if (audioOutput && audioOutput.state) {
+            const state = audioOutput.state;
+            if (state.statusLine) {
+                lines.push(state.statusLine);
+            }
+            if (state.statsLine) {
+                lines.push(state.statsLine);
+            }
+            if (state.precisionDetails) {
+                lines.push(state.precisionDetails);
+            }
+            if (Array.isArray(state.debugDetails) && state.debugDetails.length) {
+                for (const detail of state.debugDetails) {
+                    if (detail) {
+                        lines.push(detail);
+                    }
+                }
+            }
+        }
+        if (lines.length) {
+            debugOverlay.textContent = lines.join('\n');
+            debugOverlay.style.display = 'block';
+        } else {
+            debugOverlay.textContent = '';
+            debugOverlay.style.display = 'none';
+        }
+    };
 
     let paused = <!-- Start Paused -->;
     let forceRenderOneFrame = paused;
@@ -709,6 +760,7 @@
 
         // Advance Time
         updateDate();
+        updateDebugOverlay();
         
         if(flyControls)
         {

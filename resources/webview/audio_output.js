@@ -991,13 +991,90 @@
             const audioBlockBytes = samplesPerBlock * 2 * 4;
             state.debugDetails = [
                 `RT: precision ${precisionMode}, targetType ${typeName}, texture.type ${textureTypeName}`,
-                `Readback: ${readbackType}, RT bytes ${Math.round(targetBytes / 1024)} KB, block PCM bytes ${Math.round(audioBlockBytes / 1024)} KB`
+                `Readback: ${readbackType}, RT bytes ${Math.round(targetBytes / 1024)} KB, block PCM bytes ${Math.round(audioBlockBytes / 1024)} KB`,
+                'Readback path: readPixels'
             ];
             renderStatus();
         } catch {
             // ignore
         }
         return ctx;
+    };
+
+    const tryReadRenderTargetPixelsPBO = function (ctx, options) {
+        if (!ctx || !ctx.target || !ctx.renderer || !options) {
+            return false;
+        }
+        const pixels = ctx.pixels;
+        if (!(pixels instanceof Uint8Array)) {
+            return false;
+        }
+        const renderer = ctx.renderer;
+        const gl = options.gl || (renderer.getContext ? renderer.getContext() : null);
+        if (!gl || (typeof global.WebGL2RenderingContext !== 'undefined' && !(gl instanceof global.WebGL2RenderingContext))) {
+            return false;
+        }
+        if (!renderer.properties || typeof renderer.properties.get !== 'function') {
+            return false;
+        }
+        const targetProps = renderer.properties.get(ctx.target);
+        const framebuffer = targetProps ? targetProps.__webglFramebuffer : null;
+        if (!framebuffer) {
+            return false;
+        }
+        const byteLength = pixels.byteLength;
+        ctx.readback = ctx.readback || {};
+        if (!ctx.readback.pbo || ctx.readback.size !== byteLength) {
+            try {
+                if (ctx.readback.pbo) {
+                    gl.deleteBuffer(ctx.readback.pbo);
+                }
+                ctx.readback.pbo = gl.createBuffer();
+                ctx.readback.size = byteLength;
+            } catch {
+                return false;
+            }
+        }
+        let previousFramebuffer;
+        let previousPbo;
+        try {
+            previousFramebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+            previousPbo = gl.getParameter(gl.PIXEL_PACK_BUFFER_BINDING);
+        } catch {
+            return false;
+        }
+        try {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+            gl.bindBuffer(gl.PIXEL_PACK_BUFFER, ctx.readback.pbo);
+            gl.bufferData(gl.PIXEL_PACK_BUFFER, byteLength, gl.STREAM_READ);
+            gl.readPixels(0, 0, ctx.width, ctx.height, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+            const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+            gl.flush();
+            let status = gl.clientWaitSync(fence, 0, 0);
+            if (status === gl.TIMEOUT_EXPIRED) {
+                status = gl.clientWaitSync(fence, 0, 1000000);
+            }
+            if (status === gl.TIMEOUT_EXPIRED) {
+                gl.deleteSync(fence);
+                return false;
+            }
+            gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, pixels);
+            gl.deleteSync(fence);
+            return true;
+        } catch {
+            return false;
+        } finally {
+            try {
+                gl.bindBuffer(gl.PIXEL_PACK_BUFFER, previousPbo);
+            } catch {
+                // ignore
+            }
+            try {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, previousFramebuffer);
+            } catch {
+                // ignore
+            }
+        }
     };
 
     const ensureSampleRing = function (soundBufferName) {
@@ -1113,8 +1190,14 @@
         }
         renderer.setRenderTarget(ctx.target);
         renderer.render(ctx.scene, ctx.camera);
-        renderer.readRenderTargetPixels(ctx.target, 0, 0, ctx.width, ctx.height, ctx.pixels);
+        const usedPbo = tryReadRenderTargetPixelsPBO(ctx, options);
+        if (!usedPbo) {
+            renderer.readRenderTargetPixels(ctx.target, 0, 0, ctx.width, ctx.height, ctx.pixels);
+        }
         renderer.setRenderTarget(previousTarget);
+        if (state.debugDetails && state.debugDetails.length >= 3) {
+            state.debugDetails[2] = `Readback path: ${usedPbo ? 'pbo+fence' : 'readPixels'}`;
+        }
 
         const left = new Float32Array(ctx.samplesPerBlock);
         const right = new Float32Array(ctx.samplesPerBlock);
