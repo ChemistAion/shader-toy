@@ -4,7 +4,7 @@
       <img src="https://github.com/stevensona/shader-toy/workflows/Build%20and%20Test/badge.svg">
   </a>
   <a href="https://opensource.org/licenses/MIT" >
-      <img src="https://img.shields.io/apm/l/vim-mode.svg">
+      <img src="https://img.shields.io/badge/license-MIT-blue">
   </a>
 </p>
 
