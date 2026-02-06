@@ -16,7 +16,7 @@ To run the command, either open the "Command Palette" and type "Shader Toy: Show
 
 Running the command splits the view and displays a fullscreen quad with your shader applied. Your fragment shader's entry point is `void main()` or if that is unavailable `void mainImage(out vec4, in vec2)` where the first parameter is the output color and the second parameter is the fragments screen position.
 
-An alternative command "Shader Toy: Show Static GLSL Preview" is available, which will open a preview that does not react to changing editors. An arbitrary amount of those views can be opened at one time, which enables a unique workflow to edit shaders that rely on multiple passes. 
+An alternative command "Shader Toy: Show Static GLSL Preview" is available, which will open a preview that does not react to changing editors. An arbitrary amount of those views can be opened at one time, which enables a unique workflow to edit shaders that rely on multiple passes.
 
 ## Features
 
@@ -54,7 +54,7 @@ The wildcard will be resolved by replacement with values from any of the followi
 * [ 'px', 'nx', 'py', 'ny', 'pz', 'nz' ] or
 * [ 'posx', 'negx', 'posy', 'negy', 'posz', 'negz' ].
 
-If any of the six files can not be found, the next set is tried, starting from the first. 
+If any of the six files can not be found, the next set is tried, starting from the first.
 
 ### Audio Input (experimental)
 _Note: By default audio input is disabled, change the setting "Enable Audio Input" to use it._\
@@ -145,6 +145,11 @@ void main () {
 }
 ```
 
+### WebGL-2 and GLSL ES 3.00
+By default the webview will try to load a `webgl2` and fallback to a `webgl` context if not available. However the option `shader-toy.webglVersion` can be used to explicitly request a `webgl2` context with support for GLSL ES 3.00, if not available an error will be emitted.
+
+### Vertex Shader
+If the above setting is set to `WebGL2` then vertex shaders are supported by declaring them in a fragment shader via `#iVertex`. The shader declared as an input has to write to `gl_Position` and can additionaly declare output variables that can be used in the fragment shader, this can for example be used to generate uv-coordinates and output them like `out vec2 uv;`. See the demos for examples of vertex shader usage.
 
 ### GLSL Preview Interaction
 The extension provides a pause button inside the GLSL Preview to stop the progression of time. In conjunction with this you can use the screenshot button provided inside the GLSL Preview to capture and save a frame. The resolution of the saved screenshot will by default be the same resolution as the GLSL Preview, though a setting is available that allows the user to override the resolution with an arbitrary value. A recording button is also available, the quality as well as the size of the recording is determined by the webview. Lastly the extension provides a superficial view into the shaders performance and memory consumption.
@@ -204,6 +209,7 @@ Contributions of any kind are welcome and encouraged.
 * Improved diagnostics when using glslify.
 * Added diagnostics when there is a js error happening in the webview, rather than the user ending up with a black screen.
 * Fixed error code lines diagnostics with multi-level includes support.
+* Added optoin `shader-toy.webglVersion` to explicitly request a `webgl2` context with support for vertex shaders via `#iVertex`.
 
 ### 0.11.3
 * Added `shader-toy.recordVideoContainer` (set video file container).
@@ -356,7 +362,7 @@ Contributions of any kind are welcome and encouraged.
 * fixed a bug that broke line highlighting from GLSL compile errors,
 * added experimental ability use audio as input to shaders,
 * added iSampleRate uniform, which holds the sample rate of the audio context,
-* deprecated input definitions using different "protocols", instead the type of input is inferred from the extension, 
+* deprecated input definitions using different "protocols", instead the type of input is inferred from the extension,
 * deprecated requirement of using a "protocol" for includes,
 * added iDate uniform, which holds year, month, day and seconds in day in its components,
 * fixed a bug that caused shaders defining void mainImage(out vec4, in vec2) without in qualifier to not compile,
