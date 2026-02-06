@@ -12,7 +12,7 @@
         "url": "https://github.com/stevensona/shader-toy/issues"
     },
     "engines": {
-        "vscode": "^1.79.1"
+        "vscode": "^1.103.0"
     },
     "categories": [
         "Other"
@@ -277,7 +277,7 @@
         "@typescript-eslint/eslint-plugin": "^8.40.0",
         "@typescript-eslint/parser": "^8.40.0",
         "@vscode/test-electron": "^2.5.2",
-        "@vscode/vsce": "^3.6.0",
+        "@vscode/vsce": "^3.7.1",
         "eslint": "^8.40.0",
         "glob": "^11.1.0",
         "mocha": "^11.7.1",
