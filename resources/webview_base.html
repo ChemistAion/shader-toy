@@ -44,6 +44,33 @@
             z-index: 2;
             position: absolute;
         }
+        #gesture-overlay {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            padding: 10px 14px;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: #ff4d4d;
+            font-family: Consolas;
+            font-size: 14px;
+            border: 1px solid rgba(255, 77, 77, 0.6);
+            border-radius: 6px;
+            z-index: 6;
+            display: none;
+            pointer-events: none;
+        }
+        body.gesture-locked #pause-button,
+        body.gesture-locked .button-container,
+        body.gesture-locked .pause-play,
+        body.gesture-locked #container,
+        body.gesture-locked #screenshot,
+        body.gesture-locked #record,
+        body.gesture-locked #sound-button,
+        body.gesture-locked #reload,
+        body.gesture-locked #debug-overlay {
+            visibility: hidden;
+        }
         #debug-overlay {
             font-family: Consolas;
             font-size: 11px;
@@ -55,9 +82,12 @@
             z-index: 4;
             position: absolute;
             left: 8px;
-            top: 8px;
+            bottom: 72px;
             max-width: 80vw;
-            pointer-events: none;
+            max-height: 40vh;
+            overflow: auto;
+            pointer-events: auto;
+            user-select: text;
         }
 
         #dat_gui_container {
@@ -103,6 +133,7 @@
 </head>
 <body>
     <div id="message"></div>
+    <div id="gesture-overlay"></div>
     <div id="debug-overlay"></div>
     <div id="dat_gui_container"></div>
     <div id="container">
@@ -147,6 +178,7 @@
         vscode = acquireVsCodeApi();
     }
     const debugOverlay = document.getElementById('debug-overlay');
+    const gestureOverlay = document.getElementById('gesture-overlay');
     if (vscode) {
         window.vscode = vscode;
     }
@@ -515,6 +547,19 @@
             message: 'mainSound requires shader-toy.webglVersion set to "WebGL2".'
         });
     }
+    const audioGestureUnlocked = window.ShaderToy && window.ShaderToy.audioGestureUnlocked === true;
+    const needsAudioGesture = glslUseVersion3 && hasSoundBuffer && audioContext && audioContext.state !== 'running' && !audioGestureUnlocked;
+    if (gestureOverlay) {
+        if (needsAudioGesture) {
+            gestureOverlay.textContent = 'Audio output is blocked (due to WebAudio autoplay gesture policy) until you provide a user action to the GLSL-preview.';
+            gestureOverlay.style.display = 'block';
+            document.body.classList.add('gesture-locked');
+        } else {
+            gestureOverlay.textContent = '';
+            gestureOverlay.style.display = 'none';
+            document.body.classList.remove('gesture-locked');
+        }
+    }
     if (glslUseVersion3 && window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.initFromGlobals) {
         window.ShaderToy.audioOutput.initFromGlobals({
             buffers: buffers,
@@ -528,7 +573,8 @@
             blockSize: audioBlockSize,
             audioWorkletUrl: audioWorkletUrl,
             showSoundButton: showSoundButton,
-            paused: paused
+            paused: paused || needsAudioGesture,
+            autoStart: !needsAudioGesture
         });
     }
 
@@ -562,12 +608,11 @@
                         if (vscode && typeof vscode.setState === 'function') {
                             vscode.setState({ ...webviewState, audioGestureUnlocked: true });
                         }
-                        if (vscode) {
-                            vscode.postMessage({
-                                command: 'infoMessage',
-                                message: 'WebAudio autoplay policy required GESTURE noted;'
-                            });
+                        if (gestureOverlay) {
+                            gestureOverlay.textContent = '';
+                            gestureOverlay.style.display = 'none';
                         }
+                        document.body.classList.remove('gesture-locked');
                         // Keep paused; user must explicitly press play.
                     };
                     window.addEventListener('pointerdown', resumeFromGesture, { once: true });

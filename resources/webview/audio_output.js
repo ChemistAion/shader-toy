@@ -192,7 +192,10 @@
             }
             if (message.type === 'recycle' && message.buffer && state.bufferPool) {
                 try {
-                    state.bufferPool.free.push(message.buffer);
+                    const poolBytes = state.bufferPool.blockBytes || 0;
+                    if (poolBytes > 0 && message.buffer.byteLength === poolBytes) {
+                        state.bufferPool.free.push(message.buffer);
+                    }
                 } catch {
                     // ignore
                 }
@@ -826,10 +829,6 @@
         global.addEventListener('focus', startIfNeeded, { once: true });
         const autoplayMessage = 'Audio output is blocked (due to WebAudio autoplay gesture policy) until you provide a user action to the GLSL-preview.';
         setStatus(autoplayMessage);
-        if (!state.autoplayNotified) {
-            state.autoplayNotified = true;
-            postInfoMessage(autoplayMessage);
-        }
     };
 
     const scheduleGestureStart = function (startAt, resumeAndStart) {
@@ -841,10 +840,6 @@
         });
         const autoplayMessage = 'Audio output is blocked (due to WebAudio autoplay gesture policy) until you provide a user action to the GLSL-preview.';
         setStatus(autoplayMessage);
-        if (!state.autoplayNotified) {
-            state.autoplayNotified = true;
-            postInfoMessage(autoplayMessage);
-        }
     };
 
     const renderAllBlocks = function (options) {
@@ -1287,7 +1282,11 @@
         const blockSeconds = blockSamples / state.audioContext.sampleRate;
         for (let i = 0; i < blocks; i++) {
             const buffer = pool && pool.free.length ? pool.free.pop() : null;
-            if (!buffer) {
+            const expectedBytes = blockSamples * 2 * 4;
+            if (!buffer || buffer.byteLength < expectedBytes) {
+                if (buffer && pool) {
+                    pool.total = Math.max(0, pool.total - 1);
+                }
                 postInfoMessage('Audio buffer pool exhausted; lowering render-ahead.');
                 break;
             }
