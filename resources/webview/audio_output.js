@@ -49,6 +49,7 @@
         debugDetails: [],
         ready: false,
         pendingStartAt: null,
+        pendingWorkletStartAt: null,
         gestureHandlerAttached: false,
         started: false,
         autoplayNotified: false,
@@ -335,6 +336,10 @@
             return;
         }
         if (!state.audioContext || !state.audioContext.audioWorklet) {
+            if (state.audioContext && state.audioContext.state !== 'running') {
+                setStats('Worklet: waiting for audio context');
+                return;
+            }
             state.workletFailed = true;
             setStats('Worklet: unavailable (no audioWorklet)');
             postErrorMessage('AudioWorklet is unavailable in this WebView. Audio output is disabled.');
@@ -394,6 +399,11 @@
                 state.workletReady = true;
                 setStats('Worklet: ready');
                 setupWorkletPort();
+                if (Number.isFinite(state.pendingWorkletStartAt)) {
+                    const pendingStart = state.pendingWorkletStartAt;
+                    state.pendingWorkletStartAt = null;
+                    root.audioOutput.start(pendingStart, false);
+                }
             } catch {
                 state.workletFailed = true;
                 setStats('Worklet: failed to create node');
@@ -1408,7 +1418,7 @@
         setStatus(`Audio: ${precisionSummary} @ ${state.audioContext.sampleRate} Hz, duration ${durationSeconds}s, block ${blockSeconds.toFixed(3)}s`);
         resetSampleRings();
 
-        if (!state.workletReady || state.workletFailed) {
+        if (state.workletFailed) {
             state.ready = false;
             setStats('Worklet: unavailable (no audio)');
             postErrorMessage('AudioWorklet is unavailable. Audio output is disabled.');
@@ -1416,7 +1426,11 @@
         }
 
         resetStreaming();
-        setStats('Worklet: streaming enabled');
+        if (!state.workletReady) {
+            setStats('Worklet: loading');
+        } else {
+            setStats('Worklet: streaming enabled');
+        }
         state.ready = true;
         state.started = false;
         state.outputPrimed = false;
@@ -1538,6 +1552,11 @@
         }
 
         const startAt = Number.isFinite(offsetSeconds) ? Math.max(0, offsetSeconds) : 0;
+        if (!state.workletReady || !state.workletNode) {
+            state.pendingWorkletStartAt = startAt;
+            ensureWorklet(state.options || {});
+            return;
+        }
         const useWorklet = state.workletReady && state.workletNode;
 
         const resumeAndStart = () => {

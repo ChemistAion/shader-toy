@@ -15,10 +15,10 @@ export class IncludesExtension implements WebviewExtension {
     private processBuffers(includes: Types.IncludeDefinition[], preambleExtension: ShaderPreambleExtension) {
         for (const include of includes) {
             this.content += `\
-<script data-shadertoy='include' id='${include.Name}' type='x-shader/x-fragment'>
+<textarea data-shadertoy='include' id='${include.Name}' spellcheck='false'>
 ${preambleExtension.getShaderPreamble()}
 ${include.Code}
-</script>`;
+</textarea>`;
         }
     }
 
