@@ -249,7 +249,9 @@ message: 'Failed loading audio file: ${audio.UserPath}'
             }
         }
 
-        if (this.content !== '') {
+        // Create a real AudioContext when there are audio inputs OR sound output buffers.
+        const hasSoundOutput = buffers.some(b => b.IsSound === true);
+        if (this.content !== '' || hasSoundOutput) {
             this.content = `
             var AudioContext = window.AudioContext || window.webkitAudioContext;
             var audioContext = (window.ShaderToy && window.ShaderToy.audioContext)

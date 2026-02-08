@@ -130,7 +130,7 @@ export class BufferProvider {
             for (const texture of buffer.TextureInputs) {
                 if (!texture.Self && texture.Buffer !== undefined && texture.BufferIndex !== undefined) {
                     const dependencyBuffer = buffers[texture.BufferIndex];
-                    if (dependencyBuffer.UsesSelf) {
+                    if (dependencyBuffer && dependencyBuffer.UsesSelf) {
                         dependencyBuffer.Dependents.push({
                             Index: i,
                             Channel: texture.Channel
