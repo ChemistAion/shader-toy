@@ -12,6 +12,7 @@
         gainNode: null,
         gainConnected: false,
         outputGain: 0.5,
+        outputEnabled: true,
         outputPrimed: false,
         workletNode: null,
         workletReady: false,
@@ -999,7 +1000,7 @@
         if (!state.gainNode) {
             return;
         }
-        const gainValue = state.outputGain || 0;
+        const gainValue = state.outputEnabled ? (state.outputGain || 0) : 0;
         try {
             state.gainNode.gain.value = gainValue;
         } catch {
@@ -1046,6 +1047,7 @@
         state.audioContext = audioContext;
         state.showStatus = options.showSoundButton !== false;
         state.outputGain = 0.5;
+        state.outputEnabled = true;
         state.gainNode = audioContext.createGain();
         applyOutputGain();
         connectOutput();
@@ -1131,6 +1133,7 @@
 
         state.audioContext = audioContext;
         state.showStatus = options.showSoundButton !== false;
+        state.outputEnabled = true;
         if (!state.gainNode) {
             state.gainNode = audioContext.createGain();
         }
@@ -1246,6 +1249,11 @@
         if (state.audioContext && typeof state.audioContext.suspend === 'function') {
             state.audioContext.suspend();
         }
+    };
+
+    root.audioOutput.setOutputEnabled = function (enabled) {
+        state.outputEnabled = !!enabled;
+        applyOutputGain();
     };
 
     root.audioOutput.resume = function () {

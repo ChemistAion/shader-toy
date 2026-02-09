@@ -10,7 +10,8 @@ import { removeDuplicates } from './utility';
 
 type Webview = {
     Panel: vscode.WebviewPanel,
-    OnDidDispose: () => void
+    OnDidDispose: () => void,
+    HasHtml?: boolean
 };
 type StaticWebview = Webview & {
     Document: vscode.TextDocument
@@ -51,7 +52,8 @@ export class ShaderToyManager {
             Panel: newWebviewPanel,
             OnDidDispose: () => {
                 this.webviewPanel = undefined;
-            }
+            },
+            HasHtml: false
         };
         newWebviewPanel.onDidDispose(this.webviewPanel.OnDidDispose);
         if (this.context.activeEditor !== undefined) {
@@ -77,7 +79,8 @@ export class ShaderToyManager {
                 this.staticWebviews.push({
                     Panel: newWebviewPanel,
                     OnDidDispose: onDidDispose,
-                    Document: document
+                    Document: document,
+                    HasHtml: false
                 });
                 const staticWebview = this.staticWebviews[this.staticWebviews.length - 1];
                 this.staticWebviews[this.staticWebviews.length - 1] = await this.updateWebview(staticWebview, vscode.window.activeTextEditor.document);
@@ -342,9 +345,17 @@ export class ShaderToyManager {
             webviewPanel.Panel.dispose();
             newWebviewPanel.onDidDispose(webviewPanel.OnDidDispose);
             webviewPanel.Panel = newWebviewPanel;
+            webviewPanel.HasHtml = false;
+        }
+
+        if (webviewPanel.HasHtml) {
+            const payload = await webviewContentProvider.generateHotReloadPayload(webviewPanel.Panel.webview, this.startingData);
+            webviewPanel.Panel.webview.postMessage({ command: 'hotReload', payload });
+            return webviewPanel;
         }
 
         webviewPanel.Panel.webview.html = await webviewContentProvider.generateWebviewContent(webviewPanel.Panel.webview, this.startingData);
+        webviewPanel.HasHtml = true;
         return webviewPanel;
     };
 }
