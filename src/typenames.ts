@@ -71,7 +71,9 @@ export type AudioDefinition = {
     Channel: number,
     LocalPath?: string,
     RemotePath?: string,
-    UserPath: string
+    UserPath: string,
+    FromSound?: boolean,
+    SoundIndex?: number
 };
 export type UniformDefinition = {
     Name: string,
@@ -106,6 +108,9 @@ export type BufferDefinition = {
     Dependents: BufferDependency[],
     LineOffset: number
     Includes: IncludeDefinition[],
+    IsSound?: boolean,
+    SoundIndices?: number[],
+    SoundPrecision?: string,
     UsesKeyboard?: boolean,
     UsesFirstPersonControls?: boolean,
 };

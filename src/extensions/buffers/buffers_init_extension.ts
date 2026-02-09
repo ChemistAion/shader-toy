@@ -13,6 +13,27 @@ export class BuffersInitExtension implements WebviewExtension {
 
     private processBuffers(buffers: Types.BufferDefinition[]) {
         for (const buffer of buffers) {
+            // Sound buffers are rendered by the audio pipeline and should not
+            // create visual render targets or ShaderMaterials here.
+            if (buffer.IsSound === true) {
+                this.content += `\
+buffers.push({
+    Name: ${JSON.stringify(buffer.Name)},
+    File: ${JSON.stringify(buffer.File)},
+    LineOffset: ${buffer.LineOffset},
+    Target: null,
+    ChannelResolution: Array(10).fill(new THREE.Vector3(0,0,0)),
+    PingPongTarget: null,
+    PingPongChannel: -1,
+    Dependents: ${JSON.stringify(buffer.Dependents)},
+    Shader: null,
+    IsSound: true,
+    SoundIndices: ${buffer.SoundIndices !== undefined ? JSON.stringify(buffer.SoundIndices) : 'undefined'},
+    SoundPrecision: ${buffer.SoundPrecision !== undefined ? JSON.stringify(buffer.SoundPrecision) : 'undefined'}
+});
+`;
+                continue;
+            }
             // Create a RenderTarget for all but the final buffer
             let target = 'null';
             let pingPongTarget = 'null';
@@ -36,6 +57,7 @@ buffers.push({
     PingPongTarget: ${pingPongTarget},
     PingPongChannel: ${buffer.SelfChannel},
     Dependents: ${JSON.stringify(buffer.Dependents)},
+    IsSound: false,
     Shader: new THREE.ShaderMaterial({
         glslVersion: glslUseVersion3 ? THREE.GLSL3 : THREE.GLSL1,
         vertexShader: ${buffer.VertexCode !== undefined ? `prepareVertexShader(document.getElementById(${JSON.stringify(buffer.Name + '_vertex')}).textContent)` : 'undefined'},
