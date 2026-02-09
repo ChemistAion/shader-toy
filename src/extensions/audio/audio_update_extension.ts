@@ -5,6 +5,9 @@ import { WebviewExtension } from '../webview_extension';
 export class AudioUpdateExtension implements WebviewExtension {
     public generateContent(): string {
         return `\
+if (window.ShaderToy && window.ShaderToy.audioOutput && typeof window.ShaderToy.audioOutput.update === 'function') {
+    window.ShaderToy.audioOutput.update();
+}
 for (let audio of audios) {
     // Get audio data
     audio.Analyser.getByteFrequencyData(audio.Data.subarray(0, audio.Data.length / 2));

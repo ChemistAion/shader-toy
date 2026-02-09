@@ -16,6 +16,7 @@ export class AudioInitExtension implements WebviewExtension, TextureExtensionExt
     }
 
     private processBuffers(buffers: Types.BufferDefinition[], context: Context, makeAvailableResource: (localUri: string) => string) {
+        let audioInputContent = '';
         for (const i in buffers) {
             const buffer = buffers[i];
             const audios =  buffer.AudioInputs;
@@ -37,7 +38,7 @@ export class AudioInitExtension implements WebviewExtension, TextureExtensionExt
                 }
 
                 if (path !== undefined) {
-                    this.content += `
+                    audioInputContent += `
                     fetch('${path}')
                         .then(function(response) {
                             return response.arrayBuffer();
@@ -98,21 +99,27 @@ export class AudioInitExtension implements WebviewExtension, TextureExtensionExt
             }
         }
 
-        if (this.content !== '') {
-            this.content = `
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            const audioContext = new AudioContext();
+        const audioInitHeader = `
+            const audioOutput = (window.ShaderToy && window.ShaderToy.audioOutput) ? window.ShaderToy.audioOutput : undefined;
+            const audioState = audioOutput
+                ? audioOutput.init({ enabled: (glslVersionSetting === 'WebGL2') && isWebGL2 })
+                : { enabled: false, context: { sampleRate: 0, resume: function(){}, suspend: function(){} } };
+            const audioContext = audioState.context;
             
             let audios = [];
-            ` + this.content;
-        }
-        else {
-            this.content = `
-            const audioContext = {
-                sampleRate: 0
-            };
+            `;
+
+        if (audioInputContent !== '') {
+            this.content = audioInitHeader + `
+            if (audioState.enabled) {
+            ` + audioInputContent + `
+            }
             `;
         }
+        else {
+            this.content = audioInitHeader;
+        }
+
     }
 
     public generateContent(): string {
@@ -122,4 +129,5 @@ export class AudioInitExtension implements WebviewExtension, TextureExtensionExt
     public generateTextureContent(): string {
         return this.textureContent;
     }
+
 }

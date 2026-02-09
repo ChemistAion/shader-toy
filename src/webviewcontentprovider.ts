@@ -204,7 +204,7 @@ export class WebviewContentProvider {
             }
 
             const audios = buffer.AudioInputs;
-            if (audios.length > 0) {
+            if (audios.length > 0 || buffer.IsSound === true) {
                 useAudio = true;
             }
 
@@ -389,6 +389,9 @@ export class WebviewContentProvider {
 
             const webviewTimeInput = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/time_input.js', getResourceText);
             this.webviewAssembler.addReplaceModule(webviewTimeInput, '<!-- Webview time_input.js -->', '<!-- Webview time_input.js -->');
+
+            const webviewAudioOutput = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/audio_output.js', getResourceText);
+            this.webviewAssembler.addReplaceModule(webviewAudioOutput, '<!-- Webview audio_output.js -->', '<!-- Webview audio_output.js -->');
 
             const webviewRenderLoop = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/render_loop.js', getResourceText);
             this.webviewAssembler.addReplaceModule(webviewRenderLoop, '<!-- Webview render_loop.js -->', '<!-- Webview render_loop.js -->');
