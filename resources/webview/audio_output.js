@@ -662,10 +662,17 @@
         ring.texture.needsUpdate = true;
     };
 
-    const buildSoundFooter = function (precisionMode, width) {
+    const buildSoundSourceFallback = function (source, precisionMode, width) {
+        const shaderSource = source || '';
+        const hasMain = /void\s+main\s*\(\s*\)\s*\{/.test(shaderSource);
+        const hasMainSound = /\bmainSound\s*\(/.test(shaderSource);
+        if (hasMain || !hasMainSound) {
+            return shaderSource;
+        }
+
         const safeWidth = Math.max(1, Math.floor(width || 1));
         if (precisionMode === '16bPACK') {
-            return `
+            return shaderSource + `
 int _st_sampleIndex() {
     int x = int(floor(gl_FragCoord.x));
     int y = int(floor(gl_FragCoord.y));
@@ -696,8 +703,9 @@ void main() {
 }
 `;
         }
+
         if (precisionMode === '8bPACK') {
-            return `
+            return shaderSource + `
 int _st_sampleIndex() {
     int x = int(floor(gl_FragCoord.x));
     int y = int(floor(gl_FragCoord.y));
@@ -718,7 +726,8 @@ void main() {
 }
 `;
         }
-        return `
+
+        return shaderSource + `
 int _st_sampleIndex() {
     int x = int(floor(gl_FragCoord.x));
     int y = int(floor(gl_FragCoord.y));
@@ -736,6 +745,13 @@ void main() {
 `;
     };
 
+    const buildSoundSource = function (source, precisionMode, width) {
+        if (root.audioShaderWrapper && typeof root.audioShaderWrapper.buildSoundSource === 'function') {
+            return root.audioShaderWrapper.buildSoundSource(source, precisionMode, width);
+        }
+        return buildSoundSourceFallback(source, precisionMode, width);
+    };
+
     const buildSoundMaterial = function (soundBuffer, options, sampleRate, precisionMode, width, height) {
         if (!global.THREE || !soundBuffer || !options) {
             return null;
@@ -747,11 +763,7 @@ void main() {
         let source = shaderElement.textContent;
         const prepareFragmentShader = options.prepareFragmentShader;
         const glslUseVersion3 = !!options.glslUseVersion3;
-        const hasMain = /void\s+main\s*\(\s*\)\s*\{/.test(source);
-        const hasMainSound = /\bmainSound\s*\(/.test(source);
-        if (!hasMain && hasMainSound) {
-            source += buildSoundFooter(precisionMode, width);
-        }
+        source = buildSoundSource(source, precisionMode, width);
         const fragmentShader = prepareFragmentShader ? prepareFragmentShader(source, glslUseVersion3) : source;
 
         const uniforms = {
