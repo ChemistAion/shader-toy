@@ -67,8 +67,27 @@
         body.gesture-locked #screenshot,
         body.gesture-locked #record,
         body.gesture-locked #sound-button,
-        body.gesture-locked #reload {
+        body.gesture-locked #reload,
+        body.gesture-locked #debug-overlay {
             visibility: hidden;
+        }
+        #debug-overlay {
+            font-family: Consolas;
+            font-size: 11px;
+            color: #e6e6e6;
+            background-color: rgba(0, 0, 0, 0.7);
+            white-space: pre;
+            padding: 6px 8px;
+            border-radius: 4px;
+            z-index: 4;
+            position: absolute;
+            left: 8px;
+            bottom: 72px;
+            max-width: 80vw;
+            max-height: 40vh;
+            overflow: auto;
+            pointer-events: auto;
+            user-select: text;
         }
 
         #dat_gui_container {
@@ -112,6 +131,7 @@
 <body>
     <div id="message"></div>
     <div id="gesture-overlay"></div>
+    <div id="debug-overlay"></div>
     <div id="dat_gui_container"></div>
     <div id="container">
         <!-- Pause Element -->
@@ -156,6 +176,7 @@
     }
     var compileTimePanel;
     const gestureOverlay = document.getElementById('gesture-overlay');
+    const debugOverlay = document.getElementById('debug-overlay');
 
     let revealError = function(line, file) {
         if (vscode) {
@@ -396,6 +417,24 @@
 
         compileAllShaders();
         forceRenderOneFrame = true;
+    };
+
+    let updateDebugOverlay = function() {
+        if (!debugOverlay) {
+            return;
+        }
+        let lines = [];
+        if (window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.getOverlayLines) {
+            lines = window.ShaderToy.audioOutput.getOverlayLines() || [];
+        }
+        if (lines.length) {
+            debugOverlay.textContent = lines.join('\n');
+            debugOverlay.style.display = 'block';
+        }
+        else {
+            debugOverlay.textContent = '';
+            debugOverlay.style.display = 'none';
+        }
     };
 
     // GLSL version selection
@@ -665,6 +704,7 @@
         }
 
         // Audio Update
+        updateDebugOverlay();
 
         for (let buffer of buffers) {
             if (!buffer || buffer.IsSound || !buffer.Shader) {

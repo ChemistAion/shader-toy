@@ -785,6 +785,82 @@
         return ctx;
     };
 
+    const tryReadRenderTargetPixelsPBO = function (ctx, options) {
+        if (!ctx || !ctx.target || !ctx.renderer || !options) {
+            return false;
+        }
+        const pixels = ctx.pixels;
+        if (!(pixels instanceof Uint8Array)) {
+            return false;
+        }
+        const renderer = ctx.renderer;
+        const gl = options.gl || (renderer.getContext ? renderer.getContext() : null);
+        if (!gl || (typeof global.WebGL2RenderingContext !== 'undefined' && !(gl instanceof global.WebGL2RenderingContext))) {
+            return false;
+        }
+        if (!renderer.properties || typeof renderer.properties.get !== 'function') {
+            return false;
+        }
+        const targetProps = renderer.properties.get(ctx.target);
+        const framebuffer = targetProps ? targetProps.__webglFramebuffer : null;
+        if (!framebuffer) {
+            return false;
+        }
+        const byteLength = pixels.byteLength;
+        ctx.readback = ctx.readback || {};
+        if (!ctx.readback.pbo || ctx.readback.size !== byteLength) {
+            try {
+                if (ctx.readback.pbo) {
+                    gl.deleteBuffer(ctx.readback.pbo);
+                }
+                ctx.readback.pbo = gl.createBuffer();
+                ctx.readback.size = byteLength;
+            } catch {
+                return false;
+            }
+        }
+        let previousFramebuffer;
+        let previousPbo;
+        try {
+            previousFramebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+            previousPbo = gl.getParameter(gl.PIXEL_PACK_BUFFER_BINDING);
+        } catch {
+            return false;
+        }
+        try {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+            gl.bindBuffer(gl.PIXEL_PACK_BUFFER, ctx.readback.pbo);
+            gl.bufferData(gl.PIXEL_PACK_BUFFER, byteLength, gl.STREAM_READ);
+            gl.readPixels(0, 0, ctx.width, ctx.height, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+            const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+            gl.flush();
+            let status = gl.clientWaitSync(fence, 0, 0);
+            if (status === gl.TIMEOUT_EXPIRED) {
+                status = gl.clientWaitSync(fence, 0, 1000000);
+            }
+            if (status === gl.TIMEOUT_EXPIRED) {
+                gl.deleteSync(fence);
+                return false;
+            }
+            gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, pixels);
+            gl.deleteSync(fence);
+            return true;
+        } catch {
+            return false;
+        } finally {
+            try {
+                gl.bindBuffer(gl.PIXEL_PACK_BUFFER, previousPbo);
+            } catch {
+                // ignore
+            }
+            try {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, previousFramebuffer);
+            } catch {
+                // ignore
+            }
+        }
+    };
+
     const renderSoundBlock = function (blockIndex, options, precisionMode, soundBuffer, blockStartSample) {
         const ctx = getRenderContext(options, precisionMode, soundBuffer);
         if (!ctx) {
@@ -814,8 +890,12 @@
         ctx.material.uniforms.iAudioTime.value = startSample / state.audioContext.sampleRate;
         renderer.setRenderTarget(ctx.target);
         renderer.render(ctx.scene, ctx.camera);
-        renderer.readRenderTargetPixels(ctx.target, 0, 0, ctx.width, ctx.height, ctx.pixels);
+        const usedPbo = tryReadRenderTargetPixelsPBO(ctx, options);
+        if (!usedPbo) {
+            renderer.readRenderTargetPixels(ctx.target, 0, 0, ctx.width, ctx.height, ctx.pixels);
+        }
         renderer.setRenderTarget(previousTarget);
+        ctx.readbackPath = usedPbo ? 'pbo+fence' : 'readPixels';
 
         const left = new Float32Array(ctx.samplesPerBlock);
         const right = new Float32Array(ctx.samplesPerBlock);
@@ -901,6 +981,7 @@
         }
         const options = state.options || {};
         const soundBuffers = state.soundBuffers || [];
+        const precisionSummary = getPrecisionSummary(options, soundBuffers);
         const mixGain = soundBuffers.length > 0 ? 1 / soundBuffers.length : 1;
         const blockSamples = state.stream.blockSamples || (DEFAULT_BLOCK_DIM * DEFAULT_BLOCK_DIM);
         ensureBufferPool(blockSamples);
@@ -910,6 +991,7 @@
             ? Math.max(0, Math.floor(baseSample))
             : (state.stream.nextBlock * blockSamples);
         state.stream.lastNeed = blocks;
+        const blockMs = state.audioContext ? (blockSamples / state.audioContext.sampleRate * 1000).toFixed(1) : '?';
 
         for (let i = 0; i < blocks; i++) {
             const buffer = pool && pool.free.length ? pool.free.pop() : null;
@@ -954,6 +1036,20 @@
                 applyOutputGain();
             }
         }
+
+        const poolFree = state.bufferPool ? state.bufferPool.free.length : 0;
+        const poolTotal = state.bufferPool ? state.bufferPool.total : 0;
+        const workletQueue = state.workletStats ? state.workletStats.queueFrames : 0;
+        const workletUnderruns = state.workletStats ? state.workletStats.underruns : 0;
+        const queueMs = state.audioContext ? (workletQueue / state.audioContext.sampleRate * 1000).toFixed(0) : '?';
+        const renderW = state.renderBlockWidth || DEFAULT_BLOCK_DIM;
+        const renderH = state.renderBlockHeight || DEFAULT_BLOCK_DIM;
+        state.statusLine = `Audio: ${precisionSummary} @ ${state.audioContext.sampleRate} Hz, block ${blockMs}ms`;
+        state.streamDetails = [
+            `Stream: ${renderW}×${renderH}=${blockSamples} samp (${blockMs}ms) | rendered ${state.stream.renderedBlocks} | need ${state.stream.lastNeed}`,
+            `Pool: ${poolFree}/${poolTotal} bufs | queue ${workletQueue} samp (${queueMs}ms)`,
+            `Worklet: ${state.workletFailed ? 'failed' : (state.workletReady ? 'ready' : (state.workletLoading ? 'loading' : 'idle'))} | underruns ${workletUnderruns}`
+        ];
     };
 
     const requestBlocksFromNeed = function (wantBaseSample, framesWanted) {
@@ -1064,7 +1160,7 @@
 
         const precisionSummary = getPrecisionSummary(options, soundBuffers);
         const blockSeconds = (state.stream.blockSamples || (DEFAULT_BLOCK_DIM * DEFAULT_BLOCK_DIM)) / audioContext.sampleRate;
-        setStatus(`Audio: ${precisionSummary} @ ${audioContext.sampleRate} Hz, block ${blockSeconds.toFixed(3)}s`);
+        setStatus(`Audio: ${precisionSummary} @ ${audioContext.sampleRate} Hz, block ${(blockSeconds * 1000).toFixed(1)}ms`);
         resetSampleRings();
 
         if (state.workletFailed) {
@@ -1153,7 +1249,7 @@
 
         const precisionSummary = getPrecisionSummary(options, soundBuffers);
         const blockSeconds = (state.stream.blockSamples || (DEFAULT_BLOCK_DIM * DEFAULT_BLOCK_DIM)) / audioContext.sampleRate;
-        setStatus(`Audio: ${precisionSummary} @ ${audioContext.sampleRate} Hz, block ${blockSeconds.toFixed(3)}s`);
+        setStatus(`Audio: ${precisionSummary} @ ${audioContext.sampleRate} Hz, block ${(blockSeconds * 1000).toFixed(1)}ms`);
         resetSampleRings();
 
         if (!state.workletReady || state.workletFailed) {
@@ -1254,6 +1350,54 @@
     root.audioOutput.setOutputEnabled = function (enabled) {
         state.outputEnabled = !!enabled;
         applyOutputGain();
+    };
+
+    root.audioOutput.getOverlayLines = function () {
+        const lines = [];
+        if (state.statusLine) {
+            lines.push(state.statusLine);
+        }
+        if (state.streamDetails && state.streamDetails.length) {
+            lines.push(...state.streamDetails);
+        }
+        const ringDepth = state.sampleRingDepth || 0;
+        const ringBlock = (state.sampleRingBlockWidth || 0) * (state.sampleRingBlockHeight || 0);
+        const ringWrite = (() => {
+            if (!state.sampleRing || state.sampleRing.size === 0) {
+                return '-';
+            }
+            const first = state.sampleRing.values().next();
+            return first && first.value ? String(first.value.writeIndex) : '-';
+        })();
+        lines.push(`Ring: depth ${ringDepth} block ${ringBlock} write ${ringWrite}`);
+        const rmsL = Number.isFinite(state.analysis.rmsL) ? state.analysis.rmsL.toFixed(3) : '0.000';
+        const rmsR = Number.isFinite(state.analysis.rmsR) ? state.analysis.rmsR.toFixed(3) : '0.000';
+        lines.push(`RMS: L ${rmsL} | R ${rmsR}`);
+        const ctx = state.renderContexts && state.soundBuffer ? state.renderContexts.get(state.soundBuffer.Name) : null;
+        if (ctx) {
+            const precision = resolvePrecisionForBuffer(state.options || {}, state.soundBuffer);
+            const readback = ctx.readbackPath || 'readPixels';
+            let textureTypeName = 'unknown';
+            if (ctx.target && ctx.target.texture) {
+                const texType = ctx.target.texture.type;
+                if (texType === global.THREE.FloatType) {
+                    textureTypeName = 'FloatType';
+                } else if (texType === global.THREE.HalfFloatType) {
+                    textureTypeName = 'HalfFloatType';
+                } else if (texType === global.THREE.UnsignedByteType) {
+                    textureTypeName = 'UnsignedByteType';
+                } else {
+                    textureTypeName = String(texType);
+                }
+            }
+            const bytesPerComponent = (precision === '32bFLOAT') ? 4 : (precision === '16bFLOAT' ? 2 : 1);
+            const targetBytes = ctx.width * ctx.height * 4 * bytesPerComponent;
+            const audioBlockBytes = ctx.samplesPerBlock * 2 * 4;
+            const readbackType = (precision === '16bPACK' || precision === '8bPACK') ? 'Uint8Array' : 'Float32Array';
+            lines.push(`RT: precision ${precision} | texture ${textureTypeName} | readback ${readback}`);
+            lines.push(`Readback: ${readbackType}, RT bytes ${Math.round(targetBytes / 1024)} KB, block PCM bytes ${Math.round(audioBlockBytes / 1024)} KB`);
+        }
+        return lines;
     };
 
     root.audioOutput.resume = function () {
