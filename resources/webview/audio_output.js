@@ -964,13 +964,35 @@
         requestBlocks(blocks, wantBaseSample);
     };
 
+    const clampBlockSamples = function (value) {
+        const numeric = Math.max(0, Math.floor(Number(value) || 0));
+        if (numeric <= 0) {
+            return 1024;
+        }
+        const rounded = Math.max(128, Math.round(numeric / 128) * 128);
+        return rounded;
+    };
+
+    const factorBlockDimensions = function (samples) {
+        const step = 128;
+        const safeSamples = Math.max(step, Math.floor(samples));
+        let width = step;
+        for (let w = step; w * w <= safeSamples; w += step) {
+            if (safeSamples % w === 0) {
+                width = w;
+            }
+        }
+        const height = Math.max(1, Math.floor(safeSamples / width));
+        return { width, height, samples: width * height };
+    };
+
     const applyRenderBlockSize = function (options) {
-        const blockSize = Math.max(1, Math.floor(Number(options.blockSize) || 0));
-        const blockWidth = Math.max(1, Math.floor(Math.sqrt(blockSize)));
-        const blockHeight = Math.max(1, Math.ceil(blockSize / blockWidth));
-        state.renderBlockWidth = blockWidth;
-        state.renderBlockHeight = blockHeight;
-        state.stream.blockSamples = blockWidth * blockHeight;
+        const requested = options ? options.blockSize : 0;
+        const blockSamples = clampBlockSamples(requested);
+        const dims = factorBlockDimensions(blockSamples);
+        state.renderBlockWidth = dims.width;
+        state.renderBlockHeight = dims.height;
+        state.stream.blockSamples = dims.samples;
     };
 
     const applyOutputGain = function () {
