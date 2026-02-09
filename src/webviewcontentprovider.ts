@@ -603,7 +603,7 @@ export class WebviewContentProvider {
         const audioOutputPrecisionExtension = new AudioOutputPrecisionExtension(audioOutputPrecision);
         this.webviewAssembler.addReplaceModule(audioOutputPrecisionExtension, '<!-- Audio Output Precision -->', '<!-- Audio Output Precision -->');
 
-        const audioBlockSize = this.context.getConfig<number>('audioBlockSize') || 65536;
+        const audioBlockSize = this.context.getConfig<number>('audioBlockSize') || 1024;
         const audioBlockSizeExtension = new AudioBlockSizeExtension(audioBlockSize);
         this.webviewAssembler.addReplaceModule(audioBlockSizeExtension, '<!-- Audio Block Size -->', '<!-- Audio Block Size -->');
 

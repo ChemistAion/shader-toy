@@ -24,7 +24,7 @@
         stream: {
             active: false,
             nextBlock: 0,
-            blockSamples: 512 * 512,
+            blockSamples: 0,
             renderedBlocks: 0,
             lastNeed: 0
         },
@@ -60,7 +60,8 @@
     };
 
     const DEFAULT_BLOCK_DIM = 256;
-    const DEFAULT_POOL_COUNT = 6;
+    const MIN_POOL_COUNT = 8;
+    const TARGET_POOL_SECONDS = 0.5;
 
     root.audioOutput.state = state;
 
@@ -472,24 +473,46 @@
 
     const applyRenderBlockSize = function (options) {
         const requestedRaw = options && Number.isFinite(options.blockSize) ? Math.floor(options.blockSize) : 0;
-        let dim = DEFAULT_BLOCK_DIM;
-        let blockSamples = dim * dim;
+        let width = DEFAULT_BLOCK_DIM;
+        let height = DEFAULT_BLOCK_DIM;
+        let blockSamples = width * height;
 
-        if (requestedRaw > 0) {
-            const rootDim = Math.floor(Math.sqrt(requestedRaw));
-            if (rootDim * rootDim === requestedRaw) {
-                dim = Math.max(1, rootDim);
-                blockSamples = dim * dim;
-                if (blockSamples % 128 !== 0) {
-                    postInfoMessage(`Audio block size ${blockSamples} is not a multiple of 128; AudioWorklet may underrun.`);
+        if (requestedRaw > 0 && requestedRaw % 128 === 0) {
+            // Find a good width x height factorization.
+            // Prefer square-ish; width must be power-of-two for GPU texture alignment.
+            const candidates = [128, 256, 512, 1024];
+            let bestW = 0;
+            let bestH = 0;
+            for (const w of candidates) {
+                if (requestedRaw % w === 0) {
+                    const h = requestedRaw / w;
+                    if (h >= 1 && h <= 4096) {
+                        bestW = w;
+                        bestH = h;
+                    }
                 }
-            } else {
-                postInfoMessage(`Audio block size ${requestedRaw} must be a perfect square (e.g., 65536). Using ${blockSamples}.`);
             }
+            if (bestW > 0) {
+                width = bestW;
+                height = bestH;
+                blockSamples = width * height;
+            } else {
+                // Fallback: perfect square check
+                const rootDim = Math.floor(Math.sqrt(requestedRaw));
+                if (rootDim * rootDim === requestedRaw) {
+                    width = rootDim;
+                    height = rootDim;
+                    blockSamples = requestedRaw;
+                } else {
+                    postInfoMessage(`Audio block size ${requestedRaw} must be a multiple of 128. Using ${blockSamples}.`);
+                }
+            }
+        } else if (requestedRaw > 0) {
+            postInfoMessage(`Audio block size ${requestedRaw} must be a multiple of 128. Using ${blockSamples}.`);
         }
 
-        state.renderBlockWidth = dim;
-        state.renderBlockHeight = dim;
+        state.renderBlockWidth = width;
+        state.renderBlockHeight = height;
         state.stream.blockSamples = blockSamples;
         ensureBufferPool(blockSamples);
     };
@@ -516,7 +539,10 @@
             resetBufferPool();
         }
         const freshPool = state.bufferPool;
-        while (freshPool.free.length + freshPool.total < DEFAULT_POOL_COUNT) {
+        // For small blocks we need more buffers in the pool to sustain streaming.
+        const sampleRate = (state.audioContext && state.audioContext.sampleRate) ? state.audioContext.sampleRate : 48000;
+        const poolCount = Math.max(MIN_POOL_COUNT, Math.ceil(TARGET_POOL_SECONDS * sampleRate / samples));
+        while (freshPool.free.length + freshPool.total < poolCount) {
             freshPool.free.push(new ArrayBuffer(blockBytes));
             freshPool.total += 1;
         }
@@ -563,7 +589,7 @@
         renderStatus();
     };
 
-    const buildSoundMaterial = function (buffer, options, sampleRate, precisionMode) {
+    const buildSoundMaterial = function (buffer, options, sampleRate, precisionMode, blockWidth, blockHeight) {
         if (!global.document || !global.document.getElementById) {
             return null;
         }
@@ -573,14 +599,16 @@
             return null;
         }
 
-        const samplesPerBlock = 512 * 512;
+        const bw = blockWidth || DEFAULT_BLOCK_DIM;
+        const bh = blockHeight || DEFAULT_BLOCK_DIM;
+        const samplesPerBlock = bw * bh;
 
         const footer = (precisionMode === '16bPACK') ? `
     uniform float blockOffset;
 
     void main() {
-    float sampleTime = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0) / iSampleRate;
-    float sampleIndex = (blockOffset * iSampleRate) + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0);
+    float sampleTime = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * ${bw}.0) / iSampleRate;
+    float sampleIndex = (blockOffset * iSampleRate) + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * ${bw}.0);
     int sampleIndexInt = int(sampleIndex);
     vec2 y = mainSound(sampleIndexInt, sampleTime);
     vec2 v  = floor((0.5 + 0.5 * y) * 65536.0);
@@ -591,8 +619,8 @@
     uniform float blockOffset;
 
     void main() {
-    float sampleTime = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0) / iSampleRate;
-    float sampleIndex = (blockOffset * iSampleRate) + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0);
+    float sampleTime = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * ${bw}.0) / iSampleRate;
+    float sampleIndex = (blockOffset * iSampleRate) + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * ${bw}.0);
     int sampleIndexInt = int(sampleIndex);
     vec2 y = mainSound(sampleIndexInt, sampleTime);
     vec2 v = floor((0.5 + 0.5 * y) * 255.0);
@@ -602,8 +630,8 @@
     uniform float blockOffset;
 
     void main() {
-    float sampleTime = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0) / iSampleRate;
-    float sampleIndex = (blockOffset * iSampleRate) + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * 512.0);
+    float sampleTime = blockOffset + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * ${bw}.0) / iSampleRate;
+    float sampleIndex = (blockOffset * iSampleRate) + ((gl_FragCoord.x - 0.5) + (gl_FragCoord.y - 0.5) * ${bw}.0);
     int sampleIndexInt = int(sampleIndex);
     vec2 y = mainSound(sampleIndexInt, sampleTime);
     GLSL_FRAGCOLOR = vec4(y, 0.0, 1.0);
@@ -852,7 +880,7 @@
         const outputDataR = state.audioBuffer.getChannelData(1);
         const totalSamples = state.audioBuffer.length;
         const precisionSummary = getPrecisionSummary(options, soundBuffers);
-        const blockSamples = state.stream.blockSamples || (512 * 512);
+        const blockSamples = state.stream.blockSamples || (DEFAULT_BLOCK_DIM * DEFAULT_BLOCK_DIM);
         const numBlocks = Math.ceil(totalSamples / blockSamples);
         const mixGain = soundBuffers.length > 0 ? 1 / soundBuffers.length : 1;
 
@@ -917,13 +945,14 @@
             return null;
         }
 
-        const WIDTH = 512;
-        const HEIGHT = 512;
+        const WIDTH = state.renderBlockWidth || DEFAULT_BLOCK_DIM;
+        const HEIGHT = state.renderBlockHeight || DEFAULT_BLOCK_DIM;
         const samplesPerBlock = WIDTH * HEIGHT;
 
         const existing = state.renderContexts.get(soundBuffer.Name);
         if (existing) {
-            if (existing.renderer === renderer && existing.precisionMode === precisionMode) {
+            if (existing.renderer === renderer && existing.precisionMode === precisionMode
+                && existing.width === WIDTH && existing.height === HEIGHT) {
                 return existing;
             }
             disposeRenderContext(soundBuffer.Name);
@@ -942,7 +971,7 @@
         camera.position.set(0, 0, 1);
         camera.lookAt(scene.position);
 
-        const material = buildSoundMaterial(soundBuffer, options, state.audioContext.sampleRate, precisionMode);
+        const material = buildSoundMaterial(soundBuffer, options, state.audioContext.sampleRate, precisionMode, WIDTH, HEIGHT);
         if (!material) {
             target.dispose();
             return null;
@@ -970,7 +999,6 @@
             height: HEIGHT
         };
         state.renderContexts.set(soundBuffer.Name, ctx);
-        state.stream.blockSamples = samplesPerBlock;
         try {
             const typeName = (targetType === global.THREE.FloatType)
                 ? 'FloatType'
@@ -1092,8 +1120,8 @@
         }
 
         const ringDepth = Math.max(1, Math.floor(state.sampleRingDepth || 4));
-        const blockWidth = state.sampleRingBlockWidth || 512;
-        const blockHeight = state.sampleRingBlockHeight || 512;
+        const blockWidth = state.sampleRingBlockWidth || 64;
+        const blockHeight = state.sampleRingBlockHeight || 64;
         const width = blockWidth;
         const height = blockHeight * ringDepth;
         const data = new Float32Array(width * height * 4);
@@ -1332,7 +1360,16 @@
         const workletState = state.workletFailed
             ? 'failed'
             : (state.workletReady ? 'ready' : (state.workletLoading ? 'loading' : 'idle'));
-        setStats(`Streaming: block ${blockSeconds.toFixed(3)}s, rendered ${state.stream.renderedBlocks}, need ${state.stream.lastNeed}, sources ${soundBuffers.length}, precision ${precisionSummary}, pool ${poolFree}/${poolTotal}, queue ${workletQueue}, underruns ${workletUnderruns}, worklet ${workletState}`);
+        const queueMs = state.audioContext ? (workletQueue / state.audioContext.sampleRate * 1000).toFixed(0) : '?';
+        const blockMs = state.audioContext ? (blockSamples / state.audioContext.sampleRate * 1000).toFixed(1) : '?';
+        const renderW = state.renderBlockWidth || DEFAULT_BLOCK_DIM;
+        const renderH = state.renderBlockHeight || DEFAULT_BLOCK_DIM;
+        setStats(`Stream: ${renderW}×${renderH}=${blockSamples} samp (${blockMs}ms) | rendered ${state.stream.renderedBlocks} | need ${state.stream.lastNeed}`);
+        state.streamDetails = [
+            `Sources: ${soundBuffers.length} | precision ${precisionSummary}`,
+            `Pool: ${poolFree}/${poolTotal} bufs | queue ${workletQueue} samp (${queueMs}ms)`,
+            `Worklet: ${workletState} | underruns ${workletUnderruns}`
+        ];
     };
 
     const requestBlocksFromNeed = function (wantBaseSample, framesWanted) {
@@ -1565,7 +1602,8 @@
                 resetStreaming();
                 state.stream.active = true;
                 state.stream.nextBlock = Math.floor(startAt * state.audioContext.sampleRate / state.stream.blockSamples);
-                requestBlocks(4);
+                const initialBlocks = Math.max(4, Math.ceil(0.25 * state.audioContext.sampleRate / (state.stream.blockSamples || 1)));
+                requestBlocks(initialBlocks);
                 state.sourceNode = null;
                 setTransportStart(startAt);
 

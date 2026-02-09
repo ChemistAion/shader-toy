@@ -245,6 +245,13 @@
             if (state.statsLine) {
                 lines.push(state.statsLine);
             }
+            if (Array.isArray(state.streamDetails) && state.streamDetails.length) {
+                for (const detail of state.streamDetails) {
+                    if (detail) {
+                        lines.push(detail);
+                    }
+                }
+            }
             if (state.precisionDetails) {
                 lines.push(state.precisionDetails);
             }
@@ -254,6 +261,23 @@
                         lines.push(detail);
                     }
                 }
+            }
+            // Ring buffer stats
+            if (state.sampleRing && state.sampleRing.size > 0) {
+                for (const [name, ring] of state.sampleRing.entries()) {
+                    if (ring) {
+                        const ringBlockSamples = ring.blockWidth * ring.blockHeight;
+                        const totalSamples = ringBlockSamples * ring.ringDepth;
+                        const ringMs = state.audioContext ? (totalSamples / state.audioContext.sampleRate * 1000).toFixed(0) : '?';
+                        lines.push(`Ring[${name}]: ${ring.blockWidth}\u00d7${ring.blockHeight}\u00d7${ring.ringDepth} = ${totalSamples} samp (${ringMs}ms) writeIdx ${ring.writeIndex}`);
+                    }
+                }
+            }
+            // Analysis RMS
+            if (state.analysis && state.analysis.enabled && (state.analysis.rmsL > 0 || state.analysis.rmsR > 0)) {
+                const dbL = state.analysis.rmsL > 0 ? (20 * Math.log10(state.analysis.rmsL)).toFixed(1) : '-inf';
+                const dbR = state.analysis.rmsR > 0 ? (20 * Math.log10(state.analysis.rmsR)).toFixed(1) : '-inf';
+                lines.push(`RMS: L ${dbL} dB  R ${dbR} dB`);
             }
         }
         if (lines.length) {
@@ -537,7 +561,7 @@
     const hasSoundBuffer = buffers.some((buffer) => buffer && buffer.IsSound);
     const audioOutputPrecision = '<!-- Audio Output Precision -->';
     const audioBlockSizeRaw = '<!-- Audio Block Size -->';
-    const audioBlockSize = Number(audioBlockSizeRaw) || 65536;
+    const audioBlockSize = Number(audioBlockSizeRaw) || 1024;
     const audioWorkletUrl = '<!-- Audio Worklet Processor -->';
     const showSoundButtonRaw = '<!-- Show Sound Button -->';
     const showSoundButton = showSoundButtonRaw !== 'false';

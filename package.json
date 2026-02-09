@@ -206,8 +206,8 @@
                 },
                 "shader-toy.audioBlockSize": {
                     "type": "number",
-                    "default": 65536,
-                    "description": "Audio GPU block size in samples (must be a multiple of 128). Lower values reduce latency but increase MessagePort traffic."
+                    "default": 1024,
+                    "description": "Audio GPU block size in samples (must be a multiple of 128). Lower values reduce latency but increase MessagePort traffic. Minimum 128, typical 1024-4096."
                 },
                 "shader-toy.testCompileIncludedFiles": {
                     "type": "boolean",
