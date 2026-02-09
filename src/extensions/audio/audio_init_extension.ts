@@ -253,11 +253,15 @@ message: 'Failed loading audio file: ${audio.UserPath}'
         if (this.content !== '' || hasSoundOutput) {
             this.content = `
             var AudioContext = window.AudioContext || window.webkitAudioContext;
-            var audioContext = (window.ShaderToy && window.ShaderToy.audioContext)
-                ? window.ShaderToy.audioContext
-                : (AudioContext ? new AudioContext() : undefined);
+            var audioAllowed = (glslVersionSetting === 'WebGL2') && isWebGL2;
+            var audioContext = undefined;
+            if (audioAllowed) {
+                audioContext = (window.ShaderToy && window.ShaderToy.audioContext)
+                    ? window.ShaderToy.audioContext
+                    : (AudioContext ? new AudioContext() : undefined);
+            }
             if (!audioContext) {
-                audioContext = { sampleRate: 0 };
+                audioContext = { sampleRate: 0, resume: function(){}, suspend: function(){} };
             }
             if (window.ShaderToy) {
                 window.ShaderToy.audioContext = audioContext;
@@ -292,7 +296,10 @@ message: 'Failed loading audio file: ${audio.UserPath}'
             if (window.ShaderToy) {
                 window.ShaderToy.audios = audios;
             }
-            ` + this.content;
+            if (audioAllowed) {
+            ` + this.content + `
+            }
+            `;
         }
         else {
             this.content = `
