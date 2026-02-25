@@ -1,0 +1,3 @@
+[submodule "references/fragcoord"]
+	path = references/fragcoord
+	url = https://github.com/ChemistAion/fragcoord
