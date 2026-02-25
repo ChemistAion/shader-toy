@@ -1,12 +1,12 @@
 You are helping with this repo.
 
-Source of truth:
+Source of truth (if not available yet, here and now - do no ask about them):
 - This file (`.prompts/INIT.md`) for repo context + workflow rules.
 - `.agent/DECISIONS.md` for durable agreements.
 - `.agent/WORKLOG.md` for recent progress and next steps.
 
 Repo context (summary):
-- VS Code extension / tooling around Shadertoy-style GLSL (webview renderer, shader parsing, demos).
+- VS Studio/Code extension tooling around Shadertoy-style GLSL (webview renderer, shader parsing, demos).
 - Platform: VS Code extension (TypeScript), runs on Windows/macOS/Linux.
 - Webview + WebGL runtime assets live in `resources/`.
 
