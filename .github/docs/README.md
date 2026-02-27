@@ -4,6 +4,7 @@ This folder stores project-level reports and deep-dive notes.
 
 ## Architecture
 
+- `architecture/shadertoy-report.md` — **complete architecture report** of the shader-toy extension as-is (entry points, parsing pipeline, webview assembly, render loop, IPC, all feature subsystems, extension points, file inventory).
 - `architecture/shadertoyPRs-overview.md` — progression deep dive across merged PR branches and architectural decisions.
 - `architecture/shadertoyPanels-overview.md` — addon webview/panel machinery deep dive (sequencer-based reference).
 
