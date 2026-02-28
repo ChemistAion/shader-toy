@@ -7,6 +7,7 @@ import { ShaderLexer, Token, TokenType, LineRange } from './shaderlexer';
 export enum ObjectType {
     Include,
     Vertex,
+    Sound,
     Texture,
     TextureMagFilter,
     TextureMinFilter,
@@ -15,6 +16,7 @@ export enum ObjectType {
     Number,
     Value,
     Uniform,
+    SoundFormat,
     Keyboard,
     FirstPersonControls,
     StrictCompatibility,
@@ -27,6 +29,16 @@ type Include = {
 type Vertex = {
     Type: ObjectType.Vertex,
     Path: string
+};
+type Sound = {
+    Type: ObjectType.Sound,
+    Index: number,
+    Path: string
+};
+type SoundFormat = {
+    Type: ObjectType.SoundFormat,
+    Index: number,
+    Value: string
 };
 type Texture = {
     Type: ObjectType.Texture,
@@ -88,7 +100,7 @@ type ErrorObject = {
     Message: string
 };
 type TextureObject = Texture | TextureMagFilter | TextureMinFilter | TextureWrapMode | TextureType;
-type ParseObject = Include | Vertex | TextureObject | Uniform | Keyboard | FirstPersonControls | StrictCompatibility;
+type ParseObject = Include | Vertex | Sound | SoundFormat | TextureObject | Uniform | Keyboard | FirstPersonControls | StrictCompatibility;
 
 export class ShaderParser {
     private stream: ShaderStream;
@@ -141,6 +153,42 @@ export class ShaderParser {
         case 'iVertex':
             returnObject = this.getVertex();
             break;
+        default:
+            if (tokenValue.indexOf('iSound') === 0) {
+                const indexText = tokenValue.substring('iSound'.length);
+                const nextToken = this.lexer.peek();
+                const hasFormat = nextToken && nextToken.type === TokenType.Punctuation && nextToken.value === '::';
+                if (indexText.length === 0) {
+                    const index = -1;
+                    if (hasFormat) {
+                        this.lexer.next();
+                        returnObject = this.getSoundFormat(index);
+                    }
+                    else {
+                        returnObject = this.getSound(index);
+                    }
+                }
+                else {
+                    const index = Number(indexText);
+                    if (!/^[0-9]+$/.test(indexText) || !Number.isFinite(index)) {
+                        returnObject = this.makeError(`Invalid iSound index "${indexText}"`);
+                    }
+                    else if (hasFormat) {
+                        this.lexer.next();
+                        returnObject = this.getSoundFormat(index);
+                    }
+                    else {
+                        returnObject = this.getSound(index);
+                    }
+                }
+                break;
+            }
+            if (tokenValue.indexOf('iSample') === 0) {
+                returnObject = this.makeError('iSample is no longer supported. Use iSampleRingN samplers instead.');
+                break;
+            }
+            returnObject = this.getTextureObject(nextToken);
+            break;
         case 'iKeyboard':
             returnObject = { Type: ObjectType.Keyboard };
             break;
@@ -153,9 +201,7 @@ export class ShaderParser {
         case 'iUniform':
             returnObject = this.getUniformObject();
             break;
-        default: // Must be iChannel
-            returnObject = this.getTextureObject(nextToken);
-            break;
+        // no default here; handled above
         }
 
         const rangeEnd = this.lexer.getLastRange().End;
@@ -200,6 +246,53 @@ export class ShaderParser {
             Path: tokenValue
         };
         return vertex;
+    }
+
+    private getSound(index: number): Sound | ErrorObject {
+        const nextToken = this.lexer.next();
+        if (nextToken === undefined) {
+            return this.makeError('Expected string after "iSound" but got end-of-file');
+        }
+        if (nextToken.type !== TokenType.String) {
+            return this.makeError(`Expected string after "iSound" but got "${nextToken.value}"`);
+        }
+
+        const tokenValue = nextToken.value as string;
+        if (index < 0) {
+            return this.makeError('iSound requires an explicit index in [0..9].');
+        }
+        const sound: Sound = {
+            Type: ObjectType.Sound,
+            Index: index,
+            Path: tokenValue
+        };
+        return sound;
+    }
+
+    private getSoundFormat(index: number): SoundFormat | ErrorObject {
+        const formatToken = this.lexer.next();
+        if (formatToken === undefined) {
+            return this.makeError('Expected identifier after "iSound::" but got end-of-file');
+        }
+        if (formatToken.type !== TokenType.Identifier || formatToken.value !== 'Format') {
+            return this.makeError(`Expected "Format" after "iSound::" but got "${formatToken.value}"`);
+        }
+
+        const valueToken = this.lexer.next();
+        if (valueToken === undefined) {
+            return this.makeError('Expected string after "iSound::Format" but got end-of-file');
+        }
+        if (valueToken.type !== TokenType.String) {
+            return this.makeError(`Expected string after "iSound::Format" but got "${valueToken.value}"`);
+        }
+
+        const tokenValue = valueToken.value as string;
+        const soundFormat: SoundFormat = {
+            Type: ObjectType.SoundFormat,
+            Index: index,
+            Value: tokenValue
+        };
+        return soundFormat;
     }
 
     private getTextureObject(previous: Token): Texture | TextureMagFilter | TextureMinFilter | TextureWrapMode | TextureType | ErrorObject {

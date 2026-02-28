@@ -28,6 +28,22 @@ export class RenderStartingData {
     UniformsGui: UniformsGuiStartingData = { Open: false, Values: new Map<string, number[]>() };
 }
 
+export type HotReloadState = {
+    time: number;
+    paused: boolean;
+    mouse: Mouse;
+    normalizedMouse: NormalizedMouse;
+    flyControlPosition: Position;
+    flyControlRotation: Quaternion;
+};
+
+export type HotReloadPayload = {
+    shadersHtml: string;
+    includesHtml: string;
+    initScript: string;
+    state: HotReloadState;
+};
+
 export enum TextureMagFilter {
     Linear  = 'Linear',
     Nearest = 'Nearest',
@@ -71,7 +87,9 @@ export type AudioDefinition = {
     Channel: number,
     LocalPath?: string,
     RemotePath?: string,
-    UserPath: string
+    UserPath: string,
+    FromSound?: boolean,
+    SoundIndex?: number
 };
 export type UniformDefinition = {
     Name: string,
@@ -106,6 +124,9 @@ export type BufferDefinition = {
     Dependents: BufferDependency[],
     LineOffset: number
     Includes: IncludeDefinition[],
+    IsSound?: boolean,
+    SoundIndices?: number[],
+    SoundPrecision?: string,
     UsesKeyboard?: boolean,
     UsesFirstPersonControls?: boolean,
 };

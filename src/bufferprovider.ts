@@ -17,7 +17,9 @@ type InputTexture = {
     Channel: ChannelId,
     Local: boolean,
     UserPath: string,
-    Path: string
+    Path: string,
+    SoundIndex?: number,
+    Line?: number
 };
 type InputTextureSettings = {
     Mag?: Types.TextureMagFilter,
@@ -35,9 +37,27 @@ type InputTextureSettings = {
 export class BufferProvider {
     private context: Context;
     private visitedFiles: string[];
+    private soundFileIndices: Map<string, number[]>;
+    private soundIndexPrecisions: Map<number, string>;
+    private selfSoundPrecisions: Map<string, string>;
     constructor(context: Context) {
         this.context = context;
         this.visitedFiles = [];
+        this.soundFileIndices = new Map<string, number[]>();
+        this.soundIndexPrecisions = new Map<number, string>();
+        this.selfSoundPrecisions = new Map<string, string>();
+    }
+
+    private registerSoundFile(index: number, file: string) {
+        const existing = this.soundFileIndices.get(file);
+        if (existing) {
+            if (!existing.includes(index)) {
+                existing.push(index);
+            }
+        }
+        else {
+            this.soundFileIndices.set(file, [index]);
+        }
     }
 
     private looksLikeStandaloneVertexShader(code: string): boolean {
@@ -52,6 +72,19 @@ export class BufferProvider {
 
     public async parseShaderCode(file: string, code: string, buffers: Types.BufferDefinition[], commonIncludes: Types.IncludeDefinition[], generateStandalone: boolean) {
         await this.parseShaderCodeInternal(file, file, code, buffers, commonIncludes, generateStandalone);
+
+        // Ensure any #iSound targets are parsed as standalone buffers.
+        for (const soundFile of this.soundFileIndices.keys()) {
+            if (this.visitedFiles.includes(soundFile)) {
+                continue;
+            }
+            const soundFileRead = await this.readShaderFile(soundFile);
+            if (soundFileRead.success === false) {
+                this.showErrorAtLine(file, `Could not open sound shader file: ${soundFile}`, 1);
+                continue;
+            }
+            await this.parseShaderCodeInternal(file, soundFile, soundFileRead.bufferCode, buffers, commonIncludes, generateStandalone);
+        }
 
         const findByName = (path: string) => {
             const name = this.makeName(path);
@@ -91,7 +124,7 @@ export class BufferProvider {
             for (const texture of buffer.TextureInputs) {
                 if (!texture.Self && texture.Buffer !== undefined && texture.BufferIndex !== undefined) {
                     const dependencyBuffer = buffers[texture.BufferIndex];
-                    if (dependencyBuffer.UsesSelf) {
+                    if (dependencyBuffer && dependencyBuffer.UsesSelf) {
                         dependencyBuffer.Dependents.push({
                             Index: i,
                             Channel: texture.Channel
@@ -162,6 +195,8 @@ export class BufferProvider {
         const boxedLineOffset: Types.BoxedValue<number> = { Value: 0 };
         const boxedVertexShaderFile: Types.BoxedValue<string | undefined> = { Value: undefined };
         const boxedVertexShaderLine: Types.BoxedValue<number | undefined> = { Value: undefined };
+        const boxedSoundShaderFiles = new Map<number, Types.BoxedValue<string | undefined>>();
+        const boxedSoundShaderLines = new Map<number, Types.BoxedValue<number | undefined>>();
         const pendingTextures: InputTexture[] = [];
         const pendingTextureSettings = new Map<ChannelId, InputTextureSettings>();
         const pendingUniforms: Types.UniformDefinition[] = [];
@@ -177,6 +212,8 @@ export class BufferProvider {
             boxedLineOffset,
             boxedVertexShaderFile,
             boxedVertexShaderLine,
+            boxedSoundShaderFiles,
+            boxedSoundShaderLines,
             pendingTextures,
             pendingTextureSettings,
             pendingUniforms,
@@ -236,6 +273,8 @@ export class BufferProvider {
                     vertexLineOffsetBox,
                     vertexVertexShaderFile,
                     vertexVertexShaderLine,
+                    boxedSoundShaderFiles,
+                    boxedSoundShaderLines,
                     vertexPendingTextures,
                     vertexPendingTextureSettings,
                     vertexPendingUniforms,
@@ -257,6 +296,7 @@ export class BufferProvider {
         const uniforms: Types.UniformDefinition[] = [];
         const usesKeyboard = boxedUsesKeyboard.Value;
         const usesFirstPersonControls = boxedFirstPersonControls.Value;
+        let usesMainSound = false;
 
         // Resolve textures
         for (const pendingTexture of pendingTextures) {
@@ -264,6 +304,27 @@ export class BufferProvider {
             const userPath = pendingTexture.UserPath;
             const channel = pendingTexture.Channel;
             const local = pendingTexture.Local;
+
+            const normalizedPath = depFile.trim().toLowerCase();
+            const soundMatch = normalizedPath.match(/^sound(?:\/\/)?(\d+)$/);
+            if (soundMatch) {
+                const soundIndex = Number(soundMatch[1]);
+                if (!Number.isFinite(soundIndex) || soundIndex < 0 || soundIndex > 9 || Math.floor(soundIndex) !== soundIndex) {
+                    this.showErrorAtLine(file, '#iChannel sound index must be an integer in [0..9].', pendingTexture.Line ?? 1);
+                    continue;
+                }
+                audios.push({
+                    Channel: channel,
+                    UserPath: userPath || `sound${soundIndex}`,
+                    FromSound: true,
+                    SoundIndex: soundIndex
+                });
+                continue;
+            }
+            if (normalizedPath === 'sound' || normalizedPath.startsWith('sound://')) {
+                this.showErrorAtLine(file, '#iChannel requires explicit sound index (use "sound0" .. "sound9").', pendingTexture.Line ?? 1);
+                continue;
+            }
 
             const fullMime = mime.getType(path.extname(depFile) || 'txt') || 'text/plain';
             const mimeType = fullMime.split('/')[0] || 'text';
@@ -380,6 +441,13 @@ export class BufferProvider {
             }
         }
 
+        // IMPORTANT: avoid matching commented-out code when scanning for entry points or channels.
+        const codeForSearch = code
+            // block comments (preserve newlines for line numbers)
+            .replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, ' '))
+            // line comments (preserve line length)
+            .replace(/\/\/.*$/gm, (match) => ' '.repeat(match.length));
+
         {
             const insertMainImageCode = () => {
                 code += `
@@ -389,23 +457,50 @@ void main() {
 }`;
             };
 
-            if (this.context.getConfig<boolean>('shaderToyStrictCompatibility') || strictComp.Value) {
-                insertMainImageCode();
-            }
-            else {
-                // If there is no void main() in the shader we assume it is a shader-toy style shader
-                // IMPORTANT: avoid matching commented-out code like `// void main() {}`.
-                // This check only determines whether we should inject a wrapper `main()`.
-                const codeForSearch = code
-                    // block comments
-                    .replace(/\/\*[\s\S]*?\*\//g, '')
-                    // line comments
-                    .replace(/\/\/.*$/gm, '');
+            const mainPos = codeForSearch.search(/void\s+main\s*\(\s*\)\s*\{/g);
+            const mainImagePos = codeForSearch.search(/void\s+mainImage\s*\(\s*out\s+vec4\s+\w+,\s*(in\s)?\s*vec2\s+\w+\s*\)\s*\{/g);
+            const mainSoundAnyPos = codeForSearch.search(/\bmainSound\s*\(/g);
+            const mainSoundIntPos = codeForSearch.search(/vec2\s+mainSound\s*\(\s*int\s+\w+\s*,\s*float\s+\w+\s*\)/g);
+            const mainSoundFloatPos = codeForSearch.search(/vec2\s+mainSound\s*\(\s*float\s+\w+\s*\)/g);
 
-                const mainPos = codeForSearch.search(/void\s+main\s*\(\s*\)\s*\{/g);
-                const mainImagePos = codeForSearch.search(/void\s+mainImage\s*\(\s*out\s+vec4\s+\w+,\s*(in\s)?\s*vec2\s+\w+\s*\)\s*\{/g);
-                if (mainPos === -1 && mainImagePos >= 0) {
+            usesMainSound = mainSoundAnyPos >= 0;
+            const hasMainSoundInt = mainSoundIntPos >= 0;
+            const hasMainSoundFloat = mainSoundFloatPos >= 0;
+
+            if (usesMainSound) {
+                const webglVersion = this.context.getConfig<string>('webglVersion');
+                if (webglVersion !== 'WebGL2') {
+                    const line = mainSoundAnyPos >= 0
+                        ? codeForSearch.slice(0, mainSoundAnyPos).split(/\r\n|\n/).length
+                        : 1;
+                    this.showErrorAtLine(file, 'mainSound requires shader-toy.webglVersion set to "WebGL2".', line);
+                }
+            }
+
+            if (usesMainSound && hasMainSoundInt && !hasMainSoundFloat) {
+                code += `
+vec2 mainSound(float sampleTime) {
+    return mainSound(0, sampleTime);
+}`;
+            }
+            if (usesMainSound && hasMainSoundFloat && !hasMainSoundInt) {
+                code += `
+vec2 mainSound(int sampleIndex, float sampleTime) {
+    return mainSound(sampleTime);
+}`;
+            }
+
+            const needsMainWrapper = (mainPos === -1);
+            const hasMainImage = (mainImagePos >= 0);
+
+            if (!usesMainSound) {
+                if (this.context.getConfig<boolean>('shaderToyStrictCompatibility') || strictComp.Value) {
                     insertMainImageCode();
+                }
+                else {
+                    if (needsMainWrapper && hasMainImage) {
+                        insertMainImageCode();
+                    }
                 }
             }
         }
@@ -421,7 +516,7 @@ void main() {
             }
             if (this.context.getConfig<boolean>('warnOnUndefinedTextures')) {
                 for (let i = 0; i < 9; i++) {
-                    if (code.search('iChannel' + i) > 0) {
+                    if (codeForSearch.search('iChannel' + i) > 0) {
                         if (!definedTextures.has(i)) {
                             vscode.window.showWarningMessage(`iChannel${i} in use but there is no definition #iChannel${i} in shader`, 'Details')
                                 .then(() => {
@@ -471,6 +566,27 @@ void main() {
         }
 
         // Push yourself after all your dependencies
+        const soundIndices = this.soundFileIndices.get(file) || [];
+        const isSoundFile = soundIndices.length > 0;
+        let soundPrecision: string | undefined;
+        if (isSoundFile) {
+            for (const index of soundIndices) {
+                const precision = this.soundIndexPrecisions.get(index);
+                if (!precision) {
+                    continue;
+                }
+                if (soundPrecision && soundPrecision !== precision) {
+                    this.showWarningAtLine(file, `Conflicting #iSound::Format values for sound indices; using "${soundPrecision}".`, lineOffset);
+                    break;
+                }
+                soundPrecision = precision;
+            }
+            if (!soundPrecision) {
+                soundPrecision = this.selfSoundPrecisions.get(file);
+            }
+        } else if (usesMainSound) {
+            soundPrecision = this.selfSoundPrecisions.get(file);
+        }
         buffers.push({
             Name: this.makeName(file),
             File: file,
@@ -485,6 +601,9 @@ void main() {
             UsesSelf: false,
             SelfChannel: -1,
             Dependents: [],
+            IsSound: usesMainSound || isSoundFile,
+            SoundIndices: soundIndices.length > 0 ? soundIndices : undefined,
+            SoundPrecision: soundPrecision,
             UsesKeyboard: usesKeyboard,
             UsesFirstPersonControls: usesFirstPersonControls,
             LineOffset: lineOffset
@@ -498,6 +617,8 @@ void main() {
         lineOffset: Types.BoxedValue<number>,
         vertexShaderFile: Types.BoxedValue<string | undefined>,
         vertexShaderLine: Types.BoxedValue<number | undefined>,
+        soundShaderFiles: Map<number, Types.BoxedValue<string | undefined>>,
+        soundShaderLines: Map<number, Types.BoxedValue<number | undefined>>,
         textures: InputTexture[],
         textureSettings: Map<ChannelId, InputTextureSettings>,
         uniforms: Types.UniformDefinition[],
@@ -540,9 +661,37 @@ void main() {
                 this.showErrorAtLine(file, nextObject.Message, parser.line());
                 break;
             case ObjectType.Texture: {
+                const line = parser.line();
                 let userPath = nextObject.Path;
                 let textureFile: string;
                 let local = false;
+
+                const normalizedPath = userPath.trim().toLowerCase();
+                const soundMatch = normalizedPath.match(/^sound(?:\/\/)?(\d+)$/);
+                if (soundMatch) {
+                    const soundIndex = Number(soundMatch[1]);
+                    if (!Number.isFinite(soundIndex) || soundIndex < 0 || soundIndex > 9 || Math.floor(soundIndex) !== soundIndex) {
+                        this.showErrorAtLine(file, '#iChannel sound index must be an integer in [0..9].', line);
+                        removeLastObject();
+                        break;
+                    }
+                    const texture: InputTexture = {
+                        Channel: nextObject.Index,
+                        Local: true,
+                        UserPath: userPath,
+                        Path: `sound${soundIndex}`,
+                        SoundIndex: soundIndex,
+                        Line: line
+                    };
+                    textures.push(texture);
+                    removeLastObject();
+                    break;
+                }
+                if (normalizedPath === 'sound' || normalizedPath.startsWith('sound://')) {
+                    this.showErrorAtLine(file, '#iChannel requires explicit sound index (use "sound0" .. "sound9").', line);
+                    removeLastObject();
+                    break;
+                }
 
                 // Note: This is sorta cursed
                 try {
@@ -575,7 +724,8 @@ void main() {
                     Channel: nextObject.Index,
                     Local: local,
                     UserPath: userPath,
-                    Path: textureFile
+                    Path: textureFile,
+                    Line: line
                 };
                 textures.push(texture);
                 removeLastObject();
@@ -617,6 +767,112 @@ void main() {
                 }
                 removeLastObject();
                 break;
+            case ObjectType.Sound: {
+                const line = parser.line();
+                const glslVersionConfig = this.context.getConfig<string>('webglVersion');
+                const isGlslVersion3Mode = (glslVersionConfig === 'WebGL2');
+                if (!isGlslVersion3Mode) {
+                    this.showErrorAtLine(file, 'mainSound requires shader-toy.webglVersion set to "WebGL2".', line);
+                    removeLastObject();
+                    break;
+                }
+
+                const soundIndex = nextObject.Index;
+                if (!Number.isFinite(soundIndex)) {
+                    this.showErrorAtLine(file, '#iSound requires an explicit index in [0..9].', line);
+                    removeLastObject();
+                    break;
+                }
+                if (soundIndex < 0 || soundIndex > 9 || Math.floor(soundIndex) !== soundIndex) {
+                    this.showErrorAtLine(file, `#iSound index must be an integer in [0..9], got "${nextObject.Index}".`, line);
+                    removeLastObject();
+                    break;
+                }
+
+                const soundShaderFile = soundShaderFiles.get(soundIndex) ?? { Value: undefined };
+                const soundShaderLine = soundShaderLines.get(soundIndex) ?? { Value: undefined };
+                soundShaderFiles.set(soundIndex, soundShaderFile);
+                soundShaderLines.set(soundIndex, soundShaderLine);
+
+                if (soundShaderLine.Value !== undefined) {
+                    this.showErrorAtLine(file, `#iSound${soundIndex} was specified multiple times.`, line);
+                    removeLastObject();
+                    break;
+                }
+
+                let userPath = nextObject.Path;
+                const normalized = userPath.replace('file://', '');
+                if (normalized === 'default') {
+                    soundShaderFile.Value = undefined;
+                    soundShaderLine.Value = line;
+                    removeLastObject();
+                    break;
+                }
+                if (normalized === 'self') {
+                    this.showErrorAtLine(file, '#iSound "self" is not supported; use an explicit file path.', line);
+                    removeLastObject();
+                    break;
+                }
+
+                let local = false;
+                try {
+                    const soundUrl = new URL(userPath);
+                    if (soundUrl.protocol === 'file:') {
+                        local = true;
+                    }
+                }
+                catch {
+                    local = true;
+                }
+                if (!local) {
+                    this.showErrorAtLine(file, '#iSound only supports local files (file://...) for now.', line);
+                    removeLastObject();
+                    break;
+                }
+
+                userPath = userPath.replace('file://', '');
+                const mapped = await this.context.mapUserPath(userPath, file);
+                const mappedSoundFile = mapped.file;
+
+                if (path.extname(mappedSoundFile).toLowerCase() !== '.glsl') {
+                    this.showErrorAtLine(file, `#iSound expects a .glsl file, got "${userPath}"`, line);
+                    removeLastObject();
+                    break;
+                }
+
+                soundShaderFile.Value = mappedSoundFile;
+                soundShaderLine.Value = line;
+                this.registerSoundFile(soundIndex, mappedSoundFile);
+                removeLastObject();
+                break;
+            }
+            case ObjectType.SoundFormat: {
+                const line = parser.line();
+                const soundIndex = nextObject.Index;
+                const value = String(nextObject.Value);
+                const allowed = value === '32bFLOAT' || value === '16bFLOAT' || value === '16bPACK';
+                if (!allowed) {
+                    this.showErrorAtLine(file, `#iSound::Format must be "32bFLOAT", "16bFLOAT", or "16bPACK" (got "${value}").`, line);
+                    removeLastObject();
+                    break;
+                }
+
+                if (soundIndex === -1) {
+                    this.selfSoundPrecisions.set(file, value);
+                    removeLastObject();
+                    break;
+                }
+
+                if (soundIndex < 0 || soundIndex > 9 || Math.floor(soundIndex) !== soundIndex) {
+                    this.showErrorAtLine(file, `#iSound::Format index must be in [0..9] (got "${nextObject.Index}").`, line);
+                    removeLastObject();
+                    break;
+                }
+
+                this.soundIndexPrecisions.set(soundIndex, value);
+                removeLastObject();
+                break;
+            }
             case ObjectType.Include: {
                 const includeFile = (await this.context.mapUserPath(nextObject.Path, file)).file;
 
@@ -644,6 +900,8 @@ void main() {
                             include_line_offset,
                             include_vertex_file,
                             include_vertex_line,
+                            soundShaderFiles,
+                            soundShaderLines,
                             textures,
                             textureSettings,
                             uniforms,
