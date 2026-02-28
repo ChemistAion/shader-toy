@@ -9,6 +9,7 @@ import { Context } from './context';
 import { removeDuplicates } from './utility';
 import { FramesPanel } from './framespanel';
 import { ErrorsPanel } from './errorspanel';
+import { InspectPanel, InspectorMapping } from './inspectpanel';
 import { analyzeShader, ShaderWarning, WARNING_CATEGORIES } from './shaderanalysis';
 
 type Webview = {
@@ -28,12 +29,15 @@ export class ShaderToyManager {
     staticWebviews: StaticWebview[] = [];
     framesPanel: FramesPanel;
     errorsPanel: ErrorsPanel;
+    inspectPanel: InspectPanel;
     private analysisDiagnosticCollection: vscode.DiagnosticCollection;
+    private selectionListener: vscode.Disposable | undefined;
 
     constructor(context: Context) {
         this.context = context;
         this.framesPanel = new FramesPanel(context);
         this.errorsPanel = new ErrorsPanel(context);
+        this.inspectPanel = new InspectPanel(context);
         this.analysisDiagnosticCollection = vscode.languages.createDiagnosticCollection('shader-toy.analysis');
     }
 
@@ -170,6 +174,78 @@ export class ShaderToyManager {
         }
     };
 
+    public showInspectPanel = () => {
+        this.inspectPanel.show();
+
+        // Turn on inspector in preview webview
+        if (this.webviewPanel !== undefined) {
+            this.webviewPanel.Panel.webview.postMessage({ command: 'inspectorOn' });
+        }
+
+        // Register mapping change callback
+        this.inspectPanel.setOnMappingChanged((mapping: InspectorMapping) => {
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorMapping',
+                    mapping: mapping
+                });
+            }
+        });
+
+        // Register compare mode callback
+        this.inspectPanel.setOnCompareChanged((enabled: boolean) => {
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorCompare',
+                    enabled: enabled
+                });
+            }
+        });
+
+        // Start listening for text selection changes
+        this.startSelectionListener();
+    };
+
+    private startSelectionListener = () => {
+        if (this.selectionListener) return;
+
+        this.selectionListener = vscode.window.onDidChangeTextEditorSelection((event) => {
+            if (!this.inspectPanel.isActive) return;
+            const editor = event.textEditor;
+            const doc = editor.document;
+
+            // Only act on shader-like files
+            const lang = doc.languageId;
+            if (lang !== 'glsl' && lang !== 'hlsl' && !doc.fileName.match(/\.(glsl|frag|vert|comp|vs|fs|shader)$/i)) {
+                return;
+            }
+
+            const selection = editor.selection;
+            let selectedText: string;
+            if (selection.isEmpty) {
+                const wordRange = doc.getWordRangeAtPosition(selection.active, /[a-zA-Z_]\w*(\.[xyzwrgba]+)?/);
+                selectedText = wordRange ? doc.getText(wordRange) : '';
+            } else {
+                selectedText = doc.getText(selection).trim();
+            }
+
+            const line = selection.start.line + 1; // 1-based for GLSL
+
+            if (selectedText.length > 0 && selectedText.length < 200) {
+                // Send to preview webview
+                if (this.webviewPanel !== undefined) {
+                    this.webviewPanel.Panel.webview.postMessage({
+                        command: 'setInspectorVariable',
+                        variable: selectedText,
+                        line: line
+                    });
+                }
+                // Send to inspect panel
+                this.inspectPanel.postVariableUpdate(selectedText, line, '');
+            }
+        }, undefined, this.context.getVscodeExtensionContext().subscriptions);
+    };
+
     /**
      * Run static shader analysis and forward results to errors panel + diagnostics.
      */
@@ -221,6 +297,19 @@ export class ShaderToyManager {
                 case 'frameData':
                     if (this.framesPanel.isActive) {
                         this.framesPanel.postFrameData(message);
+                    }
+                    return;
+                case 'inspectorStatus':
+                    if (this.inspectPanel.isActive) {
+                        this.inspectPanel.postStatus(message.status, message.message);
+                        if (message.variable && message.type) {
+                            this.inspectPanel.postVariableUpdate(message.variable, 0, message.type);
+                        }
+                    }
+                    return;
+                case 'inspectorPixel':
+                    if (this.inspectPanel.isActive) {
+                        this.inspectPanel.postPixelValue(message.rgba, message.position);
                     }
                     return;
                 case 'readDDSFile':

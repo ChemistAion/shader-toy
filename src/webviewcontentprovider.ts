@@ -397,6 +397,9 @@ export class WebviewContentProvider {
 
             const webviewFrameTiming = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/frame_timing.js', getResourceText);
             this.webviewAssembler.addReplaceModule(webviewFrameTiming, '<!-- Webview frame_timing.js -->', '<!-- Webview frame_timing.js -->');
+
+            const webviewShaderInspect = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/shader_inspect.js', getResourceText);
+            this.webviewAssembler.addReplaceModule(webviewShaderInspect, '<!-- Webview shader_inspect.js -->', '<!-- Webview shader_inspect.js -->');
         }
 
         // Frame Timing — inject render loop hook
