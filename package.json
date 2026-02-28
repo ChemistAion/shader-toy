@@ -233,6 +233,10 @@
             {
                 "command": "shader-toy.showErrorsPanel",
                 "title": "Shader Toy: Show Shader Errors Panel"
+            },
+            {
+                "command": "shader-toy.showInspectPanel",
+                "title": "Shader Toy: Show Variable Inspector"
             }
         ],
         "menus": {

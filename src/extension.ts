@@ -94,6 +94,9 @@ export function activate(extensionContext: vscode.ExtensionContext) {
     const errorsCommand = vscode.commands.registerCommand('shader-toy.showErrorsPanel', () => {
         shadertoyManager.showErrorsPanel();
     });
+    const inspectCommand = vscode.commands.registerCommand('shader-toy.showInspectPanel', () => {
+        shadertoyManager.showInspectPanel();
+    });
     extensionContext.subscriptions.push(previewCommand);
     extensionContext.subscriptions.push(staticPreviewCommand);
     extensionContext.subscriptions.push(standaloneCompileCommand);
@@ -101,6 +104,7 @@ export function activate(extensionContext: vscode.ExtensionContext) {
     extensionContext.subscriptions.push(saveScreenshotsCommand);
     extensionContext.subscriptions.push(frameTimeCommand);
     extensionContext.subscriptions.push(errorsCommand);
+    extensionContext.subscriptions.push(inspectCommand);
 }
 
 export function deactivate() {

@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Variable Inspector</title>
+<style>
+    :root {
+        --bg: #1e1e1e;
+        --bg2: #252526;
+        --bg3: #2d2d2d;
+        --fg: #cccccc;
+        --fg2: #999999;
+        --accent: #007acc;
+        --accent-hover: #1a8ad4;
+        --success: #4ec9b0;
+        --error: #f44747;
+        --warning: #cca700;
+        --border: #3c3c3c;
+        --code-bg: #1a1a2e;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 13px;
+        color: var(--fg);
+        background: var(--bg);
+        padding: 12px;
+        line-height: 1.5;
+    }
+
+    /* ── Header ─────────────────────── */
+    .header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 12px;
+    }
+    .header .icon { font-size: 18px; }
+    .header h1 { font-size: 14px; font-weight: 600; }
+    .header .status-dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: var(--fg2);
+        margin-left: auto;
+    }
+    .header .status-dot.active { background: var(--success); }
+    .header .status-dot.error { background: var(--error); }
+
+    /* ── Variable Display ───────────── */
+    .variable-section {
+        background: var(--bg2);
+        border-radius: 6px;
+        padding: 10px 12px;
+        margin-bottom: 12px;
+    }
+    .variable-label {
+        font-size: 11px;
+        color: var(--fg2);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+    }
+    .variable-name {
+        font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+        font-size: 16px;
+        color: var(--success);
+        word-break: break-all;
+    }
+    .variable-name.empty { color: var(--fg2); font-style: italic; font-size: 13px; }
+    .variable-meta {
+        font-size: 11px;
+        color: var(--fg2);
+        margin-top: 2px;
+    }
+    .variable-meta .type-badge {
+        display: inline-block;
+        background: var(--accent);
+        color: white;
+        padding: 1px 6px;
+        border-radius: 3px;
+        font-size: 10px;
+        font-weight: 600;
+        margin-left: 4px;
+    }
+
+    /* ── Mapping Controls ───────────── */
+    .section { margin-bottom: 12px; }
+    .section-title {
+        font-size: 11px;
+        color: var(--fg2);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 6px;
+    }
+
+    .mode-buttons {
+        display: flex;
+        gap: 4px;
+    }
+    .mode-btn {
+        flex: 1;
+        padding: 5px 8px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg3);
+        color: var(--fg2);
+        cursor: pointer;
+        font-size: 12px;
+        transition: all 0.15s;
+    }
+    .mode-btn:hover { border-color: var(--accent); color: var(--fg); }
+    .mode-btn.active {
+        background: var(--accent);
+        color: white;
+        border-color: var(--accent);
+    }
+
+    .range-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-top: 8px;
+    }
+    .range-row label {
+        font-size: 12px;
+        color: var(--fg2);
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .range-row input[type="number"] {
+        width: 70px;
+        padding: 3px 6px;
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        background: var(--bg3);
+        color: var(--fg);
+        font-size: 12px;
+    }
+    .range-row input[type="number"]:focus {
+        outline: none;
+        border-color: var(--accent);
+    }
+
+    .checkbox-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 8px;
+    }
+    .checkbox-row label {
+        font-size: 12px;
+        color: var(--fg2);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    /* ── Pixel Readback ─────────────── */
+    .pixel-section {
+        background: var(--bg2);
+        border-radius: 6px;
+        padding: 10px 12px;
+        margin-bottom: 12px;
+    }
+    .pixel-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .color-swatch {
+        width: 32px;
+        height: 32px;
+        border-radius: 4px;
+        border: 1px solid var(--border);
+        background: black;
+        flex-shrink: 0;
+    }
+    .pixel-values {
+        font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+        font-size: 11px;
+        line-height: 1.6;
+    }
+    .pixel-values .ch-r { color: #f44747; }
+    .pixel-values .ch-g { color: #4ec9b0; }
+    .pixel-values .ch-b { color: #569cd6; }
+    .pixel-values .ch-a { color: #999; }
+
+    /* ── Status ──────────────────────── */
+    .status-section {
+        background: var(--bg2);
+        border-radius: 6px;
+        padding: 8px 12px;
+        font-size: 12px;
+        color: var(--fg2);
+    }
+    .status-section.error {
+        border-left: 3px solid var(--error);
+        color: var(--error);
+    }
+    .status-section.ok {
+        border-left: 3px solid var(--success);
+    }
+
+    /* ── Help ────────────────────────── */
+    .help-section {
+        margin-top: 16px;
+        padding-top: 12px;
+        border-top: 1px solid var(--border);
+        font-size: 11px;
+        color: var(--fg2);
+        line-height: 1.6;
+    }
+    .help-section kbd {
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 1px 4px;
+        font-size: 10px;
+    }
+</style>
+</head>
+<body>
+
+<div class="header">
+    <span class="icon">🔬</span>
+    <h1>Variable Inspector</h1>
+    <span class="status-dot" id="statusDot"></span>
+</div>
+
+<div class="variable-section">
+    <div class="variable-label">Inspecting</div>
+    <div class="variable-name empty" id="varName">Select an expression in the editor</div>
+    <div class="variable-meta" id="varMeta"></div>
+</div>
+
+<div class="section">
+    <div class="section-title">Mapping Mode</div>
+    <div class="mode-buttons">
+        <button class="mode-btn active" data-mode="linear">linear</button>
+        <button class="mode-btn" data-mode="sigmoid">sigmoid</button>
+        <button class="mode-btn" data-mode="log">log</button>
+    </div>
+    <div class="range-row">
+        <label>Min <input type="number" id="rangeMin" value="0" step="0.1" /></label>
+        <label>Max <input type="number" id="rangeMax" value="1" step="0.1" /></label>
+    </div>
+    <div class="checkbox-row">
+        <label>
+            <input type="checkbox" id="oorToggle" />
+            Highlight out-of-range
+        </label>
+    </div>
+    <div class="checkbox-row">
+        <label>
+            <input type="checkbox" id="compareToggle" />
+            Compare mode (raw values)
+        </label>
+    </div>
+</div>
+
+<div class="pixel-section">
+    <div class="variable-label">Pixel Value (hover over preview)</div>
+    <div class="pixel-row">
+        <div class="color-swatch" id="colorSwatch"></div>
+        <div class="pixel-values" id="pixelValues">
+            <span class="ch-r">R: —</span><br/>
+            <span class="ch-g">G: —</span><br/>
+            <span class="ch-b">B: —</span><br/>
+            <span class="ch-a">A: —</span>
+        </div>
+    </div>
+</div>
+
+<div class="status-section" id="statusSection">
+    Ready — select a variable in the shader editor
+</div>
+
+<div class="help-section">
+    <strong>Usage:</strong> Select any GLSL variable or expression in the editor while the preview is open.
+    The canvas will display per-pixel values as colors.<br/>
+    <strong>Tip:</strong> Add <kbd>// [0, 10]</kbd> comments next to variables to set custom value ranges.
+</div>
+
+<script>
+(function () {
+    // Acquire VSCode API
+    const vscode = (typeof acquireVsCodeApi === 'function') ? acquireVsCodeApi() : null;
+
+    // DOM refs
+    const varNameEl = document.getElementById('varName');
+    const varMetaEl = document.getElementById('varMeta');
+    const statusDot = document.getElementById('statusDot');
+    const statusSection = document.getElementById('statusSection');
+    const colorSwatch = document.getElementById('colorSwatch');
+    const pixelValues = document.getElementById('pixelValues');
+    const rangeMin = document.getElementById('rangeMin');
+    const rangeMax = document.getElementById('rangeMax');
+    const oorToggle = document.getElementById('oorToggle');
+    const compareToggle = document.getElementById('compareToggle');
+    const modeButtons = document.querySelectorAll('.mode-btn');
+
+    let currentMode = 'linear';
+
+    // ── Mapping change broadcast ───────────────────
+    function broadcastMapping() {
+        if (!vscode) return;
+        vscode.postMessage({
+            command: 'setMapping',
+            mapping: {
+                mode: currentMode,
+                min: parseFloat(rangeMin.value) || 0,
+                max: parseFloat(rangeMax.value) || 1,
+                highlightOutOfRange: oorToggle.checked
+            }
+        });
+    }
+
+    // Mode buttons
+    modeButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            modeButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentMode = btn.dataset.mode;
+            broadcastMapping();
+        });
+    });
+
+    // Range inputs
+    rangeMin.addEventListener('change', broadcastMapping);
+    rangeMax.addEventListener('change', broadcastMapping);
+    oorToggle.addEventListener('change', broadcastMapping);
+
+    // Compare toggle
+    compareToggle.addEventListener('change', () => {
+        if (vscode) {
+            vscode.postMessage({ command: 'setCompare', enabled: compareToggle.checked });
+        }
+    });
+
+    // ── Incoming messages ──────────────────────────
+    window.addEventListener('message', event => {
+        const msg = event.data;
+        switch (msg.command) {
+            case 'updateVariable':
+                if (msg.variable) {
+                    varNameEl.textContent = msg.variable;
+                    varNameEl.classList.remove('empty');
+                    let meta = `Line ${msg.line}`;
+                    if (msg.type) meta += ` <span class="type-badge">${msg.type}</span>`;
+                    varMetaEl.innerHTML = meta;
+                } else {
+                    varNameEl.textContent = 'Select an expression in the editor';
+                    varNameEl.classList.add('empty');
+                    varMetaEl.innerHTML = '';
+                }
+                break;
+
+            case 'inspectorStatus':
+                statusSection.textContent = msg.message || '';
+                statusSection.className = 'status-section';
+                statusDot.className = 'status-dot';
+                if (msg.status === 'ok') {
+                    statusSection.classList.add('ok');
+                    statusDot.classList.add('active');
+                } else if (msg.status === 'error') {
+                    statusSection.classList.add('error');
+                    statusDot.classList.add('error');
+                }
+                break;
+
+            case 'pixelValue':
+                if (msg.rgba) {
+                    const [r, g, b, a] = msg.rgba;
+                    const r8 = Math.round(r * 255), g8 = Math.round(g * 255),
+                          b8 = Math.round(b * 255), a8 = Math.round(a * 255);
+                    colorSwatch.style.background = `rgba(${r8},${g8},${b8},${a / 1})`;
+                    pixelValues.innerHTML =
+                        `<span class="ch-r">R: ${r.toFixed(4)}</span><br/>` +
+                        `<span class="ch-g">G: ${g.toFixed(4)}</span><br/>` +
+                        `<span class="ch-b">B: ${b.toFixed(4)}</span><br/>` +
+                        `<span class="ch-a">A: ${a.toFixed(4)}</span>`;
+                }
+                break;
+        }
+    });
+})();
+</script>
+</body>
+</html>

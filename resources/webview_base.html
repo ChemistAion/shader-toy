@@ -169,6 +169,7 @@
 <!-- Webview time_input.js -->
 <!-- Webview audio_output.js -->
 <!-- Webview frame_timing.js -->
+<!-- Webview shader_inspect.js -->
 <!-- Webview render_loop.js -->
 
 <script type="text/javascript">
@@ -300,6 +301,15 @@
                     window.ShaderToy.hotReload(message.payload);
                 }
                 break;
+            case 'setInspectorVariable':
+            case 'setInspectorMapping':
+            case 'inspectorOn':
+            case 'inspectorOff':
+            case 'setInspectorCompare':
+                if (window.ShaderToy && window.ShaderToy.inspector) {
+                    window.ShaderToy.inspector.handleMessage(message);
+                }
+                break;
         }
     });
 
@@ -424,6 +434,11 @@
 
         compileAllShaders();
         forceRenderOneFrame = true;
+
+        // Notify inspector to clear stale material references
+        if (window.ShaderToy && window.ShaderToy.inspector && window.ShaderToy.inspector.onHotReload) {
+            window.ShaderToy.inspector.onHotReload();
+        }
     };
 
     let updateDebugOverlay = function() {
