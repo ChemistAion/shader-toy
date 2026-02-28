@@ -44,6 +44,51 @@
             z-index: 2;
             position: absolute;
         }
+        #gesture-overlay {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            padding: 10px 14px;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: #ff4d4d;
+            font-family: Consolas;
+            font-size: 14px;
+            border: 1px solid rgba(255, 77, 77, 0.6);
+            border-radius: 6px;
+            z-index: 6;
+            display: none;
+            pointer-events: none;
+        }
+        body.gesture-locked #pause-button,
+        body.gesture-locked .button-container,
+        body.gesture-locked .pause-play,
+        body.gesture-locked #container,
+        body.gesture-locked #screenshot,
+        body.gesture-locked #record,
+        body.gesture-locked #sound-button,
+        body.gesture-locked #reload,
+        body.gesture-locked #debug-overlay {
+            visibility: hidden;
+        }
+        #debug-overlay {
+            font-family: Consolas;
+            font-size: 11px;
+            color: #e6e6e6;
+            background-color: rgba(0, 0, 0, 0.7);
+            white-space: pre;
+            padding: 6px 8px;
+            border-radius: 4px;
+            z-index: 4;
+            position: absolute;
+            left: 8px;
+            bottom: 72px;
+            max-width: 80vw;
+            max-height: 40vh;
+            overflow: auto;
+            pointer-events: auto;
+            user-select: text;
+        }
 
         #dat_gui_container {
             position: absolute;
@@ -70,21 +115,29 @@
         .rec_base:nth-of-type(2) {
             top: 60px;
         }
+        #sound-button {
+            top: 120px;
+        }
         
         /* Screenshot Button Style */
         
         /* Record Button Style */
 
         /* Reload Button Style */
+
+        /* Sound Button Style */
     </style>
 </head>
 <body>
     <div id="message"></div>
+    <div id="gesture-overlay"></div>
+    <div id="debug-overlay"></div>
     <div id="dat_gui_container"></div>
     <div id="container">
         <!-- Pause Element -->
     </div>
     <!-- Screenshot Element -->
+    <!-- Sound Element -->
     <!-- Record Element -->
     <!-- Reload Element -->
 </body>
@@ -109,9 +162,13 @@
 <!-- Webview runtime_env.js -->
 <!-- Webview glsl_error_hook.js -->
 <!-- Webview shader_compile.js -->
+<!-- Webview audio_shader_wrapper.js -->
+<!-- Audio Worklet Source -->
 <!-- Webview ui_controls.js -->
 <!-- Webview gl_context.js -->
 <!-- Webview time_input.js -->
+<!-- Webview audio_output.js -->
+<!-- Webview frame_timing.js -->
 <!-- Webview render_loop.js -->
 
 <script type="text/javascript">
@@ -120,6 +177,8 @@
         vscode = acquireVsCodeApi();
     }
     var compileTimePanel;
+    const gestureOverlay = document.getElementById('gesture-overlay');
+    const debugOverlay = document.getElementById('debug-overlay');
 
     let revealError = function(line, file) {
         if (vscode) {
@@ -196,6 +255,7 @@
             recordButton.addEventListener('click', recordAction);
         }
     }
+
     
     {
         let reloadButton = document.getElementById("reload");
@@ -230,8 +290,159 @@
             case 'screenshot':
                 saveScreenshot();
                 break;
+            case 'enableFrameTiming':
+                if (window.ShaderToy && window.ShaderToy.frameTiming) {
+                    window.ShaderToy.frameTiming.setEnabled(true);
+                }
+                break;
+            case 'hotReload':
+                if (window.ShaderToy && window.ShaderToy.hotReload) {
+                    window.ShaderToy.hotReload(message.payload);
+                }
+                break;
         }
     });
+
+    function replaceShaderNodes(selector, html) {
+        const existing = document.querySelectorAll(selector);
+        existing.forEach((node) => node.parentNode && node.parentNode.removeChild(node));
+        if (!html) {
+            return;
+        }
+        const container = document.createElement('div');
+        container.innerHTML = html;
+        const nodes = Array.from(container.childNodes);
+        for (const node of nodes) {
+            document.body.appendChild(node);
+        }
+    }
+
+    window.ShaderToy = window.ShaderToy || {};
+    window.ShaderToy.hotReload = function(payload) {
+        if (!payload) {
+            return;
+        }
+
+        const messageElement = document.getElementById('message');
+        if (messageElement) {
+            messageElement.innerHTML = '';
+        }
+
+        if (payload.state) {
+            if (typeof payload.state.time === 'number') {
+                startingTime = payload.state.time;
+                time = payload.state.time;
+            }
+            if (typeof payload.state.paused === 'boolean') {
+                paused = payload.state.paused;
+                if (pauseButton) {
+                    pauseButton.checked = paused;
+                }
+            }
+            if (payload.state.mouse) {
+                mouse = new THREE.Vector4(payload.state.mouse.x, payload.state.mouse.y, payload.state.mouse.z, payload.state.mouse.w);
+            }
+            if (payload.state.normalizedMouse) {
+                normalizedMouse = new THREE.Vector2(payload.state.normalizedMouse.x, payload.state.normalizedMouse.y);
+            }
+            if (payload.state.flyControlPosition) {
+                controlState.position.set(payload.state.flyControlPosition[0], payload.state.flyControlPosition[1], payload.state.flyControlPosition[2]);
+            }
+            if (payload.state.flyControlRotation) {
+                controlState.quaternion.set(payload.state.flyControlRotation[0], payload.state.flyControlRotation[1], payload.state.flyControlRotation[2], payload.state.flyControlRotation[3]);
+            }
+            if (!paused) {
+                pausedTime = 0.0;
+            }
+
+            if (window.ShaderToy && window.ShaderToy.audioOutput) {
+                if (paused && window.ShaderToy.audioOutput.pause) {
+                    window.ShaderToy.audioOutput.pause();
+                }
+
+                if (!paused && window.ShaderToy.audioOutput.resume) {
+                    window.ShaderToy.audioOutput.resume(true);
+                }
+            }
+        }
+
+        replaceShaderNodes("[data-shadertoy='include']", payload.includesHtml);
+        replaceShaderNodes("[data-shadertoy='shader']", payload.shadersHtml);
+
+        if (payload.initScript) {
+            try {
+                if (buffers && buffers.length) {
+                    for (const buffer of buffers) {
+                        try {
+                            if (buffer.Shader && buffer.Shader.dispose) {
+                                buffer.Shader.dispose();
+                            }
+                        } catch { /* ignore */ }
+                        try {
+                            if (buffer.Target && buffer.Target.dispose) {
+                                buffer.Target.dispose();
+                            }
+                        } catch { /* ignore */ }
+                        try {
+                            if (buffer.PingPongTarget && buffer.PingPongTarget.dispose) {
+                                buffer.PingPongTarget.dispose();
+                            }
+                        } catch { /* ignore */ }
+                    }
+                }
+
+                (0, eval)(payload.initScript);
+                computeSize();
+            }
+            catch (e) {
+                try { console.error(e); } catch { /* ignore */ }
+                if (vscode) {
+                    vscode.postMessage({
+                        command: 'errorMessage',
+                        message: 'Hot reload failed during init script: ' + (e && (e.stack || e.message) ? (e.stack || e.message) : String(e))
+                    });
+                }
+            }
+        }
+
+        if (glslUseVersion3 && window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.reloadFromGlobals) {
+            window.ShaderToy.audioOutput.reloadFromGlobals({
+                buffers: buffers,
+                renderer: renderer,
+                gl: gl,
+                glslUseVersion3: glslUseVersion3,
+                prepareFragmentShader: prepareFragmentShader,
+                prepareVertexShader: prepareVertexShader,
+                audioContext: audioContext,
+                precision: audioOutputPrecision,
+                blockSize: audioBlockSize,
+                audioWorkletUrl: audioWorkletUrl,
+                showSoundButton: showSoundButton,
+                paused: paused
+            });
+        }
+
+        compileAllShaders();
+        forceRenderOneFrame = true;
+    };
+
+    let updateDebugOverlay = function() {
+        if (!debugOverlay) {
+            return;
+        }
+        let lines = [];
+        if (window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.getOverlayLines) {
+            lines = window.ShaderToy.audioOutput.getOverlayLines() || [];
+        }
+        if (lines.length) {
+            debugOverlay.textContent = lines.join('\n');
+            debugOverlay.style.display = 'block';
+        }
+        else {
+            debugOverlay.textContent = '';
+            debugOverlay.style.display = 'none';
+        }
+    };
 
     // GLSL version selection
     // Values: 'Default' | 'WebGL2'
@@ -286,6 +497,82 @@
     let commonIncludes = [];
     // Includes
 
+    const hasSoundBuffer = buffers.some((buffer) => buffer && buffer.IsSound);
+    const audioOutputPrecision = '<!-- Audio Output Precision -->';
+    const audioBlockSizeRaw = '<!-- Audio Block Size -->';
+    const audioBlockSize = Number(audioBlockSizeRaw) || 1024;
+    const audioWorkletUrl = '<!-- Audio Worklet Processor -->';
+    const showSoundButtonRaw = '<!-- Show Sound Button -->';
+    const showSoundButton = showSoundButtonRaw !== 'false';
+    {
+        let soundButton = document.getElementById("sound-button");
+        if (soundButton) {
+            if (!showSoundButton) {
+                soundButton.style.display = 'none';
+            }
+            else {
+                let soundEnabled = true;
+                soundButton.classList.add('sound-on');
+                soundButton.addEventListener('click', () => {
+                    soundEnabled = !soundEnabled;
+                    soundButton.classList.toggle('sound-on', soundEnabled);
+                    soundButton.classList.toggle('sound-off', !soundEnabled);
+
+                    if (window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.setOutputEnabled) {
+                        window.ShaderToy.audioOutput.setOutputEnabled(soundEnabled);
+                    }
+                });
+            }
+        }
+    }
+    if (!glslUseVersion3 && hasSoundBuffer && vscode !== undefined) {
+        vscode.postMessage({
+            command: 'errorMessage',
+            message: 'mainSound requires shader-toy.webglVersion set to "WebGL2".'
+        });
+    }
+    const needsAudioGesture = glslUseVersion3 && hasSoundBuffer && audioContext && audioContext.state !== 'running';
+    if (gestureOverlay) {
+        if (needsAudioGesture) {
+            gestureOverlay.textContent = 'Audio output is blocked (due to WebAudio autoplay gesture policy) until you provide a user action to the GLSL-preview.';
+            gestureOverlay.style.display = 'block';
+            document.body.classList.add('gesture-locked');
+        }
+        else {
+            gestureOverlay.textContent = '';
+            gestureOverlay.style.display = 'none';
+            document.body.classList.remove('gesture-locked');
+        }
+    }
+    if (needsAudioGesture) {
+        const clearGestureOverlay = () => {
+            if (gestureOverlay) {
+                gestureOverlay.textContent = '';
+                gestureOverlay.style.display = 'none';
+            }
+            document.body.classList.remove('gesture-locked');
+        };
+        window.addEventListener('pointerdown', clearGestureOverlay, { once: true });
+        window.addEventListener('keydown', clearGestureOverlay, { once: true });
+    }
+    if (glslUseVersion3 && window.ShaderToy && window.ShaderToy.audioOutput && window.ShaderToy.audioOutput.initFromGlobals) {
+        window.ShaderToy.audioOutput.initFromGlobals({
+            buffers: buffers,
+            renderer: renderer,
+            gl: gl,
+            glslUseVersion3: glslUseVersion3,
+            prepareFragmentShader: prepareFragmentShader,
+            prepareVertexShader: prepareVertexShader,
+            audioContext: audioContext,
+            precision: audioOutputPrecision,
+            blockSize: audioBlockSize,
+            audioWorkletUrl: audioWorkletUrl,
+            showSoundButton: showSoundButton,
+            paused: paused,
+            autoStart: true
+        });
+    }
+
     // WebGL2 inserts more lines into the shader
     if (isWebGL2) {
         for (let buffer of buffers) {
@@ -329,53 +616,60 @@
     let camera = new THREE.OrthographicCamera(-resolution.x / 2.0, resolution.x / 2.0, resolution.y / 2.0, -resolution.y / 2.0, 1, 1000);
     camera.position.set(0, 0, 10);
 
-    // Run every shader once to check for compile errors
-    let compileTimeStart = performance.now();
-    let failed=0;
     const failedBufferNames = new Set();
-    for (let include of commonIncludes) {
-        currentShader = {
-            Name: include.Name,
-            File: include.File,
-            // add for wrapper lines inserted by compileFragShader
-            LineOffset: <!-- Preamble Line Numbers --> + 2 + (isWebGL2 ? WEBGL2_EXTRA_SHADER_LINES : 0)
-        };
-        // Test Compile Included Files
-    }
-
-    for (let buffer of buffers) {
-        if (buffer.VertexShaderElementId !== undefined) {
+    function compileAllShaders() {
+        // Run every shader once to check for compile errors
+        let compileTimeStart = performance.now();
+        let failed = 0;
+        failedBufferNames.clear();
+        for (let include of commonIncludes) {
             currentShader = {
-                Name: buffer.Name + ' (vertex)',
-                File: buffer.VertexFile,
-                LineOffset: buffer.VertexLineOffset
+                Name: include.Name,
+                File: include.File,
+                // add for wrapper lines inserted by compileFragShader
+                LineOffset: <!-- Preamble Line Numbers --> + 2 + (isWebGL2 ? WEBGL2_EXTRA_SHADER_LINES : 0)
             };
+            // Test Compile Included Files
+        }
 
-            const vertexSource = prepareVertexShader(document.getElementById(buffer.VertexShaderElementId).textContent);
-            if (!compileVertShader(gl, vertexSource)) {
-                failed++;
-                failedBufferNames.add(buffer.Name);
+        for (let buffer of buffers) {
+            if (buffer.IsSound || !buffer.Shader) {
                 continue;
             }
+            if (buffer.VertexShaderElementId !== undefined) {
+                currentShader = {
+                    Name: buffer.Name + ' (vertex)',
+                    File: buffer.VertexFile,
+                    LineOffset: buffer.VertexLineOffset
+                };
+
+                const vertexSource = prepareVertexShader(document.getElementById(buffer.VertexShaderElementId).textContent);
+                if (!compileVertShader(gl, vertexSource)) {
+                    failed++;
+                    failedBufferNames.add(buffer.Name);
+                    continue;
+                }
+            }
+            currentShader = {
+                Name: buffer.Name,
+                File: buffer.File,
+                LineOffset: buffer.LineOffset
+            };
+            quad.material = buffer.Shader;
+            renderer.setRenderTarget(buffer.Target);
+            renderer.render(scene, camera);
         }
-        currentShader = {
-            Name: buffer.Name,
-            File: buffer.File,
-            LineOffset: buffer.LineOffset
-        };
-        quad.material = buffer.Shader;
-        renderer.setRenderTarget(buffer.Target);
-        renderer.render(scene, camera);
-    }
-    currentShader = {};
-    let compileTimeEnd = performance.now();
-    let compileTime = compileTimeEnd - compileTimeStart;
-    if (compileTimePanel !== undefined) {
-        for (let i = 0; i < 200; i++) {
-            compileTimePanel.update(compileTime, 200);
+        currentShader = {};
+        let compileTimeEnd = performance.now();
+        let compileTime = compileTimeEnd - compileTimeStart;
+        if (compileTimePanel !== undefined) {
+            for (let i = 0; i < 200; i++) {
+                compileTimePanel.update(compileTime, 200);
+            }
         }
     }
 
+    compileAllShaders();
     computeSize();
     render();
 
@@ -417,8 +711,12 @@
         }
 
         // Audio Update
+        updateDebugOverlay();
 
         for (let buffer of buffers) {
+            if (!buffer || buffer.IsSound || !buffer.Shader) {
+                continue;
+            }
             if (failedBufferNames.has(buffer.Name)) {
                 continue;
             }
@@ -450,6 +748,9 @@
         }
 
         for (let buffer of buffers) {
+            if (!buffer || buffer.IsSound || !buffer.Shader) {
+                continue;
+            }
             if (buffer.PingPongTarget) {
                 [buffer.PingPongTarget, buffer.Target] = [buffer.Target, buffer.PingPongTarget];
                 buffer.Shader.uniforms[`iChannel${buffer.PingPongChannel}`].value = buffer.PingPongTarget.texture;
@@ -465,6 +766,8 @@
         }
 
         frameCounter++;
+
+        // Frame Timing
     }
     function forceAspectRatio(width, height) {
         // Forced aspect ratio

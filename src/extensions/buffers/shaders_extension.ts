@@ -22,20 +22,20 @@ export class ShadersExtension implements WebviewExtension {
                 }
             }
             this.content += `\
-<script id='${buffer.Name}' type='x-shader/x-fragment'>
+<textarea data-shadertoy='shader' id='${buffer.Name}' style='display:none'>
 ${preamble}
 ${keyboardShaderExtension !== undefined ? keyboardShaderExtension.getShaderPreamble() : ''}
 #line 1 0
 ${buffer.Code}
-</script>`;
+</textarea>`;
 
             if (buffer.VertexCode !== undefined) {
                 this.content += `\
-<script id='${buffer.Name}_vertex' type='x-shader/x-vertex'>
+<textarea data-shadertoy='shader' id='${buffer.Name}_vertex' style='display:none'>
 ${preamble}
 ${keyboardShaderExtension !== undefined ? keyboardShaderExtension.getShaderPreamble() : ''}
 ${buffer.VertexCode}
-</script>`;
+</textarea>`;
             }
         }
     }
