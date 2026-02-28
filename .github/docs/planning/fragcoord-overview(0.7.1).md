@@ -250,7 +250,7 @@ The heatmap now measures **shader complexity** (instruction count per pixel) rat
 |--------|---------|-----|
 | `xM` | Heatmap overlay — thermalRamp/grayscaleRamp coloring from instruction-count texture | `071_heatmap_shader_xM_full.txt` (L191–224) |
 | `yM` | SIMD downsample — max-pool source pixels into grid cells | `071_heatmap_shader_yM_full.txt` (L225–244) |
-| `mM` | Simple downsample | `071_heatmap_shader_mM_full.txt` (L174) |
+| `mM` | Simple downsample | `071_heatmap_shader_mM.txt` (L174) |
 
 ---
 

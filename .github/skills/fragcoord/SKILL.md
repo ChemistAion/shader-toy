@@ -1,15 +1,24 @@
+---
+name: fragcoord
+description: Reference skill for FragCoord v0.7.1 architecture and feature-transplant guidance (inspect, errors, frames, heatmap) for shader tooling projects.
+---
+
 # FragCoord.xyz v0.7.1 — AI Agent SKILL File
 
 > **Purpose**: Comprehensive reference for AI coding agents implementing FragCoord-style shader debugging features in WebGL/WebView-based projects (e.g., VSCode extensions).
 >
-> **Companion files** (assume co-located):
-> - `fragcoord-overview(0.7.1).md` — Full architecture overview
-> - `fragcoord-inspect(0.7.1)-REPORT.md` — Variable inspector deep-dive
-> - `fragcoord-errors(0.7.1)-REPORT.md` — Error diagnostics deep-dive
-> - `fragcoord-frames(0.7.1)-REPORT.md` — Frame timing deep-dive
-> - `fragcoord-heatmap(0.7.1)-REPORT.md` — Heatmap/instruction-counting deep-dive
-> - `fragcoord-transplant-plan(0.7.1).md` — VSCode transplant plan with code snippets
-> - `inspector(0.7.1)/` — 113 extracted evidence snippets (`071_*.txt`)
+> **Primary references in this repository**:
+> - `.github/docs/planning/fragcoord-overview(0.7.1).md` — Full architecture overview
+> - `references/fragcoord/fragcoord-inspect(0.7.1)-REPORT.md` — Variable inspector deep-dive
+> - `references/fragcoord/fragcoord-errors(0.7.1)-REPORT.md` — Error diagnostics deep-dive
+> - `references/fragcoord/fragcoord-frames(0.7.1)-REPORT.md` — Frame timing deep-dive
+> - `references/fragcoord/fragcoord-heatmap(0.7.1)-REPORT.md` — Heatmap/instruction-counting deep-dive
+> - `.github/docs/planning/fragcoord-transplant-plan(0.7.1).md` — VSCode transplant plan with code snippets
+> - `references/fragcoord/inspector(0.7.1)/` — 113 extracted evidence snippets (`071_*.txt`)
+>
+> **Path shorthand used below**:
+> - `fragcoord-*.md` / `fragcoord-*-REPORT.md` refer to files under `references/fragcoord/` unless an explicit path is shown.
+> - `071_*.txt` snippet names refer to `references/fragcoord/inspector(0.7.1)/`.
 
 ---
 
@@ -85,7 +94,7 @@ Every inspector sub-mode follows this pattern:
 ## 2. Feature: Variable Inspector (Inspect)
 
 **Primary Reference**: `fragcoord-inspect(0.7.1)-REPORT.md` (all sections)
-**Evidence Snippets**: `inspector(0.7.1)/071_inspmap_full_pipeline.txt`, `071_shader_rewriting_Bj.txt`, `071_compare_mode.txt`, `071_histogram_pipeline.txt`
+**Evidence Snippets**: `inspector(0.7.1)/071_inspmap_full_pipeline.txt`, `071_inspmap_generation.txt`, `071_compare_scissor.txt`, `071_histogram_processing.txt`
 
 ### 2.1 Machinery Overview
 
@@ -163,7 +172,7 @@ Uses WebGL **scissor test** to render original shader on one side, inspected on 
 - **Sample grid**: reads pixel values across viewport at regular intervals
 - **Binning**: values mapped to N bins (typically 64 or 128)
 - **Rendering**: horizontal bar chart in sidebar
-- **See**: `fragcoord-inspect(0.7.1)-REPORT.md` §5, snippet `071_histogram_pipeline.txt`
+- **See**: `fragcoord-inspect(0.7.1)-REPORT.md` §5, snippet `071_histogram_processing.txt`
 
 ### 2.8 Transplant Notes
 
@@ -180,7 +189,7 @@ Uses WebGL **scissor test** to render original shader on one side, inspected on 
 ## 3. Feature: Error Diagnostics (Errors)
 
 **Primary Reference**: `fragcoord-errors(0.7.1)-REPORT.md` (all sections)
-**Evidence Snippets**: `inspector(0.7.1)/071_nan_inf_oor_full.txt`, `071_shader_warnings_full.txt`, `071_compile_error_parsing.txt`, `071_error_overlay.txt`
+**Evidence Snippets**: `inspector(0.7.1)/071_nan_inf_oor_full.txt`, `071_shader_warnings_full.txt`, `071_shader_error_parsing.txt`, `071_diagnostic_overlay_render.txt`
 
 ### 3.1 Three-Layer Error Detection
 
@@ -270,7 +279,7 @@ Each warning produces: `{ kind, color, description, line, column }`
 ## 4. Feature: Frame Timing (Frames)
 
 **Primary Reference**: `fragcoord-frames(0.7.1)-REPORT.md` (all sections)
-**Evidence Snippets**: `inspector(0.7.1)/071_FrameTimeGraph_Q8.txt`, `071_gpu_timer_query.txt`, `071_frame_ring_buffer.txt`, `071_frame_statistics.txt`
+**Evidence Snippets**: `inspector(0.7.1)/071_FrameTimeGraph_Q8.txt`, `071_gpu_timer_query.txt`, `071_frame_time_callback.txt`
 
 ### 4.1 Dual Timing Sources
 
@@ -302,7 +311,7 @@ Four functions manage the async GPU timer lifecycle:
 - `slice(start, end)` handles wrap-around correctly
 - `toArray()` returns ordered copy for rendering
 
-**See**: `fragcoord-frames(0.7.1)-REPORT.md` §4, snippet `071_frame_ring_buffer.txt`
+**See**: `fragcoord-frames(0.7.1)-REPORT.md` §4, snippet `071_FrameTimeGraph_Q8.txt`
 
 ### 4.4 Statistics Engine
 
@@ -321,7 +330,7 @@ Four functions manage the async GPU timer lifecycle:
 - Formula: `result = alpha * current + (1 - alpha) * previous`
 - Applied to displayed statistics for smooth updates
 
-**See**: `fragcoord-frames(0.7.1)-REPORT.md` §5, snippet `071_frame_statistics.txt`
+**See**: `fragcoord-frames(0.7.1)-REPORT.md` §5, snippet `071_FrameTimeGraph_Q8.txt`
 
 ### 4.5 Canvas Graph (Q8 Component)
 
@@ -362,7 +371,7 @@ Four functions manage the async GPU timer lifecycle:
 ## 5. Feature: Performance Heatmap
 
 **Primary Reference**: `fragcoord-heatmap(0.7.1)-REPORT.md` (all sections)
-**Evidence Snippets**: `inspector(0.7.1)/071_heatmap_rewriting_full.txt`, `071_heatmap_overlay.txt`, `071_heatmap_line_counts.txt`, `071_heatmap_downsample.txt`
+**Evidence Snippets**: `inspector(0.7.1)/071_heatmap_rewriting_full.txt`, `071_heatmap_overlay.txt`, `071_heatmap_rewrite_Cj.txt`, `071_heatmap_shader_mM.txt`
 
 ### 5.1 Major Architecture Change (0.6.2 → 0.7.1)
 
@@ -406,7 +415,7 @@ Three-function pipeline:
 
 **Display**: editor gutter annotations showing relative cost per line (colored bars, numeric counts).
 
-**See**: `fragcoord-heatmap(0.7.1)-REPORT.md` §3, snippet `071_heatmap_line_counts.txt`
+**See**: `fragcoord-heatmap(0.7.1)-REPORT.md` §3, snippet `071_heatmap_rewrite_Cj.txt`
 
 ### 5.4 GPU Downsample Pipeline
 
@@ -446,7 +455,7 @@ Alternative: `grayscaleRamp` (linear black→white)
 
 **Compositing**: overlay blended on top of original render with configurable opacity.
 
-**See**: `fragcoord-heatmap(0.7.1)-REPORT.md` §4-§5, snippets `071_heatmap_overlay.txt`, `071_heatmap_downsample.txt`
+**See**: `fragcoord-heatmap(0.7.1)-REPORT.md` §4-§5, snippets `071_heatmap_overlay.txt`, `071_heatmap_shader_mM.txt`
 
 ### 5.7 Transplant Notes
 
@@ -623,33 +632,32 @@ Recommended WebView ↔ Extension Host protocol:
 
 | File | Content | Key Sections to Reference |
 |------|---------|--------------------------|
-| `fragcoord-overview(0.7.1).md` | Architecture, components, data flow | §1 Bundle, §3 State, §4 WebGL, §5 Rewriting, §6 Heatmap |
-| `fragcoord-inspect(0.7.1)-REPORT.md` | Inspector deep-dive | §2 Selection, §3 Rewriting, §4 Compare, §5 Histogram |
-| `fragcoord-errors(0.7.1)-REPORT.md` | Error diagnostics | §2 Compile, §3 NaN Probe, §4 Shader Analysis |
-| `fragcoord-frames(0.7.1)-REPORT.md` | Frame timing | §2 GPU Timer, §4 Ring Buffer, §5 Stats, §6 Canvas |
-| `fragcoord-heatmap(0.7.1)-REPORT.md` | Heatmap | §2 Instrumentation, §3 Per-Line, §4 GPU Pipeline, §5 Overlay |
-| `fragcoord-transplant-plan(0.7.1).md` | VSCode plan | §1 Arch, §2 Errors, §3 Inspect, §4 Frames, §5 Heatmap, §6 Shared, §7 Roadmap |
+| `references/fragcoord/fragcoord-overview(0.7.1).md` | Architecture, components, data flow | §1 Bundle, §3 State, §4 WebGL, §5 Rewriting, §6 Heatmap |
+| `references/fragcoord/fragcoord-inspect(0.7.1)-REPORT.md` | Inspector deep-dive | §2 Selection, §3 Rewriting, §4 Compare, §5 Histogram |
+| `references/fragcoord/fragcoord-errors(0.7.1)-REPORT.md` | Error diagnostics | §2 Compile, §3 NaN Probe, §4 Shader Analysis |
+| `references/fragcoord/fragcoord-frames(0.7.1)-REPORT.md` | Frame timing | §2 GPU Timer, §4 Ring Buffer, §5 Stats, §6 Canvas |
+| `references/fragcoord/fragcoord-heatmap(0.7.1)-REPORT.md` | Heatmap | §2 Instrumentation, §3 Per-Line, §4 GPU Pipeline, §5 Overlay |
+| `references/fragcoord/fragcoord-transplant-plan(0.7.1).md` | VSCode plan | §1 Arch, §2 Errors, §3 Inspect, §4 Frames, §5 Heatmap, §6 Shared, §7 Roadmap |
 
-### Key Evidence Snippets (inspector(0.7.1)/)
+### Key Evidence Snippets (`references/fragcoord/inspector(0.7.1)/`)
 
 | Snippet File | What It Contains |
 |-------------|------------------|
 | `071_inspmap_full_pipeline.txt` | Complete Bj() rewriting pipeline |
-| `071_shader_rewriting_Bj.txt` | Bj() function detail |
-| `071_compare_mode.txt` | Compare/scissor mode implementation |
-| `071_histogram_pipeline.txt` | Histogram sampling and binning |
+| `071_inspmap_generation.txt` | Bj()/Oj() generation details |
+| `071_compare_scissor.txt` | Compare/scissor mode implementation |
+| `071_histogram_processing.txt` | Histogram sampling and binning |
 | `071_nan_inf_oor_full.txt` | Complete NaN/Inf/OOR detection code |
 | `071_shader_warnings_full.txt` | Mj() all 9 warning categories |
-| `071_compile_error_parsing.txt` | Xd() compile error parsing |
-| `071_error_overlay.txt` | Error pixel overlay rendering |
+| `071_shader_error_parsing.txt` | Xd() compile error parsing |
+| `071_diagnostic_overlay_render.txt` | Error pixel overlay rendering |
 | `071_FrameTimeGraph_Q8.txt` | Complete Q8 canvas graph component |
 | `071_gpu_timer_query.txt` | _M/CM/EM/SM GPU timer functions |
-| `071_frame_ring_buffer.txt` | l2 ring buffer class |
-| `071_frame_statistics.txt` | xb() statistics computation |
+| `071_frame_time_callback.txt` | Frame-time callback wiring in viewport |
 | `071_heatmap_rewriting_full.txt` | Oh/z8/W8/_0/V8 instrumentation chain |
 | `071_heatmap_overlay.txt` | bM()/xM overlay shader + compositing |
-| `071_heatmap_downsample.txt` | wM/yM/M3/mM downsample pipeline |
-| `071_heatmap_line_counts.txt` | $8/_j/Cj per-line count pipeline |
+| `071_heatmap_shader_mM.txt` | mM downsample shader pipeline |
+| `071_heatmap_rewrite_Cj.txt` | Cj per-line count aggregation |
 
 ---
 
@@ -657,7 +665,7 @@ Recommended WebView ↔ Extension Host protocol:
 
 1. **Start with this SKILL file** for architecture overview and function-level understanding.
 2. **Dive into specific REPORTs** (linked above) for implementation details and rationale.
-3. **Check evidence snippets** in `inspector(0.7.1)/` for actual minified source extracts.
+3. **Check evidence snippets** in `references/fragcoord/inspector(0.7.1)/` for actual minified source extracts.
 4. **Follow transplant plan** priority order (P0→P5) for incremental implementation.
 5. **Shader rewriting is the core technique** — all features work by modifying GLSL source before compilation.
 6. **Float FBO is prerequisite** for inspect, errors (NaN), and heatmap — implement this first in shared infrastructure.
