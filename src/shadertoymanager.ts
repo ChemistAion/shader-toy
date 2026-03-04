@@ -10,6 +10,7 @@ import { removeDuplicates } from './utility';
 import { FramesPanel } from './framespanel';
 import { ErrorsPanel } from './errorspanel';
 import { InspectPanel, InspectorMapping } from './inspectpanel';
+import { HeatmapPanel } from './heatmappanel';
 import { analyzeShader, ShaderWarning, WARNING_CATEGORIES } from './shaderanalysis';
 
 type Webview = {
@@ -30,14 +31,17 @@ export class ShaderToyManager {
     framesPanel: FramesPanel;
     errorsPanel: ErrorsPanel;
     inspectPanel: InspectPanel;
+    heatmapPanel: HeatmapPanel;
     private analysisDiagnosticCollection: vscode.DiagnosticCollection;
     private selectionListener: vscode.Disposable | undefined;
+    private heatmapDecorationType: vscode.TextEditorDecorationType | undefined;
 
     constructor(context: Context) {
         this.context = context;
         this.framesPanel = new FramesPanel(context);
         this.errorsPanel = new ErrorsPanel(context);
         this.inspectPanel = new InspectPanel(context);
+        this.heatmapPanel = new HeatmapPanel(context);
         this.analysisDiagnosticCollection = vscode.languages.createDiagnosticCollection('shader-toy.analysis');
     }
 
@@ -206,6 +210,75 @@ export class ShaderToyManager {
         this.startSelectionListener();
     };
 
+    public showHeatmapPanel = () => {
+        this.heatmapPanel.show();
+
+        // Turn on heatmap in preview webview
+        if (this.webviewPanel !== undefined) {
+            this.webviewPanel.Panel.webview.postMessage({ command: 'heatmapOn' });
+        }
+
+        // Register opacity callback
+        this.heatmapPanel.setOnOpacityChanged((opacity: number) => {
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setHeatmapOpacity',
+                    opacity: opacity
+                });
+            }
+        });
+
+        // Register color scheme callback
+        this.heatmapPanel.setOnColorSchemeChanged((scheme: string) => {
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setHeatmapColorScheme',
+                    scheme: scheme
+                });
+            }
+        });
+    };
+
+    private applyHeatmapGutterDecorations = (counts: Array<{ line: number; count: number }>) => {
+        if (!this.context.activeEditor) return;
+        const editor = this.context.activeEditor;
+
+        // Dispose previous decoration type
+        if (this.heatmapDecorationType) {
+            this.heatmapDecorationType.dispose();
+        }
+
+        if (!counts || counts.length === 0) return;
+
+        const maxCount = Math.max(...counts.map(c => c.count), 1);
+
+        this.heatmapDecorationType = vscode.window.createTextEditorDecorationType({
+            gutterIconSize: 'contain'
+        });
+
+        const decorations: vscode.DecorationOptions[] = counts.map(entry => {
+            const t = entry.count / maxCount;
+            const r = Math.round(t * 255);
+            const b = Math.round((1 - t) * 160);
+            const color = `rgba(${r}, ${Math.round(t * 80)}, ${b}, 0.6)`;
+            return {
+                range: new vscode.Range(entry.line - 1, 0, entry.line - 1, 0),
+                renderOptions: {
+                    before: {
+                        contentText: `${entry.count}`,
+                        color: color,
+                        fontStyle: 'italic',
+                        margin: '0 8px 0 0',
+                        width: '30px',
+                        textDecoration: 'none; font-size: 10px'
+                    }
+                }
+            };
+        });
+
+        editor.setDecorations(this.heatmapDecorationType, decorations);
+    };
+
     private startSelectionListener = () => {
         if (this.selectionListener) return;
 
@@ -310,6 +383,17 @@ export class ShaderToyManager {
                 case 'inspectorPixel':
                     if (this.inspectPanel.isActive) {
                         this.inspectPanel.postPixelValue(message.rgba, message.position);
+                    }
+                    return;
+                case 'heatmapData':
+                    if (this.heatmapPanel.isActive) {
+                        this.heatmapPanel.postHeatmapData(message.minCount, message.maxCount);
+                    }
+                    return;
+                case 'heatmapLineCounts':
+                    if (this.heatmapPanel.isActive) {
+                        this.heatmapPanel.postLineCounts(message.counts);
+                        this.applyHeatmapGutterDecorations(message.counts);
                     }
                     return;
                 case 'readDDSFile':

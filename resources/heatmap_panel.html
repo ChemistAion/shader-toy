@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shader Heatmap</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+    font-size: var(--vscode-font-size, 13px);
+    color: var(--vscode-foreground, #ccc);
+    background: var(--vscode-editor-background, #1e1e1e);
+    padding: 10px;
+    overflow-x: hidden;
+}
+h2 { font-size: 14px; font-weight: 600; margin-bottom: 8px; opacity: 0.9; }
+.section { margin-bottom: 14px; }
+.section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; opacity: 0.5; margin-bottom: 6px; }
+
+/* Controls */
+.control-row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+}
+.control-label {
+    font-size: 11px; opacity: 0.7; min-width: 55px;
+}
+.opacity-slider {
+    flex: 1; height: 4px;
+    -webkit-appearance: none; appearance: none;
+    background: rgba(128,128,128,0.3); border-radius: 2px; outline: none;
+}
+.opacity-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--vscode-focusBorder, #007acc); cursor: pointer;
+}
+.opacity-value {
+    font-size: 11px; font-family: monospace; min-width: 30px; text-align: right;
+}
+.scheme-btn {
+    background: transparent;
+    border: 1px solid rgba(128,128,128,0.3);
+    color: inherit; padding: 2px 8px; font-size: 10px;
+    border-radius: 3px; cursor: pointer;
+}
+.scheme-btn.active {
+    background: rgba(128,128,128,0.25);
+    border-color: rgba(128,128,128,0.5);
+}
+.scheme-btn:hover { background: rgba(128,128,128,0.15); }
+
+/* Legend */
+.legend { margin-top: 4px; }
+.legend-bar {
+    height: 10px; border-radius: 5px; margin-bottom: 4px;
+}
+.legend-labels {
+    display: flex; justify-content: space-between;
+    font-size: 10px; font-family: monospace; opacity: 0.6;
+}
+.legend-center { text-align: center; flex: 1; }
+
+/* Stats */
+.stats-row {
+    display: flex; gap: 16px; font-size: 11px; font-family: monospace; opacity: 0.8;
+}
+.stats-row span { display: inline-block; }
+
+/* Status */
+.status-bar {
+    margin-top: 8px; padding: 6px 8px; border-radius: 4px;
+    font-size: 11px; opacity: 0.7;
+    background: rgba(128,128,128,0.08);
+    border: 1px solid rgba(128,128,128,0.12);
+}
+.status-bar.active { border-color: rgba(0,180,0,0.3); }
+
+/* Line counts table */
+.line-counts-section { margin-top: 12px; }
+.line-counts-scroll {
+    max-height: 250px; overflow-y: auto; font-family: monospace; font-size: 11px;
+}
+.line-counts-scroll table { width: 100%; border-collapse: collapse; }
+.line-counts-scroll th {
+    text-align: left; font-size: 10px; text-transform: uppercase;
+    opacity: 0.5; letter-spacing: 0.5px; padding: 2px 6px;
+    border-bottom: 1px solid rgba(128,128,128,0.2);
+    position: sticky; top: 0;
+    background: var(--vscode-editor-background, #1e1e1e);
+}
+.line-counts-scroll td { padding: 1px 6px; }
+.count-bar {
+    display: inline-block; height: 8px; border-radius: 2px;
+    min-width: 2px; margin-left: 6px; vertical-align: middle;
+}
+</style>
+</head>
+<body>
+<h2>🔥 Shader Performance Heatmap</h2>
+
+<div class="section">
+    <div class="section-title">Overlay Controls</div>
+    <div class="control-row">
+        <span class="control-label">Opacity</span>
+        <input type="range" class="opacity-slider" id="opacitySlider"
+               min="0" max="1" step="0.05" value="0.7" />
+        <span class="opacity-value" id="opacityValue">70%</span>
+    </div>
+    <div class="control-row">
+        <span class="control-label">Color</span>
+        <button class="scheme-btn active" data-scheme="thermal" id="btnThermal">Thermal</button>
+        <button class="scheme-btn" data-scheme="grayscale" id="btnGrayscale">Grayscale</button>
+    </div>
+</div>
+
+<div class="section">
+    <div class="section-title">Legend</div>
+    <div class="legend">
+        <div class="legend-bar" id="legendBar"></div>
+        <div class="legend-labels">
+            <span id="legendMin">0</span>
+            <span class="legend-center">Instruction Count</span>
+            <span id="legendMax">0</span>
+        </div>
+    </div>
+</div>
+
+<div class="section">
+    <div class="stats-row">
+        <span id="statMin">Min: —</span>
+        <span id="statMax">Max: —</span>
+        <span id="statRange">Range: —</span>
+    </div>
+</div>
+
+<div class="status-bar" id="statusBar">Waiting for heatmap data…</div>
+
+<div class="section line-counts-section">
+    <div class="section-title">Per-Line Instruction Counts</div>
+    <div class="line-counts-scroll" id="lineCountsTable">
+        <em style="font-size:11px;opacity:0.4">No line data yet</em>
+    </div>
+</div>
+
+<script>
+(function() {
+    'use strict';
+    const vscode = acquireVsCodeApi();
+
+    // ── Color ramp helpers ──────────────────────────────────────
+    function thermalColor(t) {
+        t = Math.max(0, Math.min(1, t));
+        if (t < 0.2)      { const s=t*5;       return [0,0,Math.round(s*160)]; }
+        else if (t < 0.4)  { const s=(t-.2)*5;  return [Math.round(s*200),0,Math.round((1-s)*160)]; }
+        else if (t < 0.6)  { const s=(t-.4)*5;  return [200+Math.round(s*55),Math.round(s*150),0]; }
+        else if (t < 0.8)  { const s=(t-.6)*5;  return [255,150+Math.round(s*105),0]; }
+        else               { const s=(t-.8)*5;  return [255,255,Math.round(s*255)]; }
+    }
+    function grayscaleColor(t) { const v=Math.round(Math.max(0,Math.min(1,t))*255); return [v,v,v]; }
+    function colorCSS(t, scheme) {
+        const [r,g,b] = scheme === 'grayscale' ? grayscaleColor(t) : thermalColor(t);
+        return `rgb(${r},${g},${b})`;
+    }
+    function gradientCSS(scheme) {
+        const stops = [];
+        for (let i = 0; i <= 10; i++) {
+            const t = i/10;
+            stops.push(`${colorCSS(t, scheme)} ${(t*100).toFixed(0)}%`);
+        }
+        return `linear-gradient(to right, ${stops.join(', ')})`;
+    }
+
+    // ── Elements ────────────────────────────────────────────────
+    const opacitySlider = document.getElementById('opacitySlider');
+    const opacityValue  = document.getElementById('opacityValue');
+    const btnThermal    = document.getElementById('btnThermal');
+    const btnGrayscale  = document.getElementById('btnGrayscale');
+    const legendBar     = document.getElementById('legendBar');
+    const legendMin     = document.getElementById('legendMin');
+    const legendMax     = document.getElementById('legendMax');
+    const statMin       = document.getElementById('statMin');
+    const statMax       = document.getElementById('statMax');
+    const statRange     = document.getElementById('statRange');
+    const statusBar     = document.getElementById('statusBar');
+    const lineCountsDiv = document.getElementById('lineCountsTable');
+
+    let currentScheme = 'thermal';
+
+    // Init legend gradient
+    legendBar.style.background = gradientCSS(currentScheme);
+
+    // ── Controls ────────────────────────────────────────────────
+    opacitySlider.addEventListener('input', function() {
+        const val = parseFloat(opacitySlider.value);
+        opacityValue.textContent = Math.round(val * 100) + '%';
+        vscode.postMessage({ command: 'setHeatmapOpacity', opacity: val });
+    });
+
+    btnThermal.addEventListener('click', function() {
+        currentScheme = 'thermal';
+        btnThermal.classList.add('active');
+        btnGrayscale.classList.remove('active');
+        legendBar.style.background = gradientCSS('thermal');
+        vscode.postMessage({ command: 'setHeatmapColorScheme', scheme: 'thermal' });
+    });
+    btnGrayscale.addEventListener('click', function() {
+        currentScheme = 'grayscale';
+        btnGrayscale.classList.add('active');
+        btnThermal.classList.remove('active');
+        legendBar.style.background = gradientCSS('grayscale');
+        vscode.postMessage({ command: 'setHeatmapColorScheme', scheme: 'grayscale' });
+    });
+
+    // ── Messages from extension host ────────────────────────────
+    window.addEventListener('message', function(event) {
+        const msg = event.data;
+        if (!msg || !msg.command) return;
+
+        switch (msg.command) {
+            case 'heatmapData': {
+                const mn = Math.round(msg.minCount);
+                const mx = Math.round(msg.maxCount);
+                legendMin.textContent = String(mn);
+                legendMax.textContent = String(mx);
+                statMin.textContent = 'Min: ' + mn;
+                statMax.textContent = 'Max: ' + mx;
+                statRange.textContent = 'Range: ' + (mx - mn);
+                statusBar.textContent = 'Heatmap active — ' + mn + ' … ' + mx + ' instructions';
+                statusBar.classList.add('active');
+                break;
+            }
+            case 'heatmapLineCounts': {
+                renderLineCounts(msg.counts || []);
+                break;
+            }
+        }
+    });
+
+    function renderLineCounts(counts) {
+        if (!counts || counts.length === 0) {
+            lineCountsDiv.innerHTML = '<em style="font-size:11px;opacity:0.4">No line data yet</em>';
+            return;
+        }
+        const maxCount = Math.max(...counts.map(c => c.count), 1);
+        let html = '<table><tr><th>Line</th><th>Count</th><th></th></tr>';
+        for (const entry of counts) {
+            const t = entry.count / maxCount;
+            const barColor = colorCSS(t, currentScheme);
+            const barWidth = Math.max(2, Math.round(t * 120));
+            html += `<tr>` +
+                `<td>${entry.line}</td>` +
+                `<td>${entry.count}</td>` +
+                `<td><span class="count-bar" style="width:${barWidth}px;background:${barColor}"></span></td>` +
+                `</tr>`;
+        }
+        html += '</table>';
+        lineCountsDiv.innerHTML = html;
+    }
+})();
+</script>
+</body>
+</html>

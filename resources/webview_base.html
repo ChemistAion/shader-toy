@@ -170,6 +170,7 @@
 <!-- Webview audio_output.js -->
 <!-- Webview frame_timing.js -->
 <!-- Webview shader_inspect.js -->
+<!-- Webview shader_heatmap.js -->
 <!-- Webview render_loop.js -->
 
 <script type="text/javascript">
@@ -310,6 +311,14 @@
                     window.ShaderToy.inspector.handleMessage(message);
                 }
                 break;
+            case 'heatmapOn':
+            case 'heatmapOff':
+            case 'setHeatmapOpacity':
+            case 'setHeatmapColorScheme':
+                if (window.ShaderToy && window.ShaderToy.heatmap) {
+                    window.ShaderToy.heatmap.handleMessage(message);
+                }
+                break;
         }
     });
 
@@ -438,6 +447,10 @@
         // Notify inspector to clear stale material references
         if (window.ShaderToy && window.ShaderToy.inspector && window.ShaderToy.inspector.onHotReload) {
             window.ShaderToy.inspector.onHotReload();
+        }
+        // Notify heatmap to clear stale material references
+        if (window.ShaderToy && window.ShaderToy.heatmap && window.ShaderToy.heatmap.onHotReload) {
+            window.ShaderToy.heatmap.onHotReload();
         }
     };
 
@@ -783,6 +796,11 @@
         frameCounter++;
 
         // Frame Timing
+
+        // Heatmap overlay
+        if (window.ShaderToy && window.ShaderToy.heatmap && window.ShaderToy.heatmap.isActive()) {
+            window.ShaderToy.heatmap.renderFrame();
+        }
     }
     function forceAspectRatio(width, height) {
         // Forced aspect ratio

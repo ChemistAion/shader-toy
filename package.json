@@ -237,6 +237,10 @@
             {
                 "command": "shader-toy.showInspectPanel",
                 "title": "Shader Toy: Show Variable Inspector"
+            },
+            {
+                "command": "shader-toy.showHeatmapPanel",
+                "title": "Shader Toy: Show Performance Heatmap"
             }
         ],
         "menus": {
