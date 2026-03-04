@@ -633,10 +633,16 @@ vec4 _inspMap(vec4 v) {${oor}
 
     /** Get the shader source for the final (image) buffer */
     function getShaderSource() {
-        const textareas = document.querySelectorAll('textarea[data-shadertoy="shader"]');
-        if (textareas.length === 0) return '';
-        // The last textarea is the final/image buffer
-        return textareas[textareas.length - 1].value || '';
+        // On master, shaders live in <script type='x-shader/x-fragment'> tags
+        const scripts = document.querySelectorAll('script[type="x-shader/x-fragment"]');
+        if (scripts.length === 0) {
+            // Fallback: try <textarea data-shadertoy="shader"> (hot-reload branch)
+            const textareas = document.querySelectorAll('textarea[data-shadertoy="shader"]');
+            if (textareas.length === 0) return '';
+            return textareas[textareas.length - 1].value || '';
+        }
+        // The last script is the final/image buffer
+        return scripts[scripts.length - 1].textContent || '';
     }
 
     /** Attempt to rewrite and recompile the inspector shader */
