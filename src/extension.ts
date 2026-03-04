@@ -97,6 +97,9 @@ export function activate(extensionContext: vscode.ExtensionContext) {
     const inspectCommand = vscode.commands.registerCommand('shader-toy.showInspectPanel', () => {
         shadertoyManager.showInspectPanel();
     });
+    const heatmapCommand = vscode.commands.registerCommand('shader-toy.showHeatmapPanel', () => {
+        shadertoyManager.showHeatmapPanel();
+    });
     extensionContext.subscriptions.push(previewCommand);
     extensionContext.subscriptions.push(staticPreviewCommand);
     extensionContext.subscriptions.push(standaloneCompileCommand);
@@ -105,6 +108,7 @@ export function activate(extensionContext: vscode.ExtensionContext) {
     extensionContext.subscriptions.push(frameTimeCommand);
     extensionContext.subscriptions.push(errorsCommand);
     extensionContext.subscriptions.push(inspectCommand);
+    extensionContext.subscriptions.push(heatmapCommand);
 }
 
 export function deactivate() {

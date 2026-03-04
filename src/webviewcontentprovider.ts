@@ -400,6 +400,9 @@ export class WebviewContentProvider {
 
             const webviewShaderInspect = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/shader_inspect.js', getResourceText);
             this.webviewAssembler.addReplaceModule(webviewShaderInspect, '<!-- Webview shader_inspect.js -->', '<!-- Webview shader_inspect.js -->');
+
+            const webviewShaderHeatmap = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/shader_heatmap.js', getResourceText);
+            this.webviewAssembler.addReplaceModule(webviewShaderHeatmap, '<!-- Webview shader_heatmap.js -->', '<!-- Webview shader_heatmap.js -->');
         }
 
         // Frame Timing — inject render loop hook
