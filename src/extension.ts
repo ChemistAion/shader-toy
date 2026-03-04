@@ -88,11 +88,19 @@ export function activate(extensionContext: vscode.ExtensionContext) {
     const saveScreenshotsCommand = vscode.commands.registerCommand('shader-toy.saveGlslPreviewScreenShots', () => {
         shadertoyManager.postCommand('screenshot');
     });
+    const frameTimeCommand = vscode.commands.registerCommand('shader-toy.showFrameTimePanel', () => {
+        shadertoyManager.showFrameTimePanel();
+    });
+    const errorsCommand = vscode.commands.registerCommand('shader-toy.showErrorsPanel', () => {
+        shadertoyManager.showErrorsPanel();
+    });
     extensionContext.subscriptions.push(previewCommand);
     extensionContext.subscriptions.push(staticPreviewCommand);
     extensionContext.subscriptions.push(standaloneCompileCommand);
     extensionContext.subscriptions.push(pausePreviewsCommand);
     extensionContext.subscriptions.push(saveScreenshotsCommand);
+    extensionContext.subscriptions.push(frameTimeCommand);
+    extensionContext.subscriptions.push(errorsCommand);
 }
 
 export function deactivate() {

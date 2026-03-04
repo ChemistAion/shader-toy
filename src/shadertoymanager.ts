@@ -7,6 +7,9 @@ import { RenderStartingData, DiagnosticBatch } from './typenames';
 import { WebviewContentProvider } from './webviewcontentprovider';
 import { Context } from './context';
 import { removeDuplicates } from './utility';
+import { FramesPanel } from './framespanel';
+import { ErrorsPanel } from './errorspanel';
+import { analyzeShader, ShaderWarning, WARNING_CATEGORIES } from './shaderanalysis';
 
 type Webview = {
     Panel: vscode.WebviewPanel,
@@ -23,13 +26,26 @@ export class ShaderToyManager {
 
     webviewPanel: Webview | undefined;
     staticWebviews: StaticWebview[] = [];
+    framesPanel: FramesPanel;
+    errorsPanel: ErrorsPanel;
+    private analysisDiagnosticCollection: vscode.DiagnosticCollection;
 
     constructor(context: Context) {
         this.context = context;
+        this.framesPanel = new FramesPanel(context);
+        this.framesPanel.onDidDispose(() => {
+            this.postCommand('disableFrameTiming');
+        });
+        this.framesPanel.onDidChangeVisibility((visible) => {
+            this.postCommand(visible ? 'enableFrameTiming' : 'disableFrameTiming');
+        });
+        this.errorsPanel = new ErrorsPanel(context);
+        this.analysisDiagnosticCollection = vscode.languages.createDiagnosticCollection('shader-toy.analysis');
     }
 
     public migrateToNewContext = async (context: Context) => {
         this.context = context;
+        this.framesPanel.updateContext(context);
         if (this.webviewPanel && this.context.activeEditor) {
             await this.updateWebview(this.webviewPanel, this.context.activeEditor.document);
         }
@@ -148,6 +164,39 @@ export class ShaderToyManager {
         this.staticWebviews.forEach((webview: StaticWebview) => webview.Panel.webview.postMessage({command: command}));
     };
 
+    public showFrameTimePanel = () => {
+        this.framesPanel.show();
+        this.postCommand('enableFrameTiming');
+    };
+
+    public showErrorsPanel = () => {
+        this.errorsPanel.show();
+        // Run analysis on current document immediately
+        if (this.context.activeEditor) {
+            this.runShaderAnalysis(this.context.activeEditor.document);
+        }
+    };
+
+    /**
+     * Run static shader analysis and forward results to errors panel + diagnostics.
+     */
+    private runShaderAnalysis = (document: vscode.TextDocument) => {
+        const source = document.getText();
+        const warnings = analyzeShader(source);
+
+        // Send to errors panel
+        this.errorsPanel.postShaderWarnings(warnings);
+
+        // Also emit as VSCode diagnostics (warnings)
+        const diagnostics = warnings.map(w => {
+            const range = new vscode.Range(w.line - 1, w.column - 1, w.line - 1, w.endColumn - 1);
+            const diag = new vscode.Diagnostic(range, w.reason, vscode.DiagnosticSeverity.Warning);
+            diag.source = `shader-analysis (${w.kind})`;
+            return diag;
+        });
+        this.analysisDiagnosticCollection.set(document.uri, diagnostics);
+    };
+
     private resetStartingData = () => {
         const paused = this.startingData.Paused;
         this.startingData = new RenderStartingData();
@@ -176,6 +225,11 @@ export class ShaderToyManager {
         newWebviewPanel.webview.onDidReceiveMessage(
             (message: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
                 switch (message.command) {
+                case 'frameData':
+                    if (this.framesPanel.isActive) {
+                        this.framesPanel.postFrameData(message);
+                    }
+                    return;
                 case 'readDDSFile':
                 {
                     const requestId: number = message.requestId;
@@ -296,6 +350,17 @@ export class ShaderToyManager {
                     }
 
                     this.context.showDiagnostics(diagnosticBatch, severity);
+
+                    // Forward compile errors to the errors panel
+                    if (this.errorsPanel.isActive && message.type === 'error') {
+                        this.errorsPanel.postCompileErrors(
+                            diagnosticBatch.diagnostics.map((d: { line: number; message: string }) => ({
+                                line: d.line,
+                                message: d.message,
+                                file: diagnosticBatch.filename
+                            }))
+                        );
+                    }
                     return;
                 }
                 case 'showGlslsError':
@@ -319,6 +384,8 @@ export class ShaderToyManager {
 
     private updateWebview = async <T extends Webview | StaticWebview>(webviewPanel: T, document: vscode.TextDocument): Promise<T> => {
         this.context.clearDiagnostics();
+        this.analysisDiagnosticCollection.clear();
+        this.errorsPanel.clearErrors();
         const webviewContentProvider = new WebviewContentProvider(this.context, document.getText(), document.fileName);
         const localResources = await webviewContentProvider.parseShaderTree(false);
 
@@ -345,6 +412,12 @@ export class ShaderToyManager {
         }
 
         webviewPanel.Panel.webview.html = await webviewContentProvider.generateWebviewContent(webviewPanel.Panel.webview, this.startingData);
+
+        // Run shader analysis if errors panel is active
+        if (this.errorsPanel.isActive) {
+            this.runShaderAnalysis(document);
+        }
+
         return webviewPanel;
     };
 }
