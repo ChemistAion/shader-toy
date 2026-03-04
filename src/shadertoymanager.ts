@@ -7,6 +7,7 @@ import { RenderStartingData, DiagnosticBatch } from './typenames';
 import { WebviewContentProvider } from './webviewcontentprovider';
 import { Context } from './context';
 import { removeDuplicates } from './utility';
+import { InspectPanel, InspectorMapping } from './inspectpanel';
 
 type Webview = {
     Panel: vscode.WebviewPanel,
@@ -23,9 +24,12 @@ export class ShaderToyManager {
 
     webviewPanel: Webview | undefined;
     staticWebviews: StaticWebview[] = [];
+    inspectPanel: InspectPanel;
+    private selectionListener: vscode.Disposable | undefined;
 
     constructor(context: Context) {
         this.context = context;
+        this.inspectPanel = new InspectPanel(context);
     }
 
     public migrateToNewContext = async (context: Context) => {
@@ -148,6 +152,78 @@ export class ShaderToyManager {
         this.staticWebviews.forEach((webview: StaticWebview) => webview.Panel.webview.postMessage({command: command}));
     };
 
+    public showInspectPanel = () => {
+        this.inspectPanel.show();
+
+        // Turn on inspector in preview webview
+        if (this.webviewPanel !== undefined) {
+            this.webviewPanel.Panel.webview.postMessage({ command: 'inspectorOn' });
+        }
+
+        // Register mapping change callback
+        this.inspectPanel.setOnMappingChanged((mapping: InspectorMapping) => {
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorMapping',
+                    mapping: mapping
+                });
+            }
+        });
+
+        // Register compare mode callback
+        this.inspectPanel.setOnCompareChanged((enabled: boolean) => {
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorCompare',
+                    enabled: enabled
+                });
+            }
+        });
+
+        // Start listening for text selection changes
+        this.startSelectionListener();
+    };
+
+    private startSelectionListener = () => {
+        if (this.selectionListener) return;
+
+        this.selectionListener = vscode.window.onDidChangeTextEditorSelection((event) => {
+            if (!this.inspectPanel.isActive) return;
+            const editor = event.textEditor;
+            const doc = editor.document;
+
+            // Only act on shader-like files
+            const lang = doc.languageId;
+            if (lang !== 'glsl' && lang !== 'hlsl' && !doc.fileName.match(/\.(glsl|frag|vert|comp|vs|fs|shader)$/i)) {
+                return;
+            }
+
+            const selection = editor.selection;
+            let selectedText: string;
+            if (selection.isEmpty) {
+                const wordRange = doc.getWordRangeAtPosition(selection.active, /[a-zA-Z_]\w*(\.[xyzwrgba]+)?/);
+                selectedText = wordRange ? doc.getText(wordRange) : '';
+            } else {
+                selectedText = doc.getText(selection).trim();
+            }
+
+            const line = selection.start.line + 1; // 1-based for GLSL
+
+            if (selectedText.length > 0 && selectedText.length < 200) {
+                // Send to preview webview
+                if (this.webviewPanel !== undefined) {
+                    this.webviewPanel.Panel.webview.postMessage({
+                        command: 'setInspectorVariable',
+                        variable: selectedText,
+                        line: line
+                    });
+                }
+                // Send to inspect panel
+                this.inspectPanel.postVariableUpdate(selectedText, line, '');
+            }
+        }, undefined, this.context.getVscodeExtensionContext().subscriptions);
+    };
+
     private resetStartingData = () => {
         const paused = this.startingData.Paused;
         this.startingData = new RenderStartingData();
@@ -176,6 +252,19 @@ export class ShaderToyManager {
         newWebviewPanel.webview.onDidReceiveMessage(
             (message: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
                 switch (message.command) {
+                case 'inspectorStatus':
+                    if (this.inspectPanel.isActive) {
+                        this.inspectPanel.postStatus(message.status, message.message);
+                        if (message.variable && message.type) {
+                            this.inspectPanel.postVariableUpdate(message.variable, 0, message.type);
+                        }
+                    }
+                    return;
+                case 'inspectorPixel':
+                    if (this.inspectPanel.isActive) {
+                        this.inspectPanel.postPixelValue(message.rgba, message.position);
+                    }
+                    return;
                 case 'readDDSFile':
                 {
                     const requestId: number = message.requestId;

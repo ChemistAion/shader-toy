@@ -112,6 +112,7 @@
 <!-- Webview ui_controls.js -->
 <!-- Webview gl_context.js -->
 <!-- Webview time_input.js -->
+<!-- Webview shader_inspect.js -->
 <!-- Webview render_loop.js -->
 
 <script type="text/javascript">
@@ -229,6 +230,15 @@
                 break;
             case 'screenshot':
                 saveScreenshot();
+                break;
+            case 'setInspectorVariable':
+            case 'setInspectorMapping':
+            case 'inspectorOn':
+            case 'inspectorOff':
+            case 'setInspectorCompare':
+                if (window.ShaderToy && window.ShaderToy.inspector) {
+                    window.ShaderToy.inspector.handleMessage(message);
+                }
                 break;
         }
     });

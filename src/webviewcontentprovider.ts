@@ -392,6 +392,9 @@ export class WebviewContentProvider {
 
             const webviewRenderLoop = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/render_loop.js', getResourceText);
             this.webviewAssembler.addReplaceModule(webviewRenderLoop, '<!-- Webview render_loop.js -->', '<!-- Webview render_loop.js -->');
+
+            const webviewShaderInspect = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/shader_inspect.js', getResourceText);
+            this.webviewAssembler.addReplaceModule(webviewShaderInspect, '<!-- Webview shader_inspect.js -->', '<!-- Webview shader_inspect.js -->');
         }
 
         // Keep the GLSL #line "self" sentinel source-id consistent between extension and webview.
