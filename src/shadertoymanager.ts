@@ -26,6 +26,8 @@ export class ShaderToyManager {
     staticWebviews: StaticWebview[] = [];
     inspectPanel: InspectPanel;
     private selectionListener: vscode.Disposable | undefined;
+    private _lastInspectorVariable = '';
+    private _lastInspectorLine = 0;
 
     constructor(context: Context) {
         this.context = context;
@@ -36,6 +38,7 @@ export class ShaderToyManager {
         this.context = context;
         if (this.webviewPanel && this.context.activeEditor) {
             await this.updateWebview(this.webviewPanel, this.context.activeEditor.document);
+            this.resendInspectorState();
         }
         for (const staticWebview of this.staticWebviews) {
             await this.updateWebview(staticWebview, staticWebview.Document);
@@ -120,6 +123,7 @@ export class ShaderToyManager {
             if (isActiveDocument || staticWebview !== undefined) {
                 if (this.webviewPanel !== undefined && this.context.activeEditor !== undefined) {
                     this.webviewPanel = await this.updateWebview(this.webviewPanel, this.context.activeEditor.document);
+                    this.resendInspectorState();
                 }
 
                 this.staticWebviews.map((staticWebview: StaticWebview) => this.updateWebview(staticWebview, staticWebview.Document));
@@ -140,6 +144,7 @@ export class ShaderToyManager {
                 }
                 if (this.webviewPanel !== undefined) {
                     this.webviewPanel = await this.updateWebview(this.webviewPanel, this.context.activeEditor.document);
+                    this.resendInspectorState();
                 }
             }
         }
@@ -210,6 +215,8 @@ export class ShaderToyManager {
             const line = selection.start.line + 1; // 1-based for GLSL
 
             if (selectedText.length > 0 && selectedText.length < 200) {
+                this._lastInspectorVariable = selectedText;
+                this._lastInspectorLine = line;
                 // Send to preview webview
                 if (this.webviewPanel !== undefined) {
                     this.webviewPanel.Panel.webview.postMessage({
@@ -222,6 +229,19 @@ export class ShaderToyManager {
                 this.inspectPanel.postVariableUpdate(selectedText, line, '');
             }
         }, undefined, this.context.getVscodeExtensionContext().subscriptions);
+    };
+
+    /** Re-send inspector state to the preview webview after it is rebuilt. */
+    private resendInspectorState = () => {
+        if (!this.inspectPanel.isActive || !this.webviewPanel) return;
+        this.webviewPanel.Panel.webview.postMessage({ command: 'inspectorOn' });
+        if (this._lastInspectorVariable) {
+            this.webviewPanel.Panel.webview.postMessage({
+                command: 'setInspectorVariable',
+                variable: this._lastInspectorVariable,
+                line: this._lastInspectorLine
+            });
+        }
     };
 
     private resetStartingData = () => {
@@ -330,7 +350,9 @@ export class ShaderToyManager {
                 }
                 case 'reloadWebview':
                     if (this.webviewPanel !== undefined && this.webviewPanel.Panel === newWebviewPanel && this.context.activeEditor !== undefined) {
-                        this.updateWebview(this.webviewPanel, this.context.activeEditor.document);
+                        this.updateWebview(this.webviewPanel, this.context.activeEditor.document).then(() => {
+                            this.resendInspectorState();
+                        });
                     }
                     else {
                         this.staticWebviews.forEach((staticWebview: StaticWebview) => {
