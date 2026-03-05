@@ -205,21 +205,37 @@
         border-left: 3px solid var(--success);
     }
 
-    /* ── Help ────────────────────────── */
-    .help-section {
-        margin-top: 16px;
-        padding-top: 12px;
-        border-top: 1px solid var(--border);
-        font-size: 11px;
-        color: var(--fg2);
-        line-height: 1.6;
+    /* ── Histogram ─────────────────────── */
+    .histogram-section {
+        background: var(--bg2);
+        border-radius: 6px;
+        padding: 10px 12px;
+        margin-top: 12px;
     }
-    .help-section kbd {
-        background: var(--bg3);
+    .histogram-section .variable-label {
+        margin-bottom: 6px;
+    }
+    .histogram-canvas-wrap {
+        position: relative;
+        width: 100%;
+        height: 100px;
+        background: var(--bg);
+        border-radius: 4px;
         border: 1px solid var(--border);
-        border-radius: 3px;
-        padding: 1px 4px;
+        overflow: hidden;
+    }
+    .histogram-canvas-wrap canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+    }
+    .histogram-stats {
+        display: flex;
+        justify-content: space-between;
         font-size: 10px;
+        color: var(--fg2);
+        font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+        margin-top: 3px;
     }
 </style>
 </head>
@@ -282,10 +298,16 @@
     Ready — select a variable in the shader editor
 </div>
 
-<div class="help-section">
-    <strong>Usage:</strong> Select any GLSL variable or expression in the editor while the preview is open.
-    The canvas will display per-pixel values as colors.<br/>
-    <strong>Tip:</strong> Add <kbd>// [0, 10]</kbd> comments next to variables to set custom value ranges.
+<div class="histogram-section">
+    <div class="variable-label">Histogram</div>
+    <div class="histogram-canvas-wrap">
+        <canvas id="histogramCanvas"></canvas>
+    </div>
+    <div class="histogram-stats">
+        <span id="histMin">0.00</span>
+        <span id="histSamples"></span>
+        <span id="histMax">1.00</span>
+    </div>
 </div>
 
 <script>
@@ -307,6 +329,11 @@
     const modeButtons = document.querySelectorAll('.mode-btn');
     const hoverToggle = document.getElementById('hoverToggle');
     const pixelSection = document.getElementById('pixelSection');
+    const histCanvas = document.getElementById('histogramCanvas');
+    const histCtx = histCanvas ? histCanvas.getContext('2d') : null;
+    const histMinEl = document.getElementById('histMin');
+    const histMaxEl = document.getElementById('histMax');
+    const histSamplesEl = document.getElementById('histSamples');
 
     let currentMode = 'linear';
 
@@ -399,8 +426,69 @@
                         `<span class="ch-a">A: ${a.toFixed(4)}</span>`;
                 }
                 break;
+
+            case 'histogram':
+                if (msg.histogram) drawHistogram(msg.histogram);
+                break;
         }
     });
+
+    // ── Histogram renderer ─────────────────────────
+    function drawHistogram(h) {
+        if (!histCanvas || !histCtx) return;
+
+        // Size canvas to container (DPR-aware)
+        const wrap = histCanvas.parentElement;
+        const dpr = window.devicePixelRatio || 1;
+        const cw = wrap.clientWidth, ch = wrap.clientHeight;
+        histCanvas.width = cw * dpr;
+        histCanvas.height = ch * dpr;
+        histCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        const W = cw, H = ch;
+        const bins = h.bins || 128;
+
+        // Clear
+        histCtx.clearRect(0, 0, W, H);
+
+        // Find global max across all channels for vertical scaling
+        let peak = 1;
+        for (let i = 0; i < bins; i++) {
+            if (h.binsR[i] > peak) peak = h.binsR[i];
+            if (h.binsG[i] > peak) peak = h.binsG[i];
+            if (h.binsB[i] > peak) peak = h.binsB[i];
+        }
+
+        const barW = W / bins;
+        const pad = H * 0.05;  // 5% bottom padding
+
+        // Draw channels (B, G, R order so red is on top)
+        const channels = [
+            { data: h.binsB, color: 'rgba(86, 156, 214, 0.6)' },
+            { data: h.binsG, color: 'rgba(78, 201, 176, 0.6)' },
+            { data: h.binsR, color: 'rgba(244, 71, 71, 0.55)' }
+        ];
+
+        for (const ch of channels) {
+            histCtx.fillStyle = ch.color;
+            histCtx.beginPath();
+            histCtx.moveTo(0, H);
+            for (let i = 0; i < bins; i++) {
+                const barH = (ch.data[i] / peak) * (H - pad);
+                const x = i * barW;
+                histCtx.lineTo(x, H - barH);
+                histCtx.lineTo(x + barW, H - barH);
+            }
+            histCtx.lineTo(W, H);
+            histCtx.closePath();
+            histCtx.fill();
+        }
+
+        // Stats labels
+        histMinEl.textContent = h.autoMin.toFixed(2);
+        histMaxEl.textContent = h.autoMax.toFixed(2);
+        histSamplesEl.textContent = h.samples + ' px';
+    }
 })();
 </script>
 </body>

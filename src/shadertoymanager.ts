@@ -301,6 +301,11 @@ export class ShaderToyManager {
                         this.inspectPanel.postPixelValue(message.rgba, message.position);
                     }
                     return;
+                case 'inspectorHistogram':
+                    if (this.inspectPanel.isActive) {
+                        this.inspectPanel.postHistogram(message.histogram);
+                    }
+                    return;
                 case 'readDDSFile':
                 {
                     const requestId: number = message.requestId;

@@ -657,6 +657,8 @@ vec4 _inspMap(vec4 v) {${oor}
     let _mapping = { ...DEFAULT_MAPPING };
     let _compareMode = false;
     let _hoverEnabled = true;
+    let _histogramEnabled = true;
+    let _histogramFrame = 0;
     let _inspectorMaterial = null;
     let _originalMaterials = new Map();  // bufferIndex → original material
     let _lastRewrittenSource = '';
@@ -804,24 +806,96 @@ vec4 _inspMap(vec4 v) {${oor}
 
     /** Called after each render frame completes (GL state is valid). */
     function afterFrame() {
-        if (!_active || !_hoverEnabled || !_mouseInCanvas) return;
-        if (_mouseX < 0 || _mouseY < 0) return;
+        if (!_active) return;
+        if (typeof gl === 'undefined') return;
 
+        // Hover pixel readback
+        if (_hoverEnabled && _mouseInCanvas && _mouseX >= 0 && _mouseY >= 0) {
+            try {
+                const pixel = new Uint8Array(4);
+                gl.readPixels(_mouseX, _mouseY, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+                if (typeof vscode !== 'undefined' && vscode) {
+                    vscode.postMessage({
+                        command: 'inspectorPixel',
+                        rgba: [pixel[0] / 255, pixel[1] / 255, pixel[2] / 255, pixel[3] / 255],
+                        position: { x: _mouseX, y: _mouseY }
+                    });
+                }
+            } catch (err) { /* ignore */ }
+        }
+
+        // Histogram — sparse grid readback every N frames
+        if (_histogramEnabled && ++_histogramFrame >= 10) {
+            _histogramFrame = 0;
+            computeHistogram();
+        }
+    }
+
+    /** Sample a sparse pixel grid and compute per-channel histogram (128 bins). */
+    function computeHistogram() {
         try {
-            if (typeof gl === 'undefined') return;
+            const canvas = document.getElementById('canvas');
+            if (!canvas) return;
+            const w = canvas.width, h = canvas.height;
+            if (w <= 0 || h <= 0) return;
+
+            const GRID = 32;   // 32×32 = 1024 samples
+            const BINS = 128;
+            const binsR = new Float32Array(BINS);
+            const binsG = new Float32Array(BINS);
+            const binsB = new Float32Array(BINS);
             const pixel = new Uint8Array(4);
-            gl.readPixels(_mouseX, _mouseY, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+            let minVal = 1, maxVal = 0, samples = 0;
+
+            const stepX = Math.max(1, Math.floor(w / GRID));
+            const stepY = Math.max(1, Math.floor(h / GRID));
+
+            for (let gy = 0; gy < GRID; gy++) {
+                const py = Math.min(gy * stepY, h - 1);
+                for (let gx = 0; gx < GRID; gx++) {
+                    const px = Math.min(gx * stepX, w - 1);
+                    gl.readPixels(px, py, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+                    const r = pixel[0] / 255, g = pixel[1] / 255, b = pixel[2] / 255;
+                    // Track actual range
+                    const lo = Math.min(r, g, b), hi = Math.max(r, g, b);
+                    if (lo < minVal) minVal = lo;
+                    if (hi > maxVal) maxVal = hi;
+                    // Bin each channel (clamp to [0,1] for uint8 readback)
+                    binsR[Math.min(Math.floor(r * BINS), BINS - 1)]++;
+                    binsG[Math.min(Math.floor(g * BINS), BINS - 1)]++;
+                    binsB[Math.min(Math.floor(b * BINS), BINS - 1)]++;
+                    samples++;
+                }
+            }
+
+            if (samples === 0) return;
+
+            // 3-point smooth
+            function smooth(arr) {
+                const out = new Float32Array(arr.length);
+                for (let i = 0; i < arr.length; i++) {
+                    const prev = i > 0 ? arr[i - 1] : 0;
+                    const next = i < arr.length - 1 ? arr[i + 1] : 0;
+                    out[i] = (prev + arr[i] + next) / 3;
+                }
+                return out;
+            }
 
             if (typeof vscode !== 'undefined' && vscode) {
                 vscode.postMessage({
-                    command: 'inspectorPixel',
-                    rgba: [pixel[0] / 255, pixel[1] / 255, pixel[2] / 255, pixel[3] / 255],
-                    position: { x: _mouseX, y: _mouseY }
+                    command: 'inspectorHistogram',
+                    histogram: {
+                        binsR: Array.from(smooth(binsR)),
+                        binsG: Array.from(smooth(binsG)),
+                        binsB: Array.from(smooth(binsB)),
+                        bins: BINS,
+                        samples: samples,
+                        autoMin: minVal,
+                        autoMax: maxVal
+                    }
                 });
             }
-        } catch (err) {
-            // Silently ignore readback errors
-        }
+        } catch (err) { /* ignore */ }
     }
 
     // ── Message Handling ────────────────────────────────────────────

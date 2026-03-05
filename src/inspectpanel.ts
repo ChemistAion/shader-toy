@@ -146,6 +146,16 @@ export class InspectPanel {
         }
     }
 
+    /** Forward histogram data from the preview. */
+    public postHistogram(histogram: unknown): void {
+        if (this.panel) {
+            this.panel.webview.postMessage({
+                command: 'histogram',
+                histogram
+            });
+        }
+    }
+
     private getActiveFile(): string | undefined {
         return this.context.activeEditor?.document.fileName;
     }
