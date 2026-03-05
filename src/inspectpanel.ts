@@ -19,6 +19,7 @@ export class InspectPanel {
     private context: Context;
     private onMappingChanged: ((mapping: InspectorMapping) => void) | undefined;
     private onCompareChanged: ((enabled: boolean) => void) | undefined;
+    private onHoverChanged: ((enabled: boolean) => void) | undefined;
 
     constructor(context: Context) {
         this.context = context;
@@ -65,6 +66,11 @@ export class InspectPanel {
                         this.onCompareChanged(!!message.enabled);
                     }
                     break;
+                case 'setHoverEnabled':
+                    if (this.onHoverChanged) {
+                        this.onHoverChanged(!!message.enabled);
+                    }
+                    break;
                 case 'navigateToLine':
                     if (message.line !== undefined) {
                         const file = (message.file as string) || this.getActiveFile();
@@ -103,6 +109,11 @@ export class InspectPanel {
     /** Register callback for when compare mode toggles. */
     public setOnCompareChanged(cb: (enabled: boolean) => void): void {
         this.onCompareChanged = cb;
+    }
+
+    /** Register callback for when hover toggle changes. */
+    public setOnHoverChanged(cb: (enabled: boolean) => void): void {
+        this.onHoverChanged = cb;
     }
 
     /** Forward variable info to the panel. */

@@ -262,8 +262,11 @@
     </div>
 </div>
 
-<div class="pixel-section">
-    <div class="variable-label">Pixel Value (hover over preview)</div>
+<div class="pixel-section" id="pixelSection">
+    <div class="variable-label" style="display: flex; align-items: center; gap: 6px;">
+        <input type="checkbox" id="hoverToggle" checked />
+        <label for="hoverToggle" style="cursor: pointer; margin: 0;">Pixel Value (hover over preview)</label>
+    </div>
     <div class="pixel-row">
         <div class="color-swatch" id="colorSwatch"></div>
         <div class="pixel-values" id="pixelValues">
@@ -302,6 +305,8 @@
     const oorToggle = document.getElementById('oorToggle');
     const compareToggle = document.getElementById('compareToggle');
     const modeButtons = document.querySelectorAll('.mode-btn');
+    const hoverToggle = document.getElementById('hoverToggle');
+    const pixelSection = document.getElementById('pixelSection');
 
     let currentMode = 'linear';
 
@@ -338,6 +343,15 @@
     compareToggle.addEventListener('change', () => {
         if (vscode) {
             vscode.postMessage({ command: 'setCompare', enabled: compareToggle.checked });
+        }
+    });
+
+    // Hover toggle
+    hoverToggle.addEventListener('change', () => {
+        const enabled = hoverToggle.checked;
+        pixelSection.style.opacity = enabled ? '1' : '0.5';
+        if (vscode) {
+            vscode.postMessage({ command: 'setHoverEnabled', enabled: enabled });
         }
     });
 

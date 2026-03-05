@@ -449,6 +449,11 @@
             renderer.setRenderTarget(buffer.Target);
             renderer.render(scene, camera);
         }
+
+        // Inspector pixel readback (GL state is valid, screen framebuffer bound after final pass)
+        if (window.ShaderToy && window.ShaderToy.inspector && window.ShaderToy.inspector.afterFrame) {
+            window.ShaderToy.inspector.afterFrame();
+        }
         
         // Uniforms Update
 

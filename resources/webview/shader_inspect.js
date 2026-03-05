@@ -126,7 +126,7 @@
     }
 
     /** Resolve variable type from builtins, uniforms, or declarations (port of C0) */
-    function resolveVariableType(source, name) {
+    function resolveVariableType(source, name, targetLine) {
         if (BUILTIN_VARIABLES[name] !== undefined) return BUILTIN_VARIABLES[name];
         if (UNIFORM_TYPES[name] !== undefined) return UNIFORM_TYPES[name];
 
@@ -143,11 +143,33 @@
             }
         }
 
-        // Check declaration in source
+        // Check declaration in source — prefer nearest to targetLine
         const escaped = escapeRegex(name);
         const declRe = new RegExp(`\\b(${TYPE_REGEX_STR})\\s+${escaped}\\b`, 'g');
-        const m = declRe.exec(source);
-        return m ? m[1] : 'float';
+        let m, bestMatch = null;
+        if (targetLine !== undefined && targetLine > 0) {
+            // Find all matches and pick the nearest one at or before target line
+            while ((m = declRe.exec(source)) !== null) {
+                const matchLine = lineAtOffset(source, m.index);
+                if (matchLine <= targetLine) {
+                    if (!bestMatch || matchLine >= bestMatch.line) {
+                        bestMatch = { type: m[1], line: matchLine };
+                    }
+                }
+            }
+            // Fallback: if no match before target, take the first match
+            if (!bestMatch) {
+                declRe.lastIndex = 0;
+                m = declRe.exec(source);
+                if (m) bestMatch = { type: m[1], line: 0 };
+            }
+        } else {
+            // No line info — take the last match (most likely in-scope)
+            while ((m = declRe.exec(source)) !== null) {
+                bestMatch = { type: m[1], line: 0 };
+            }
+        }
+        return bestMatch ? bestMatch.type : 'float';
     }
 
     /** Complex expression analysis (port of mb) */
@@ -237,7 +259,7 @@
     }
 
     /** Main type resolver (port of a2) */
-    function inferType(source, variable) {
+    function inferType(source, variable, targetLine) {
         // 1. User function?
         const sig = parseFunctionSignature(source, variable);
         if (sig) return sig.returnType;
@@ -247,7 +269,7 @@
         if (def) return inferLiteralType(def);
 
         // 3. Simple word → builtins / uniforms / declarations
-        if (/^\w+$/.test(variable)) return resolveVariableType(source, variable);
+        if (/^\w+$/.test(variable)) return resolveVariableType(source, variable, targetLine);
 
         // 4. Complex expression → function call / heuristic
         return inferFunctionCallType(variable, source);
@@ -358,6 +380,14 @@ vec4 _inspMap(vec4 v) {${oor}
     /** Get line number from character offset (port of Uj helper) */
     function lineAtOffset(source, offset) {
         return (source.slice(0, offset).match(/\n/g) || []).length + 1;
+    }
+
+    /** Get the line count of the shader preamble (before #line 1 0 directive). */
+    function getPreambleOffset(source) {
+        const m = source.match(/(^|\n)#line\s+1\b/);
+        if (!m) return 0;
+        // The #line directive itself is on this line; user code starts on the next line
+        return lineAtOffset(source, m.index + (m[1].length || 0));
     }
 
     /** Compute insertion point in main body (port of q8) */
@@ -596,7 +626,7 @@ vec4 _inspMap(vec4 v) {${oor}
         const def = resolveDefine(variable, source);
         const resolved = def ?? variable;
         const type = def ? inferLiteralType(def) :
-            (/^\w+$/.test(variable) ? resolveVariableType(source, variable) : inferFunctionCallType(variable, source));
+            (/^\w+$/.test(variable) ? resolveVariableType(source, variable, inspectorLine) : inferFunctionCallType(variable, source));
 
         return buildInspectorShader(source, variable, coerceToVec4(resolved, type), mapping, false, inspectorLine);
     }
@@ -614,7 +644,7 @@ vec4 _inspMap(vec4 v) {${oor}
         const def = resolveDefine(variable, source);
         const resolved = def ?? variable;
         const type = def ? inferLiteralType(def) :
-            (/^\w+$/.test(variable) ? resolveVariableType(source, variable) : inferFunctionCallType(variable, source));
+            (/^\w+$/.test(variable) ? resolveVariableType(source, variable, inspectorLine) : inferFunctionCallType(variable, source));
 
         return buildCompareShader(source, variable, coerceToVec4(resolved, type), false, inspectorLine);
     }
@@ -626,6 +656,7 @@ vec4 _inspMap(vec4 v) {${oor}
     let _line = 0;
     let _mapping = { ...DEFAULT_MAPPING };
     let _compareMode = false;
+    let _hoverEnabled = true;
     let _inspectorMaterial = null;
     let _originalMaterials = new Map();  // bufferIndex → original material
     let _lastRewrittenSource = '';
@@ -661,10 +692,13 @@ vec4 _inspMap(vec4 v) {${oor}
                 return;
             }
 
-            const type = inferType(source, _variable);
+            // Adjust VS Code editor line → source line (account for preamble)
+            const sourceLine = _line > 0 ? _line + getPreambleOffset(source) : _line;
+
+            const type = inferType(source, _variable, sourceLine);
             const rewritten = _compareMode ?
-                rewriteForCompare(source, _variable, _line) :
-                rewriteForInspector(source, _variable, _mapping, _line);
+                rewriteForCompare(source, _variable, sourceLine) :
+                rewriteForInspector(source, _variable, _mapping, sourceLine);
 
             if (!rewritten) {
                 postStatus('error', 'Could not find main() in shader');
@@ -746,39 +780,48 @@ vec4 _inspMap(vec4 v) {${oor}
         }
     }
 
-    /** Pixel readback on hover */
+    /** Pixel readback on hover — track mouse, read pixels after frame */
+    let _mouseX = -1;
+    let _mouseY = -1;
+    let _mouseInCanvas = false;
+
     function setupHoverReadback() {
         const canvas = document.getElementById('canvas');
         if (!canvas) return;
 
-        let lastTooltipUpdate = 0;
         canvas.addEventListener('mousemove', function (e) {
-            if (!_active || !_variable) return;
-
-            const now = performance.now();
-            if (now - lastTooltipUpdate < 33) return; // ~30fps throttle
-            lastTooltipUpdate = now;
-
-            try {
-                if (typeof renderer === 'undefined' || typeof gl === 'undefined') return;
-                const rect = canvas.getBoundingClientRect();
-                const x = Math.floor((e.clientX - rect.left) * (canvas.width / rect.width));
-                const y = canvas.height - Math.floor((e.clientY - rect.top) * (canvas.height / rect.height));
-
-                const pixel = new Uint8Array(4);
-                gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
-
-                if (typeof vscode !== 'undefined' && vscode) {
-                    vscode.postMessage({
-                        command: 'inspectorPixel',
-                        rgba: [pixel[0] / 255, pixel[1] / 255, pixel[2] / 255, pixel[3] / 255],
-                        position: { x: e.clientX - rect.left, y: e.clientY - rect.top }
-                    });
-                }
-            } catch (err) {
-                // Silently ignore readback errors
-            }
+            if (!_active || !_hoverEnabled) return;
+            const rect = canvas.getBoundingClientRect();
+            _mouseX = Math.floor((e.clientX - rect.left) * (canvas.width / rect.width));
+            _mouseY = canvas.height - Math.floor((e.clientY - rect.top) * (canvas.height / rect.height));
+            _mouseInCanvas = true;
         });
+
+        canvas.addEventListener('mouseleave', function () {
+            _mouseInCanvas = false;
+        });
+    }
+
+    /** Called after each render frame completes (GL state is valid). */
+    function afterFrame() {
+        if (!_active || !_hoverEnabled || !_mouseInCanvas) return;
+        if (_mouseX < 0 || _mouseY < 0) return;
+
+        try {
+            if (typeof gl === 'undefined') return;
+            const pixel = new Uint8Array(4);
+            gl.readPixels(_mouseX, _mouseY, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+
+            if (typeof vscode !== 'undefined' && vscode) {
+                vscode.postMessage({
+                    command: 'inspectorPixel',
+                    rgba: [pixel[0] / 255, pixel[1] / 255, pixel[2] / 255, pixel[3] / 255],
+                    position: { x: _mouseX, y: _mouseY }
+                });
+            }
+        } catch (err) {
+            // Silently ignore readback errors
+        }
     }
 
     // ── Message Handling ────────────────────────────────────────────
@@ -823,6 +866,10 @@ vec4 _inspMap(vec4 v) {${oor}
                     updateInspection();
                 }
                 break;
+
+            case 'setInspectorHover':
+                _hoverEnabled = !!msg.enabled;
+                break;
         }
     }
 
@@ -834,6 +881,8 @@ vec4 _inspMap(vec4 v) {${oor}
         isActive: function () { return _active; },
         getVariable: function () { return _variable; },
         getMapping: function () { return { ..._mapping }; },
+        isHoverEnabled: function () { return _hoverEnabled; },
+        afterFrame: afterFrame,
 
         // Called on hot-reload to clear stale material references
         onHotReload: function () {

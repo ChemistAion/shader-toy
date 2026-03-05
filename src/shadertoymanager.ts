@@ -28,6 +28,7 @@ export class ShaderToyManager {
     private selectionListener: vscode.Disposable | undefined;
     private _lastInspectorVariable = '';
     private _lastInspectorLine = 0;
+    private _lastHoverEnabled = true;
 
     constructor(context: Context) {
         this.context = context;
@@ -185,6 +186,17 @@ export class ShaderToyManager {
             }
         });
 
+        // Register hover toggle callback
+        this.inspectPanel.setOnHoverChanged((enabled: boolean) => {
+            this._lastHoverEnabled = enabled;
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorHover',
+                    enabled: enabled
+                });
+            }
+        });
+
         // Start listening for text selection changes
         this.startSelectionListener();
     };
@@ -242,6 +254,10 @@ export class ShaderToyManager {
                 line: this._lastInspectorLine
             });
         }
+        this.webviewPanel.Panel.webview.postMessage({
+            command: 'setInspectorHover',
+            enabled: this._lastHoverEnabled
+        });
     };
 
     private resetStartingData = () => {
