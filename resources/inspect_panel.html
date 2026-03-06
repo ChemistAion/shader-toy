@@ -341,13 +341,13 @@
     <div class="histogram-canvas-wrap">
         <canvas id="histogramCanvas"></canvas>
         <div class="histogram-sample-controls">
-            <button class="histogram-rate-btn active" data-sample-stride="1">1:1</button>
-            <button class="histogram-rate-btn" data-sample-stride="8">1:8</button>
+            <button class="histogram-rate-btn" data-sample-stride="1">1:1</button>
+            <button class="histogram-rate-btn active" data-sample-stride="8">1:8</button>
             <button class="histogram-rate-btn" data-sample-stride="64">1:64</button>
         </div>
         <div class="histogram-rate-controls">
-            <button class="histogram-rate-btn active" data-interval-ms="1000">1Hz</button>
-            <button class="histogram-rate-btn" data-interval-ms="200">5Hz</button>
+            <button class="histogram-rate-btn" data-interval-ms="1000">1Hz</button>
+            <button class="histogram-rate-btn active" data-interval-ms="200">5Hz</button>
             <button class="histogram-rate-btn" data-interval-ms="100">10Hz</button>
         </div>
     </div>
@@ -387,8 +387,8 @@
     const histMaxEl = document.getElementById('histMax');
     const histSamplesEl = document.getElementById('histSamples');
 
-    const DEFAULT_HISTOGRAM_INTERVAL_MS = 1000;
-    const DEFAULT_HISTOGRAM_SAMPLE_STRIDE = 1;
+    const DEFAULT_HISTOGRAM_INTERVAL_MS = 200;
+    const DEFAULT_HISTOGRAM_SAMPLE_STRIDE = 8;
     let currentMode = 'linear';
     let currentHistogramIntervalMs = DEFAULT_HISTOGRAM_INTERVAL_MS;
     let currentHistogramSampleStride = DEFAULT_HISTOGRAM_SAMPLE_STRIDE;

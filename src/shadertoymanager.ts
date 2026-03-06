@@ -23,8 +23,8 @@ const DEFAULT_INSPECTOR_MAPPING: InspectorMapping = {
     max: 1,
     highlightOutOfRange: false
 };
-const DEFAULT_HISTOGRAM_INTERVAL_MS = 1000;
-const DEFAULT_HISTOGRAM_SAMPLE_STRIDE = 1;
+const DEFAULT_HISTOGRAM_INTERVAL_MS = 200;
+const DEFAULT_HISTOGRAM_SAMPLE_STRIDE = 8;
 
 export class ShaderToyManager {
     context: Context;

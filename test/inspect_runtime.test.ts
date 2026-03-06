@@ -18,6 +18,7 @@ function loadInspectorHarness() {
     let fullReadPixelsCalls = 0;
     let nowMs = 0;
     let renderTargetReadPixelsCalls = 0;
+    let lastRenderTargetReadSize = { width: 0, height: 0 };
 
     const material = {
         fragmentShader: SIMPLE_SHADER,
@@ -56,6 +57,7 @@ function loadInspectorHarness() {
         setRenderTarget: () => undefined,
         render: () => undefined,
         readRenderTargetPixels: (_target: unknown, _x: number, _y: number, w: number, h: number, buffer: Float32Array) => {
+            lastRenderTargetReadSize = { width: w, height: h };
             if (w === 2 && h === 2) {
                 renderTargetReadPixelsCalls++;
                 buffer.set([
@@ -64,6 +66,17 @@ function loadInspectorHarness() {
                     0.0, 0.5, 1.0, 1.0,
                     1.0, 0.75, 1.5, 1.0,
                 ]);
+                return;
+            }
+
+            renderTargetReadPixelsCalls++;
+            for (let index = 0; index < w * h; index++) {
+                const offset = index * 4;
+                const base = index / Math.max(1, (w * h) - 1);
+                buffer[offset] = -1.0 + base * 2.0;
+                buffer[offset + 1] = base;
+                buffer[offset + 2] = 0.5 + base;
+                buffer[offset + 3] = 1.0;
             }
         },
     };
@@ -162,6 +175,7 @@ function loadInspectorHarness() {
         messages,
         getFullReadPixelsCalls: () => fullReadPixelsCalls,
         getRenderTargetReadPixelsCalls: () => renderTargetReadPixelsCalls,
+        getLastRenderTargetReadSize: () => ({ ...lastRenderTargetReadSize }),
         getLastSetIntervalMs: () => lastSetIntervalMs,
     };
 }
@@ -200,13 +214,13 @@ suite('Inspect runtime', () => {
         assert.strictEqual(sandbox.ShaderToy.inspector.isHistogramEnabled(), true);
     });
 
-    test('defaults histogram refresh to 1Hz and switches to preset intervals', () => {
+    test('defaults histogram refresh to 5Hz and switches to preset intervals', () => {
         const { sandbox, getLastSetIntervalMs } = loadInspectorHarness();
 
-        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramIntervalMs(), 1000);
+        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramIntervalMs(), 200);
 
         sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
-        assert.strictEqual(getLastSetIntervalMs(), 1000);
+        assert.strictEqual(getLastSetIntervalMs(), 200);
 
         sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramInterval', intervalMs: 200 });
         assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramIntervalMs(), 200);
@@ -217,16 +231,16 @@ suite('Inspect runtime', () => {
         assert.strictEqual(getLastSetIntervalMs(), 100);
     });
 
-    test('defaults histogram sample stride to 1 and switches to preset strides', () => {
+    test('defaults histogram sample stride to 1:8 and switches to preset strides', () => {
         const { sandbox } = loadInspectorHarness();
 
-        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramSampleStride(), 1);
+        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramSampleStride(), 8);
 
         sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramSampleStride', sampleStride: 64 });
         assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramSampleStride(), 64);
 
         sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramSampleStride', sampleStride: 256 });
-        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramSampleStride(), 1);
+        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramSampleStride(), 8);
     });
 
     test('histogram reports the observed raw domain with active histogram timing', () => {
@@ -236,6 +250,7 @@ suite('Inspect runtime', () => {
             command: 'setInspectorMapping',
             mapping: { mode: 'linear', min: -1, max: 1, highlightOutOfRange: false }
         });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramSampleStride', sampleStride: 1 });
         sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
         sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
         sandbox.ShaderToy.inspector.afterFrame();
@@ -251,7 +266,7 @@ suite('Inspect runtime', () => {
     });
 
     test('histogram sample stride reduces the analyzed sample count', () => {
-        const { sandbox, messages } = loadInspectorHarness();
+        const { sandbox, messages, getLastRenderTargetReadSize } = loadInspectorHarness();
 
         sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramSampleStride', sampleStride: 8 });
         sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
@@ -260,6 +275,7 @@ suite('Inspect runtime', () => {
 
         const histogramMessage = messages.find(message => message.command === 'inspectorHistogram');
         assert.ok(histogramMessage, 'Expected histogram payload to be posted');
+        assert.deepStrictEqual(getLastRenderTargetReadSize(), { width: 1, height: 1 }, 'Expected raw histogram capture to downsample the render target');
         assert.strictEqual(histogramMessage?.histogram?.samples, 1, 'Expected stride sampling to reduce the analyzed pixel count');
     });
 });
