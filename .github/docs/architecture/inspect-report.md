@@ -22,18 +22,18 @@
 
 ## 1. Executive summary
 
-The inspect branch does **not** land the variable inspector as a single monolithic feature. It grows it in ten functional steps and four chore steps: first as a three-party IPC scaffold, then as a correctness pass for shader-source discovery and reload persistence, then as a set of render-loop subfeatures (hover readback, histogram), and finally as a hardening/polish pass that turns the feature from “works in the happy path” into a stateful, replay-safe subsystem.
+The inspect branch does **not** land the variable inspector as a single monolithic feature. It grows it in eleven functional steps and five chore steps: first as a three-party IPC scaffold, then as a correctness pass for shader-source discovery and reload persistence, then as a set of render-loop subfeatures (hover readback, histogram), and finally as a hardening/polish pass that turns the feature from “works in the happy path” into a stateful, replay-safe subsystem.
 
 Three architectural moves define the branch:
 
 1. **A separate inspect panel was introduced as a first-class UI peer to the preview webview**, rather than as an overlay stuffed into the preview itself. That forced the extension host to become the message hub between editor selection, preview runtime, and panel UI.
 2. **`ShaderToyManager` gradually became the state authority** for inspect. The initial version only forwarded selection and control messages; by the end of the branch it checkpointed variable, line, inferred type, mapping mode, compare mode, hover enablement, histogram enablement, and histogram interval, and replayed that bundle after preview rebuilds or panel recreation.
-3. **The preview-side engine evolved from naive, directly-coupled readback to a disciplined post-render pipeline.** Hover readback moved to `afterFrame()`, histogram generation moved from repeated point samples to one framebuffer snapshot plus deferred CPU binning, timer-driven refresh was normalized into explicit 1Hz / 5Hz / 10Hz presets, and the final stage aligned histogram analysis with asynchronous full-frame evaluation plus timing telemetry.
+3. **The preview-side engine evolved from naive, directly-coupled readback to a disciplined post-render pipeline.** Hover readback moved to `afterFrame()`, histogram generation moved from repeated point samples to one framebuffer snapshot plus deferred CPU binning, timer-driven refresh was normalized into explicit 1Hz / 5Hz / 10Hz presets, stage5F aligned histogram analysis with asynchronous full-frame evaluation plus timing telemetry, and stage5G aligned the histogram’s capture domain with the raw inspector range via a dedicated float pass.
 
-The final result at `37952f7` is a coherent inspect architecture with a clean split of responsibilities:
+The final result at `704fe4c` is a coherent inspect architecture with a clean split of responsibilities:
 
 - **Extension host:** selection capture, persisted inspect state, IPC fan-out/fan-in.
-- **Preview runtime (`shader_inspect.js`):** type inference, shader rewriting, in-place material mutation, post-render readback, and async full-frame histogram evaluation.
+- **Preview runtime (`shader_inspect.js`):** type inference, shader rewriting, in-place material mutation, post-render readback, raw-range histogram capture, and async full-frame histogram evaluation.
 - **Inspect panel:** control surface and telemetry surface, with explicit `panelReady`/`syncState` rehydration.
 
 That split is the branch’s real achievement. The visible UI is only the surface expression of a deeper contract between state replay, preview shader mutation, and post-render telemetry.
@@ -58,6 +58,8 @@ That split is the branch’s real achievement. The visible UI is only the surfac
 | 12 | 2026-03-06 | `5803782` | `stage5D: streamline inspect panel status and histogram toggle` | Made histogram enablement a persisted first-class control and simplified panel status/error presentation. |
 | 13 | 2026-03-06 | `203e05d` | `stage5E: add inspect histogram refresh presets` | Added preset refresh intervals, interval persistence, normalization on both ends, and replay-order cleanup. |
 | 14 | 2026-03-06 | `37952f7` | `stage5F: align histogram with async full-frame evaluation` | Kept the preset cadence surface intact while upgrading histogram analysis to queued async full-frame binning with timing telemetry. |
+| 15 | 2026-03-06 | `6edfee4` | `chore: INSPECT implementation full scope report` | Added the full-scope inspect progression report and indexed it in `.github/README.md`; no inspect runtime change. |
+| 16 | 2026-03-06 | `704fe4c` | `stage5G: align histogram capture with raw inspector range` | Switched histogram capture from mapped screen output to a dedicated raw float inspector pass aligned with the active mapping range. |
 
 ---
 
@@ -96,7 +98,7 @@ The core design choice is that the preview webview and the inspect panel **never
 | State authority / hub | Cache inspect settings, listen to selection changes, relay messages, replay state after rebuilds | `src/shadertoymanager.ts` |
 | Panel IPC facade | Create and own the separate inspector panel, translate webview messages to callbacks, push state into the panel | `src/inspectpanel.ts` |
 | Panel UI | Render control surface and telemetry surface; emit `panelReady`, mapping, compare, hover, histogram, interval messages | `resources/inspect_panel.html` |
-| Preview engine | Infer types, rewrite shader source, mutate final material in place, read pixels after render, asynchronously bin the full framebuffer, emit status/pixel/histogram telemetry | `resources/webview/shader_inspect.js` |
+| Preview engine | Infer types, rewrite shader source, mutate final material in place, read pixels after render, capture raw histogram values through a float pass when available, asynchronously bin the full framebuffer, emit status/pixel/histogram telemetry | `resources/webview/shader_inspect.js` |
 | Regression harness | Assert runtime contracts outside VS Code UI | `test/inspect_runtime.test.ts` |
 
 ### 3.3 Final persisted state in `ShaderToyManager`
@@ -156,7 +158,7 @@ That list is the best concise description of what “inspect state” means at t
 |---|---|
 | `inspectorStatus` | Report success/error state and inferred variable/type |
 | `inspectorPixel` | Report hover pixel readback |
-| `inspectorHistogram` | Report histogram bins, stats, and evaluation timing |
+| `inspectorHistogram` | Report histogram bins, display range, and evaluation timing |
 
 ### 3.5 Final preview-side execution path
 
@@ -175,13 +177,15 @@ That list is the best concise description of what “inspect state” means at t
    - single-pixel hover readback when enabled,
    - full-frame histogram snapshot when the dirty flag is set.
 6. Histogram generation is finalized as:
-   - one `gl.readPixels(0, 0, w, h, ...)` into a reusable buffer,
-   - queued secondary-buffer capture when a previous CPU pass is still running,
+   - raw float capture through a dedicated histogram material + `THREE.WebGLRenderTarget` when float framebuffers are available,
+   - fallback screen-space `gl.readPixels(0, 0, w, h, ...)` when raw capture is unavailable,
+   - reusable byte/float buffers plus queued secondary-buffer capture when a previous CPU pass is still running,
    - generation/cancel logic so stale async work is discarded cleanly,
    - deferred CPU binning during idle time over the **full framebuffer** in chunks,
+   - raw-value binning against the current inspector mapping range on the float path,
    - 128 bins per channel,
    - 3-point smoothing before emission,
-   - `timeMs` telemetry so the panel can show evaluation cost alongside sample count.
+   - `timeMs` telemetry plus an explicit display range so the panel can show evaluation cost and the histogram’s capture domain.
 7. The panel redraws from host-fed telemetry and restores its own UI state via `syncState` when recreated.
 
 ### 3.6 Final test anchor
@@ -192,7 +196,7 @@ That list is the best concise description of what “inspect state” means at t
 - inspector restoration returns the original fragment shader,
 - histogram enablement toggles correctly,
 - histogram refresh interval defaults to `1000` ms and can switch to `200` and `100` ms,
-- histogram evaluation bins the full framebuffer and reports timing metadata.
+- histogram evaluation bins the full framebuffer through the raw render-target path when available and reports timing metadata.
 
 That is a deliberately architectural test surface: it asserts lifecycle and state transitions rather than pixel-perfect visuals.
 
@@ -836,7 +840,7 @@ Stage5E closes the loop on inspect-state completeness. After this commit, every 
 - bounded by normalization logic,
 - at least partially protected by tests.
 
-This is the point where the branch’s control surface becomes configuration-complete. The next commit keeps that state model intact, but reshapes the histogram evaluation path behind it for higher fidelity and better observability.
+This is the point where the branch’s control surface becomes configuration-complete. The next two commits keep that state model intact while first deepening the async histogram pipeline and then changing the histogram capture domain itself.
 
 ---
 
@@ -944,7 +948,144 @@ Stage5F is the final histogram-algorithm step in the current history:
 - stage5E made cadence explicit and replay-safe,
 - stage5F made the analysis itself full-frame, asynchronous, and measurable.
 
-That means the branch now ends with a histogram subsystem that is not only configurable, but also more honest about both data fidelity and runtime cost.
+That means the histogram subsystem is now configurable, full-frame-aware, and explicit about runtime cost—but it is still capturing mapped output rather than the raw inspector-value domain. The next commit changes exactly that.
+
+---
+
+### 4.15 `6edfee4` — `chore: INSPECT implementation full scope report`
+
+**Touched files**
+
+- `.github/README.md`
+- `.github/docs/architecture/inspect-report.md`
+
+**What changed**
+
+This was a documentation-only chore commit that added the first full-scope, commit-by-commit inspect progression report and indexed it from `.github/README.md`.
+
+In practical terms, the branch gained:
+
+- a dedicated architecture report for the inspect implementation progression,
+- a stable entry in the helper-doc index so future work can discover that report easily.
+
+**Why it mattered**
+
+Like the earlier doc/reference chores, this did not change inspect runtime behavior. It did, however, strengthen the branch’s self-documentation story. At this point the inspect work is no longer only embodied in code and scattered commit messages; it is also captured in a deliberate narrative artifact that future engineers can reread.
+
+**Effect on the implementation arc**
+
+Runtime-wise, none. Process-wise, it is another sign that this branch is being treated as a referenceable transplant effort rather than a throwaway spike. It also means that stage5G lands immediately after the branch gains a much richer written explanation of its own prior evolution.
+
+---
+
+### 4.16 `704fe4c` — `stage5G: align histogram capture with raw inspector range`
+
+**Touched files**
+
+- `resources/webview/shader_inspect.js`
+- `test/inspect_runtime.test.ts`
+
+**What changed**
+
+This commit changes **what data the histogram is built from**.
+
+Up through stage5F, histogram evaluation had become asynchronous and full-frame, but it still binned values from the mapped screen-output path unless a fallback path intervened. Stage5G introduces a dedicated raw-capture pipeline so the histogram can describe the inspected value domain itself.
+
+#### New raw histogram capture path
+
+`resources/webview/shader_inspect.js` gained several new capabilities:
+
+- float-mode buffers:
+  - `_histogramFloatBuf`
+  - `_histogramQueuedFloatBuf`
+- queue metadata that now tracks value domain and display range:
+  - `_histogramQueuedValueMode`
+  - `_histogramQueuedDisplayMin`
+  - `_histogramQueuedDisplayMax`
+- dedicated histogram-render resources:
+  - `_histogramMaterial`
+  - `_histogramTarget`
+  - `_lastHistogramSource`
+
+New helpers were added to support that path:
+
+- `canUseRawHistogram()`
+- `ensureHistogramByteBuffer(...)`
+- `ensureHistogramFloatBuffer(...)`
+- `disposeHistogramResources()`
+- `syncHistogramMaterial(...)`
+- `ensureHistogramTarget(...)`
+
+Taken together, those additions give the histogram path its own render-time substrate instead of forcing it to observe whatever the visible mapped preview happened to emit.
+
+#### Dedicated float pass aligned with mapping range
+
+The core behavioral changes are:
+
+- `updateInspection()` now prepares a second shader source for histogram work and keeps a dedicated histogram material synchronized with the current inspected source.
+- `snapshotForHistogram()` now prefers a raw path:
+  1. ensure a float render target,
+  2. render the histogram material into that target,
+  3. read back float pixels via `renderer.readRenderTargetPixels(...)`,
+  4. bin them asynchronously.
+- if raw capture is unavailable, the previous byte-based fallback remains in place via `gl.readPixels(...)` from the visible framebuffer.
+
+The binning path itself also changes semantics:
+
+- `startHistogramProcessing(...)` now accepts `valueMode`, `displayMin`, and `displayMax`,
+- float-mode binning maps values into bins against the **current inspector mapping range** rather than against `0..255` byte space,
+- `postHistogram(...)` now emits the display range explicitly instead of deriving min/max from byte extrema.
+
+That last point is important: the histogram panel is no longer implicitly reporting “what byte range happened to be observed.” It is now reporting against the active inspector range, which is what the feature actually asks the user to reason about.
+
+#### Resource lifecycle hardening
+
+Because stage5G introduces dedicated histogram render resources, it also adds cleanup:
+
+- `restoreOriginal()` now disposes histogram resources,
+- `onHotReload()` also disposes them before re-inspection.
+
+That keeps the new float-pass path aligned with the same hot-reload/resource-lifecycle discipline that stage5C applied to the main inspector material.
+
+#### Test expansion
+
+`test/inspect_runtime.test.ts` was extended to exercise the raw path directly:
+
+- the harness now provides:
+  - a stub `renderer`,
+  - float-framebuffer support,
+  - `THREE.WebGLRenderTarget`,
+  - `THREE.ShaderMaterial`,
+  - counters for render-target readback calls.
+- the histogram test now asserts:
+  - raw render-target capture is used,
+  - the screen `gl.readPixels(...)` fallback is **not** used in the supported case,
+  - all pixels are analyzed,
+  - the histogram reports the configured display range (`-1` to `1` in the test),
+  - timing telemetry is still emitted.
+
+This is a much stronger correctness test than the earlier histogram assertion because it validates the intended **capture domain**, not just that some histogram payload appears.
+
+**Why it mattered**
+
+Stage5F solved “how do we process a whole frame asynchronously?” Stage5G solves a different question: **what exactly should the histogram be a histogram of?**
+
+For an inspect tool, the most useful answer is not “whatever mapped screen bytes the preview produced,” but “the raw inspected values interpreted against the current mapping range.” Without this commit, the histogram could be efficient and responsive while still being semantically downstream of the visible mapped output.
+
+Stage5G fixes that by giving histogram capture its own dedicated raw path while preserving the fallback path for environments that cannot support float render-target readback.
+
+**Effect on the implementation arc**
+
+Stage5G is the current endpoint of histogram maturation:
+
+- stage5A introduced the feature,
+- stage5B fixed the cost model,
+- stage5D exposed enablement,
+- stage5E exposed cadence,
+- stage5F made evaluation asynchronous and full-frame,
+- stage5G aligned the capture domain with the actual inspector range.
+
+That is the point where histogram stops being merely “a graph of the inspected image” and becomes much closer to “a graph of the inspected values themselves.”
 
 ---
 
@@ -1004,9 +1145,10 @@ The histogram progression is especially instructive:
 - stage5B rewrites the execution model around one readback + deferred CPU work,
 - stage5D adds user enable/disable state,
 - stage5E adds bounded cadence presets,
-- stage5F upgrades the deferred path from sampled approximation to queued async full-frame evaluation with timing telemetry.
+- stage5F upgrades the deferred path from sampled approximation to queued async full-frame evaluation with timing telemetry,
+- stage5G aligns the capture source with the raw inspector range via a dedicated float pass.
 
-That is a healthy feature maturation pattern: first demonstrate usefulness, then shape cost, then expose controls, and finally tighten fidelity plus observability.
+That is a healthy feature maturation pattern: first demonstrate usefulness, then shape cost, then expose controls, then tighten fidelity plus observability, and finally align the capture domain with the values the user is actually reasoning about.
 
 ### 5.6 Settings are normalized at both ends of the IPC boundary
 
@@ -1022,7 +1164,8 @@ The runtime tests introduced late in the branch do not try to prove visually per
 - restoration,
 - enable/disable toggles,
 - timer configuration,
-- full-frame histogram evaluation and timing payloads.
+- full-frame histogram evaluation and timing payloads,
+- raw render-target histogram capture against the configured inspector range.
 
 That is a pragmatic and architecture-aware choice for a webview/WebGL feature.
 
@@ -1032,9 +1175,10 @@ The non-runtime commits are not random noise:
 
 - one adds architecture docs and skills,
 - one adds the upstream FragCoord reference as a submodule,
+- one adds the full-scope inspect report itself,
 - two briefly add and then remove local worktree gitlinks.
 
-The first two, especially, show that inspect work on this branch was being treated as a documented transplant exercise rather than as an isolated hack.
+The documentation-focused chores, especially, show that inspect work on this branch was being treated as a documented transplant exercise rather than as an isolated hack.
 
 ---
 
@@ -1103,7 +1247,7 @@ It is the best commit for seeing how the branch closes its remaining configurati
 
 ### 6.7 `37952f7` — async full-frame histogram alignment
 
-Read this last to understand the current endpoint of the branch’s histogram work:
+Read this next to understand how the histogram became asynchronously full-frame before its capture domain was corrected:
 
 - queued async CPU binning,
 - generation-based cancellation,
@@ -1113,16 +1257,29 @@ Read this last to understand the current endpoint of the branch’s histogram wo
 
 This is the commit that turns the histogram from “well-controlled and efficient enough” into “well-controlled, efficient enough, and materially closer to the real framebuffer distribution.”
 
+### 6.8 `704fe4c` — raw-range histogram capture
+
+Read this last to understand the current endpoint of the branch’s histogram work:
+
+- dedicated histogram material + float render target,
+- raw `renderer.readRenderTargetPixels(...)` capture,
+- fallback byte path retention,
+- binning against the active inspector range,
+- cleanup of histogram-specific resources on restore and hot reload,
+- tests that verify the raw path instead of the screen-output fallback.
+
+If future work touches histogram correctness rather than just cost, this is one of the first commits to revisit.
+
 ---
 
 ## 7. Conclusion
 
-This commit range is best understood as the construction of an **inspect subsystem contract**, not merely the construction of a panel. The branch begins by proving that FragCoord-style inspect machinery can be transplanted into the preview, then spends the rest of its life making that machinery line-accurate, replay-safe, render-loop-correct, operationally affordable, and finally more faithful in its histogram evaluation model.
+This commit range is best understood as the construction of an **inspect subsystem contract**, not merely the construction of a panel. The branch begins by proving that FragCoord-style inspect machinery can be transplanted into the preview, then spends the rest of its life making that machinery line-accurate, replay-safe, render-loop-correct, operationally affordable, and finally more faithful in both its histogram evaluation model and its histogram capture domain.
 
-The final architecture at `37952f7` is strong because it settles on a clear split:
+The final architecture at `704fe4c` is strong because it settles on a clear split:
 
 - the **manager** owns state and replay,
-- the **preview runtime** owns rewriting, readback, and async histogram evaluation,
+- the **preview runtime** owns rewriting, readback, raw-range capture, and async histogram evaluation,
 - the **panel** owns controls and telemetry presentation.
 
-That split is the durable outcome of the branch. Future engineering work on inspect should preserve it, especially the host-side checkpointing model, the thin `webview_base.html` bridge, and the post-render readback discipline established across stages 4 through 5F.
+That split is the durable outcome of the branch. Future engineering work on inspect should preserve it, especially the host-side checkpointing model, the thin `webview_base.html` bridge, and the post-render readback discipline established across stages 4 through 5G.
