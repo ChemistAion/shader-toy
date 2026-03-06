@@ -11,6 +11,7 @@ Primary documentation lives under `.github/docs/`.
 - `docs/architecture/shadertoy-report.md` - architecture report for the shader-toy extension (entry points, parsing pipeline, webview assembly, render loop, IPC, feature modules).
 - `docs/architecture/shadertoyPRs-overview.md` - PR progression overview and architectural decision trail.
 - `docs/architecture/shadertoyPanels-overview.md` - panel/webview machinery overview.
+- `docs/architecture/inspect-report.md` - verbose commit-by-commit report of the inspect implementation progression on `wip#fragcoord-inspect`.
 
 ### Planning (FragCoord v0.7.1)
 
