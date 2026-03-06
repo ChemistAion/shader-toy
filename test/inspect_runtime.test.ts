@@ -5,7 +5,11 @@ import * as vm from 'vm';
 
 const SIMPLE_SHADER = `void main() {
     float x = 0.5;
-    gl_FragColor = vec4(x, 0.0, 0.0, 1.0);
+    int count = 2;
+    vec2 uv = vec2(0.25, 0.75);
+    vec4 color = vec4(x, uv, 1.0);
+    bool enabled = true;
+    gl_FragColor = color;
 }
 `;
 
@@ -14,7 +18,13 @@ function loadInspectorHarness() {
     const inspectPath = path.join(repoRoot, 'resources', 'webview', 'shader_inspect.js');
     const source = fs.readFileSync(inspectPath, 'utf8');
     let lastSetIntervalMs = 0;
-    const messages: Array<{ command: string; histogram?: { samples: number; autoMin: number; autoMax: number; timeMs: number } }> = [];
+    const messages: Array<{
+        command: string;
+        status?: string;
+        message?: string;
+        variable?: string;
+        histogram?: { samples: number; autoMin: number; autoMax: number; timeMs: number; componentCount?: number; binsA?: number[] };
+    }> = [];
     let fullReadPixelsCalls = 0;
     let nowMs = 0;
     let renderTargetReadPixelsCalls = 0;
@@ -261,7 +271,8 @@ suite('Inspect runtime', () => {
         assert.strictEqual(getRenderTargetReadPixelsCalls(), 1, 'Expected one raw render-target readback');
         assert.strictEqual(histogramMessage?.histogram?.samples, 4, 'Expected all framebuffer pixels to be analyzed');
         assert.strictEqual(histogramMessage?.histogram?.autoMin, -1);
-        assert.strictEqual(histogramMessage?.histogram?.autoMax, 1.5);
+        assert.strictEqual(histogramMessage?.histogram?.autoMax, 1);
+        assert.strictEqual(histogramMessage?.histogram?.componentCount, 1);
         assert.strictEqual(histogramMessage?.histogram?.timeMs, 3.75);
     });
 
@@ -277,5 +288,58 @@ suite('Inspect runtime', () => {
         assert.ok(histogramMessage, 'Expected histogram payload to be posted');
         assert.deepStrictEqual(getLastRenderTargetReadSize(), { width: 1, height: 1 }, 'Expected raw histogram capture to downsample the render target');
         assert.strictEqual(histogramMessage?.histogram?.samples, 1, 'Expected stride sampling to reduce the analyzed pixel count');
+    });
+
+    test('ignores non-variable inspector targets and keeps the last valid inspection active', () => {
+        const { material, sandbox, messages } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        const rewrittenShader = material.fragmentShader;
+        const messageCount = messages.length;
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'for', line: 2 });
+
+        assert.strictEqual(material.fragmentShader, rewrittenShader, 'Expected invalid selections to leave the last valid inspection in place');
+        assert.strictEqual(messages.length, messageCount, 'Expected invalid selections to be ignored without posting a new status');
+        assert.strictEqual(messages.some(message => message.command === 'inspectorStatus' && message.status === 'error'), false, 'Expected invalid selections to avoid error status updates');
+    });
+
+    test('accepts integer inspector targets', () => {
+        const { material, sandbox, messages } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'count', line: 3 });
+
+        assert.ok(material.fragmentShader.includes('_inspMap(vec4(count, count, count, 1.0))'), 'Expected integer variables to be coerced into the inspect map');
+        const statusMessage = messages.find(message => message.command === 'inspectorStatus' && message.status === 'ok');
+        assert.strictEqual(statusMessage?.variable, 'count');
+        assert.strictEqual(statusMessage?.message, 'Inspecting: count (int)');
+    });
+
+    test('rejects unsupported bool inspector targets', () => {
+        const { material, sandbox, messages } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        const rewrittenShader = material.fragmentShader;
+        const messageCount = messages.length;
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'enabled', line: 5 });
+
+        assert.strictEqual(material.fragmentShader, rewrittenShader, 'Expected unsupported bool selections to be ignored');
+        assert.strictEqual(messages.length, messageCount, 'Expected unsupported bool selections to avoid new status messages');
+    });
+
+    test('normalizes vector component selections to the full vector inspection target', () => {
+        const { material, sandbox, messages } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'uv.x', line: 4 });
+
+        assert.ok(material.fragmentShader.includes('gl_FragColor = _inspMap(vec4(uv, 0.0, 1.0));'), 'Expected vector component selection to inspect the full vector');
+        const statusMessage = messages.find(message => message.command === 'inspectorStatus' && message.status === 'ok');
+        assert.strictEqual(statusMessage?.variable, 'uv');
+        assert.strictEqual(statusMessage?.message, 'Inspecting: uv (vec2)');
     });
 });

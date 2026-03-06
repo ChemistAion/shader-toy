@@ -35,7 +35,7 @@
         'iResolution', 'iTime', 'iTimeDelta', 'iFrame', 'iMouse', 'iDate'
     ]);
 
-    const TYPE_REGEX_STR = 'float|int|uint|bool|vec[234]|ivec[234]|uvec[234]|mat[234]';
+    const TYPE_REGEX_STR = 'float|int|uint|vec[234]|ivec[234]|uvec[234]';
 
     const GLSL_KEYWORDS = new Set([
         'true', 'false', 'if', 'else', 'for', 'while', 'switch', 'case',
@@ -65,6 +65,7 @@
     const DEFAULT_MAPPING = { mode: 'linear', min: 0, max: 1, highlightOutOfRange: false };
 
     const RANGE_ANNOTATION = /\/\/\s*\[\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\]/;
+    const SIMPLE_VARIABLE_RE = /^[a-zA-Z_]\w*(?:\.[xyzwrgba]{1,4})?$/;
 
     // ── Utility ─────────────────────────────────────────────────────
 
@@ -76,9 +77,21 @@
         switch (t) {
             case 'vec2': case 'ivec2': case 'uvec2': return 2;
             case 'vec3': case 'ivec3': case 'uvec3': return 3;
-            case 'vec4': case 'ivec4': case 'uvec4': case 'mat2': case 'mat3': case 'mat4': return 4;
+            case 'vec4': case 'ivec4': case 'uvec4': return 4;
             default: return 1;
         }
+    }
+
+    function isSupportedInspectableType(type) {
+        return /^(float|int|uint|vec[234]|ivec[234]|uvec[234])$/.test(type || '');
+    }
+
+    function isVectorType(type) {
+        return /^(vec[234]|ivec[234]|uvec[234])$/.test(type || '');
+    }
+
+    function getInspectableComponentCount(type) {
+        return Math.max(1, Math.min(4, typeDimension(type)));
     }
 
     // ── Type Inference (port of a2 pipeline) ────────────────────────
@@ -121,8 +134,8 @@
         if (/^-?\d+$/.test(t)) return 'int';
         const m = t.match(new RegExp(`^(${TYPE_REGEX_STR})\\s*\\(`));
         if (m) return m[1];
-        const m2 = t.match(new RegExp(`^(${TYPE_REGEX_STR})\\b`));
-        return m2 ? m2[1] : 'float';
+        const m2 = t.match(new RegExp(`^(${TYPE_REGEX_STR})\b`));
+        return m2 ? m2[1] : null;
     }
 
     /** Resolve variable type from builtins, uniforms, or declarations (port of C0) */
@@ -135,12 +148,12 @@
         if (dotIdx > 0) {
             const base = name.slice(0, dotIdx);
             const swiz = name.slice(dotIdx);
-            if (BUILTIN_VARIABLES[base] !== undefined) {
-                return resolveSwizzle(swiz) || BUILTIN_VARIABLES[base];
+            const baseType = resolveVariableType(source, base, targetLine);
+            const swizzleType = resolveSwizzle(swiz);
+            if (baseType && swizzleType) {
+                return swizzleType;
             }
-            if (UNIFORM_TYPES[base] !== undefined) {
-                return resolveSwizzle(swiz) || UNIFORM_TYPES[base];
-            }
+            return baseType;
         }
 
         // Check declaration in source — prefer nearest to targetLine
@@ -169,14 +182,57 @@
                 bestMatch = { type: m[1], line: 0 };
             }
         }
-        return bestMatch ? bestMatch.type : 'float';
+        return bestMatch ? bestMatch.type : null;
+    }
+
+    function tryResolveInspectableVariable(source, variable, targetLine) {
+        const candidate = (variable || '').trim();
+        if (!candidate || !SIMPLE_VARIABLE_RE.test(candidate)) return null;
+
+        const dotIdx = candidate.indexOf('.');
+        const base = dotIdx > 0 ? candidate.slice(0, dotIdx) : candidate;
+        const swizzle = dotIdx > 0 ? candidate.slice(dotIdx) : '';
+        if (GLSL_KEYWORDS.has(base)) return null;
+
+        const def = resolveDefine(base, source);
+        const baseType = def ? inferLiteralType(def) : resolveVariableType(source, base, targetLine);
+        if (!isSupportedInspectableType(baseType)) return null;
+
+        if (!swizzle) {
+            return {
+                variable: candidate,
+                resolvedExpr: def ?? candidate,
+                type: baseType
+            };
+        }
+
+        const swizzleType = resolveSwizzle(swizzle);
+        if (!swizzleType || typeDimension(baseType) < 2) return null;
+
+        if (isVectorType(baseType)) {
+            return {
+                variable: base,
+                resolvedExpr: def ? `(${def})` : base,
+                type: baseType
+            };
+        }
+
+        return {
+            variable: candidate,
+            resolvedExpr: def ? `(${def})${swizzle}` : candidate,
+            type: swizzleType
+        };
     }
 
     /** Complex expression analysis (port of mb) */
     function inferExpressionType(expr, source) {
         let best = 'float';
         let bestDim = 1;
-        const promote = (t) => { const d = typeDimension(t); if (d > bestDim) { best = t; bestDim = d; } };
+        const promote = (t) => {
+            if (!t) return;
+            const d = typeDimension(t);
+            if (d > bestDim) { best = t; bestDim = d; }
+        };
 
         // Type constructors: vec3(...)
         const ctorRe = new RegExp(`\\b(${TYPE_REGEX_STR})\\s*\\(`, 'g');
@@ -282,20 +338,12 @@
         switch (type) {
             case 'float': case 'int': case 'uint':
                 return `vec4(${expr}, ${expr}, ${expr}, 1.0)`;
-            case 'bool':
-                return `vec4(vec3(${expr}), 1.0)`;
             case 'vec2': case 'ivec2': case 'uvec2':
                 return `vec4(${expr}, 0.0, 1.0)`;
             case 'vec3': case 'ivec3': case 'uvec3':
                 return `vec4(${expr}, 1.0)`;
             case 'vec4': case 'ivec4': case 'uvec4':
                 return `vec4(${expr})`;
-            case 'mat2':
-                return `vec4(${expr}[0], ${expr}[1])`;
-            case 'mat3':
-                return `vec4(${expr}[0], 1.0)`;
-            case 'mat4':
-                return `vec4(${expr}[0])`;
             default:
                 return `vec4(vec3(${expr}), 1.0)`;
         }
@@ -680,6 +728,7 @@ vec4 _inspMap(vec4 v) {${oor}
     let _histogramTarget = null;
     let _lastHistogramSource = '';
     let _inspectorMaterial = null;
+    let _inspectorType = '';
     let _originalMaterials = new Map();  // bufferIndex → original material
     let _originalFragmentShaders = new Map(); // bufferIndex → original fragment shader source
     let _lastRewrittenSource = '';
@@ -838,7 +887,7 @@ vec4 _inspMap(vec4 v) {${oor}
         };
     }
 
-    function postHistogram(binsR, binsG, binsB, samples, domainMin, domainMax, timeMs) {
+    function postHistogram(binsR, binsG, binsB, binsA, samples, domainMin, domainMax, timeMs, componentCount) {
         if (typeof vscode !== 'undefined' && vscode) {
             vscode.postMessage({
                 command: 'inspectorHistogram',
@@ -846,11 +895,13 @@ vec4 _inspMap(vec4 v) {${oor}
                     binsR: binsR,
                     binsG: binsG,
                     binsB: binsB,
+                    binsA: binsA,
                     bins: binsR.length,
                     samples: samples,
                     timeMs: timeMs,
                     autoMin: domainMin,
-                    autoMax: domainMax
+                    autoMax: domainMax,
+                    componentCount: componentCount
                 }
             });
         }
@@ -904,8 +955,10 @@ vec4 _inspMap(vec4 v) {${oor}
         const binsR = new Float32Array(BINS);
         const binsG = new Float32Array(BINS);
         const binsB = new Float32Array(BINS);
+        const binsA = new Float32Array(BINS);
         const byteScale = 1 / 255;
         const domainEpsilon = valueMode === 'float' ? 1e-9 : 1;
+        const componentCount = getInspectableComponentCount(_inspectorType);
 
         let offset = 0;
         let pixelIndex = 0;
@@ -949,25 +1002,47 @@ vec4 _inspMap(vec4 v) {${oor}
                 const rv = pixels[offset];
                 const gv = pixels[offset + 1];
                 const bv = pixels[offset + 2];
+                const av = pixels[offset + 3];
 
                 if (phase === 'scan') {
-                    const lo = Math.min(rv, gv, bv);
-                    const hi = Math.max(rv, gv, bv);
+                    let lo = rv;
+                    let hi = rv;
+                    if (componentCount >= 2) {
+                        lo = Math.min(lo, gv);
+                        hi = Math.max(hi, gv);
+                    }
+                    if (componentCount >= 3) {
+                        lo = Math.min(lo, bv);
+                        hi = Math.max(hi, bv);
+                    }
+                    if (componentCount >= 4) {
+                        lo = Math.min(lo, av);
+                        hi = Math.max(hi, av);
+                    }
                     if (lo < domainMinRaw) domainMinRaw = lo;
                     if (hi > domainMaxRaw) domainMaxRaw = hi;
                 } else {
                     if (stableDomain.collapsed) {
                         const centerIdx = BINS >> 1;
                         binsR[centerIdx]++;
-                        binsG[centerIdx]++;
-                        binsB[centerIdx]++;
+                        if (componentCount >= 2) binsG[centerIdx]++;
+                        if (componentCount >= 3) binsB[centerIdx]++;
+                        if (componentCount >= 4) binsA[centerIdx]++;
                     } else {
                         const rIdx = Math.min(Math.max(Math.floor(((rv - stableDomain.min) / stableDomain.span) * BINS), 0), BINS - 1);
-                        const gIdx = Math.min(Math.max(Math.floor(((gv - stableDomain.min) / stableDomain.span) * BINS), 0), BINS - 1);
-                        const bIdx = Math.min(Math.max(Math.floor(((bv - stableDomain.min) / stableDomain.span) * BINS), 0), BINS - 1);
                         binsR[rIdx]++;
-                        binsG[gIdx]++;
-                        binsB[bIdx]++;
+                        if (componentCount >= 2) {
+                            const gIdx = Math.min(Math.max(Math.floor(((gv - stableDomain.min) / stableDomain.span) * BINS), 0), BINS - 1);
+                            binsG[gIdx]++;
+                        }
+                        if (componentCount >= 3) {
+                            const bIdx = Math.min(Math.max(Math.floor(((bv - stableDomain.min) / stableDomain.span) * BINS), 0), BINS - 1);
+                            binsB[bIdx]++;
+                        }
+                        if (componentCount >= 4) {
+                            const aIdx = Math.min(Math.max(Math.floor(((av - stableDomain.min) / stableDomain.span) * BINS), 0), BINS - 1);
+                            binsA[aIdx]++;
+                        }
                     }
                     samples++;
                 }
@@ -1004,10 +1079,12 @@ vec4 _inspMap(vec4 v) {${oor}
                 binsR,
                 binsG,
                 binsB,
+                binsA,
                 samples,
                 toDisplayValue(domainMinRaw),
                 toDisplayValue(domainMaxRaw),
-                initialTimeMs + activeProcessingMs
+                initialTimeMs + activeProcessingMs,
+                componentCount
             );
             drainQueuedHistogram();
         }
@@ -1047,11 +1124,19 @@ vec4 _inspMap(vec4 v) {${oor}
 
             // Adjust VS Code editor line → source line (account for preamble)
             const sourceLine = _line > 0 ? _line + getPreambleOffset(source) : _line;
+            const inspectTarget = tryResolveInspectableVariable(source, _variable, sourceLine);
+            if (!inspectTarget) {
+                return;
+            }
 
-            const type = inferType(source, _variable, sourceLine);
+            _variable = inspectTarget.variable;
+
+            const type = inspectTarget.type;
+            _inspectorType = type;
+            const vec4Expr = coerceToVec4(inspectTarget.resolvedExpr, type);
             const rewritten = _compareMode ?
-                rewriteForCompare(source, _variable, sourceLine) :
-                rewriteForInspector(source, _variable, _mapping, sourceLine);
+                buildCompareShader(source, inspectTarget.variable, vec4Expr, false, sourceLine) :
+                buildInspectorShader(source, inspectTarget.variable, vec4Expr, _mapping, false, sourceLine);
 
             if (!rewritten) {
                 postStatus('error', 'Could not find main() in shader');
@@ -1126,6 +1211,7 @@ vec4 _inspMap(vec4 v) {${oor}
         _originalFragmentShaders.clear();
         disposeHistogramResources();
         _inspectorMaterial = null;
+        _inspectorType = '';
         _lastRewrittenSource = '';
     }
 
@@ -1304,13 +1390,24 @@ vec4 _inspMap(vec4 v) {${oor}
     function handleMessage(msg) {
         switch (msg.command) {
             case 'setInspectorVariable':
-                _variable = msg.variable || '';
-                _line = msg.line || 0;
+            {
+                const nextVariable = msg.variable || '';
+                const nextLine = msg.line || 0;
+                const source = getShaderSource();
+                const sourceLine = nextLine > 0 ? nextLine + getPreambleOffset(source) : nextLine;
+                const inspectTarget = tryResolveInspectableVariable(source, nextVariable, sourceLine);
+                if (!inspectTarget) {
+                    break;
+                }
+
+                _variable = inspectTarget.variable;
+                _line = nextLine;
                 if (_active && _variable) {
                     updateInspection();
                     requestHistogramUpdate();
                 }
                 break;
+            }
 
             case 'setInspectorMapping':
                 if (msg.mapping) {

@@ -8,6 +8,7 @@ import { WebviewContentProvider } from './webviewcontentprovider';
 import { Context } from './context';
 import { removeDuplicates } from './utility';
 import { InspectPanel, InspectorMapping } from './inspectpanel';
+import { resolveInspectableSelection } from './inspectselection';
 
 type Webview = {
     Panel: vscode.WebviewPanel,
@@ -280,21 +281,23 @@ export class ShaderToyManager {
             }
 
             const line = selection.start.line + 1; // 1-based for GLSL
+            const source = doc.getText();
+            const inspectableSelection = resolveInspectableSelection(source, selectedText, line);
 
-            if (selectedText.length > 0 && selectedText.length < 200) {
-                this._lastInspectorVariable = selectedText;
+            if (inspectableSelection) {
+                this._lastInspectorVariable = inspectableSelection.variable;
                 this._lastInspectorLine = line;
-                this._lastInspectorType = '';
+                this._lastInspectorType = inspectableSelection.type;
                 // Send to preview webview
                 if (this.webviewPanel !== undefined) {
                     this.webviewPanel.Panel.webview.postMessage({
                         command: 'setInspectorVariable',
-                        variable: selectedText,
+                        variable: inspectableSelection.variable,
                         line: line
                     });
                 }
                 // Send to inspect panel
-                this.inspectPanel.postVariableUpdate(selectedText, line, '');
+                this.inspectPanel.postVariableUpdate(inspectableSelection.variable, line, inspectableSelection.type);
             }
         }, undefined, this.context.getVscodeExtensionContext().subscriptions);
     };
