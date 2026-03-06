@@ -24,6 +24,7 @@ const DEFAULT_INSPECTOR_MAPPING: InspectorMapping = {
     highlightOutOfRange: false
 };
 const DEFAULT_HISTOGRAM_INTERVAL_MS = 1000;
+const DEFAULT_HISTOGRAM_SAMPLE_STRIDE = 1;
 
 export class ShaderToyManager {
     context: Context;
@@ -42,6 +43,7 @@ export class ShaderToyManager {
     private _lastHoverEnabled = true;
     private _lastHistogramEnabled = true;
     private _lastHistogramIntervalMs = DEFAULT_HISTOGRAM_INTERVAL_MS;
+    private _lastHistogramSampleStride = DEFAULT_HISTOGRAM_SAMPLE_STRIDE;
 
     constructor(context: Context) {
         this.context = context;
@@ -232,6 +234,16 @@ export class ShaderToyManager {
             }
         });
 
+        this.inspectPanel.setOnHistogramSampleStrideChanged((sampleStride: number) => {
+            this._lastHistogramSampleStride = sampleStride;
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorHistogramSampleStride',
+                    sampleStride: sampleStride
+                });
+            }
+        });
+
         this.inspectPanel.setOnDidDispose(() => {
             this.stopSelectionListener();
             if (this.webviewPanel !== undefined) {
@@ -301,7 +313,8 @@ export class ShaderToyManager {
             this._lastCompareEnabled,
             this._lastHoverEnabled,
             this._lastHistogramEnabled,
-            this._lastHistogramIntervalMs
+            this._lastHistogramIntervalMs,
+            this._lastHistogramSampleStride
         );
         if (this._lastInspectorVariable) {
             this.inspectPanel.postVariableUpdate(this._lastInspectorVariable, this._lastInspectorLine, this._lastInspectorType);
@@ -330,6 +343,10 @@ export class ShaderToyManager {
         this.webviewPanel.Panel.webview.postMessage({
             command: 'setInspectorHistogramInterval',
             intervalMs: this._lastHistogramIntervalMs
+        });
+        this.webviewPanel.Panel.webview.postMessage({
+            command: 'setInspectorHistogramSampleStride',
+            sampleStride: this._lastHistogramSampleStride
         });
         if (this._lastInspectorVariable) {
             this.webviewPanel.Panel.webview.postMessage({

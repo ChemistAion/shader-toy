@@ -259,6 +259,14 @@
     .histogram-rate-btn:hover {
         background: rgba(128, 128, 128, 0.15);
     }
+    .histogram-sample-controls {
+        position: absolute;
+        left: 6px;
+        bottom: 6px;
+        display: flex;
+        gap: 2px;
+        z-index: 1;
+    }
     .histogram-stats {
         display: flex;
         justify-content: space-between;
@@ -332,6 +340,11 @@
     </div>
     <div class="histogram-canvas-wrap">
         <canvas id="histogramCanvas"></canvas>
+        <div class="histogram-sample-controls">
+            <button class="histogram-rate-btn active" data-sample-stride="1">1:1</button>
+            <button class="histogram-rate-btn" data-sample-stride="8">1:8</button>
+            <button class="histogram-rate-btn" data-sample-stride="64">1:64</button>
+        </div>
         <div class="histogram-rate-controls">
             <button class="histogram-rate-btn active" data-interval-ms="1000">1Hz</button>
             <button class="histogram-rate-btn" data-interval-ms="200">5Hz</button>
@@ -367,6 +380,7 @@
     const histogramToggle = document.getElementById('histogramToggle');
     const histogramSection = document.getElementById('histogramSection');
     const histogramRateButtons = document.querySelectorAll('.histogram-rate-btn');
+    const histogramSampleButtons = document.querySelectorAll('[data-sample-stride]');
     const histCanvas = document.getElementById('histogramCanvas');
     const histCtx = histCanvas ? histCanvas.getContext('2d') : null;
     const histMinEl = document.getElementById('histMin');
@@ -374,8 +388,10 @@
     const histSamplesEl = document.getElementById('histSamples');
 
     const DEFAULT_HISTOGRAM_INTERVAL_MS = 1000;
+    const DEFAULT_HISTOGRAM_SAMPLE_STRIDE = 1;
     let currentMode = 'linear';
     let currentHistogramIntervalMs = DEFAULT_HISTOGRAM_INTERVAL_MS;
+    let currentHistogramSampleStride = DEFAULT_HISTOGRAM_SAMPLE_STRIDE;
     let lastHistogram = null;
 
     function setHoverUi(enabled) {
@@ -393,14 +409,30 @@
             : DEFAULT_HISTOGRAM_INTERVAL_MS;
     }
 
+    function normalizeHistogramSampleStride(sampleStride) {
+        const numericStride = Number(sampleStride);
+        return numericStride === 1 || numericStride === 8 || numericStride === 64
+            ? numericStride
+            : DEFAULT_HISTOGRAM_SAMPLE_STRIDE;
+    }
+
     function setHistogramIntervalUi(intervalMs) {
         currentHistogramIntervalMs = normalizeHistogramInterval(intervalMs);
         histogramRateButtons.forEach(btn => {
-            btn.classList.toggle('active', Number(btn.dataset.intervalMs) === currentHistogramIntervalMs);
+            if (btn.dataset.intervalMs) {
+                btn.classList.toggle('active', Number(btn.dataset.intervalMs) === currentHistogramIntervalMs);
+            }
         });
     }
 
-    function applyInspectorState(mapping, compareEnabled, hoverEnabled, histogramEnabled, histogramIntervalMs) {
+    function setHistogramSampleStrideUi(sampleStride) {
+        currentHistogramSampleStride = normalizeHistogramSampleStride(sampleStride);
+        histogramSampleButtons.forEach(btn => {
+            btn.classList.toggle('active', Number(btn.dataset.sampleStride) === currentHistogramSampleStride);
+        });
+    }
+
+    function applyInspectorState(mapping, compareEnabled, hoverEnabled, histogramEnabled, histogramIntervalMs, histogramSampleStride) {
         const nextMapping = mapping || {};
         const nextMode = nextMapping.mode || 'linear';
         currentMode = nextMode;
@@ -416,6 +448,7 @@
         setHoverUi(hoverToggle.checked);
         setHistogramUi(histogramToggle.checked);
         setHistogramIntervalUi(histogramIntervalMs);
+        setHistogramSampleStrideUi(histogramSampleStride);
         if (lastHistogram) drawHistogram(lastHistogram);
     }
 
@@ -490,6 +523,7 @@
     });
 
     histogramRateButtons.forEach(btn => {
+        if (!btn.dataset.intervalMs) return;
         btn.addEventListener('click', () => {
             const intervalMs = normalizeHistogramInterval(btn.dataset.intervalMs);
             setHistogramIntervalUi(intervalMs);
@@ -499,12 +533,22 @@
         });
     });
 
+    histogramSampleButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const sampleStride = normalizeHistogramSampleStride(btn.dataset.sampleStride);
+            setHistogramSampleStrideUi(sampleStride);
+            if (vscode) {
+                vscode.postMessage({ command: 'setHistogramSampleStride', sampleStride: sampleStride });
+            }
+        });
+    });
+
     // ── Incoming messages ──────────────────────────
     window.addEventListener('message', event => {
         const msg = event.data;
         switch (msg.command) {
             case 'syncState':
-                applyInspectorState(msg.mapping, msg.compareEnabled, msg.hoverEnabled, msg.histogramEnabled, msg.histogramIntervalMs);
+                applyInspectorState(msg.mapping, msg.compareEnabled, msg.hoverEnabled, msg.histogramEnabled, msg.histogramIntervalMs, msg.histogramSampleStride);
                 break;
             case 'updateVariable':
                 if (msg.variable) {
@@ -547,6 +591,7 @@
     setHoverUi(hoverToggle.checked);
     setHistogramUi(histogramToggle.checked);
     setHistogramIntervalUi(DEFAULT_HISTOGRAM_INTERVAL_MS);
+    setHistogramSampleStrideUi(DEFAULT_HISTOGRAM_SAMPLE_STRIDE);
     if (vscode) {
         vscode.postMessage({ command: 'panelReady' });
     }

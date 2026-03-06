@@ -152,6 +152,7 @@ function loadInspectorHarness() {
                     handleMessage: (message: { command: string; [key: string]: unknown }) => void;
                     isHistogramEnabled: () => boolean;
                     getHistogramIntervalMs: () => number;
+                    getHistogramSampleStride: () => number;
                     afterFrame: () => void;
                 }
             };
@@ -216,6 +217,18 @@ suite('Inspect runtime', () => {
         assert.strictEqual(getLastSetIntervalMs(), 100);
     });
 
+    test('defaults histogram sample stride to 1 and switches to preset strides', () => {
+        const { sandbox } = loadInspectorHarness();
+
+        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramSampleStride(), 1);
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramSampleStride', sampleStride: 64 });
+        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramSampleStride(), 64);
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramSampleStride', sampleStride: 256 });
+        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramSampleStride(), 1);
+    });
+
     test('histogram reports the observed raw domain for panel-side cropping', () => {
         const { sandbox, messages, getFullReadPixelsCalls, getRenderTargetReadPixelsCalls } = loadInspectorHarness();
 
@@ -235,5 +248,18 @@ suite('Inspect runtime', () => {
         assert.strictEqual(histogramMessage?.histogram?.autoMin, -1);
         assert.strictEqual(histogramMessage?.histogram?.autoMax, 1.5);
         assert.strictEqual(histogramMessage?.histogram?.timeMs, 1.25);
+    });
+
+    test('histogram sample stride reduces the analyzed sample count', () => {
+        const { sandbox, messages } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramSampleStride', sampleStride: 8 });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        sandbox.ShaderToy.inspector.afterFrame();
+
+        const histogramMessage = messages.find(message => message.command === 'inspectorHistogram');
+        assert.ok(histogramMessage, 'Expected histogram payload to be posted');
+        assert.strictEqual(histogramMessage?.histogram?.samples, 1, 'Expected stride sampling to reduce the analyzed pixel count');
     });
 });

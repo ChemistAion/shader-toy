@@ -659,6 +659,7 @@ vec4 _inspMap(vec4 v) {${oor}
     let _hoverEnabled = true;
     let _histogramEnabled = true;
     let _histogramIntervalMs = 1000;
+    let _histogramSampleStride = 1;
     let _histogramDirty = false;
     let _histogramTimer = null;
     let _histogramPixelBuf = null;   // cached Uint8Array for readback
@@ -698,6 +699,13 @@ vec4 _inspMap(vec4 v) {${oor}
         return numericInterval === 200 || numericInterval === 100 || numericInterval === 1000
             ? numericInterval
             : 1000;
+    }
+
+    function normalizeHistogramSampleStride(sampleStride) {
+        const numericStride = Number(sampleStride);
+        return numericStride === 1 || numericStride === 8 || numericStride === 64
+            ? numericStride
+            : 1;
     }
 
     function getNowMs() {
@@ -893,10 +901,13 @@ vec4 _inspMap(vec4 v) {${oor}
         const domainEpsilon = valueMode === 'float' ? 1e-9 : 1;
 
         let offset = 0;
+        let pixelIndex = 0;
         let samples = 0;
         let phase = 'scan';
         let domainMinRaw = Number.POSITIVE_INFINITY;
         let domainMaxRaw = Number.NEGATIVE_INFINITY;
+        let stableDomain = null;
+        const sampleStride = normalizeHistogramSampleStride(_histogramSampleStride);
 
         function getStableDomain(domainMin, domainMax) {
             if (!Number.isFinite(domainMin) || !Number.isFinite(domainMax)) {
@@ -924,7 +935,8 @@ vec4 _inspMap(vec4 v) {${oor}
 
             let processed = 0;
             const useDeadline = deadline && typeof deadline.timeRemaining === 'function';
-            while (offset < len) {
+            while (pixelIndex < totalPixels) {
+                offset = pixelIndex * 4;
                 const rv = pixels[offset];
                 const gv = pixels[offset + 1];
                 const bv = pixels[offset + 2];
@@ -952,7 +964,7 @@ vec4 _inspMap(vec4 v) {${oor}
                     samples++;
                 }
 
-                offset += 4;
+                pixelIndex += sampleStride;
                 processed++;
 
                 if (useDeadline) {
@@ -964,14 +976,15 @@ vec4 _inspMap(vec4 v) {${oor}
                 }
             }
 
-            if (offset < len) {
+            if (pixelIndex < totalPixels) {
                 scheduleHistogramWork(step);
                 return;
             }
 
             if (phase === 'scan') {
+                stableDomain = getStableDomain(domainMinRaw, domainMaxRaw);
                 phase = 'bin';
-                offset = 0;
+                pixelIndex = 0;
                 scheduleHistogramWork(step);
                 return;
             }
@@ -1243,6 +1256,14 @@ vec4 _inspMap(vec4 v) {${oor}
         _histogramDirty = true;
     }
 
+    function requestHistogramUpdateNow() {
+        cancelHistogramWork();
+        _histogramDirty = true;
+        if (typeof forceRenderOneFrame !== 'undefined') {
+            forceRenderOneFrame = true;
+        }
+    }
+
     /** Start / stop the periodic histogram refresh timer. */
     function startHistogramTimer() {
         stopHistogramTimer();
@@ -1328,6 +1349,13 @@ vec4 _inspMap(vec4 v) {${oor}
                     startHistogramTimer();
                 }
                 break;
+
+            case 'setInspectorHistogramSampleStride':
+                _histogramSampleStride = normalizeHistogramSampleStride(msg.sampleStride);
+                if (_histogramEnabled && _active) {
+                    requestHistogramUpdateNow();
+                }
+                break;
         }
     }
 
@@ -1342,6 +1370,7 @@ vec4 _inspMap(vec4 v) {${oor}
         isHoverEnabled: function () { return _hoverEnabled; },
         isHistogramEnabled: function () { return _histogramEnabled; },
         getHistogramIntervalMs: function () { return _histogramIntervalMs; },
+        getHistogramSampleStride: function () { return _histogramSampleStride; },
         afterFrame: afterFrame,
 
         // Called on hot-reload to clear stale material references

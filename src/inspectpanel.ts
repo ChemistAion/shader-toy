@@ -22,6 +22,7 @@ export class InspectPanel {
     private onHoverChanged: ((enabled: boolean) => void) | undefined;
     private onHistogramChanged: ((enabled: boolean) => void) | undefined;
     private onHistogramIntervalChanged: ((intervalMs: number) => void) | undefined;
+    private onHistogramSampleStrideChanged: ((sampleStride: number) => void) | undefined;
     private onDidDisposeCallback: (() => void) | undefined;
     private onReadyCallback: (() => void) | undefined;
 
@@ -91,6 +92,14 @@ export class InspectPanel {
                     }
                     break;
                 }
+                case 'setHistogramSampleStride':
+                {
+                    const sampleStride = Number(message.sampleStride);
+                    if (this.onHistogramSampleStrideChanged && Number.isFinite(sampleStride) && sampleStride > 0) {
+                        this.onHistogramSampleStrideChanged(sampleStride);
+                    }
+                    break;
+                }
                 case 'panelReady':
                     if (this.onReadyCallback) {
                         this.onReadyCallback();
@@ -151,6 +160,11 @@ export class InspectPanel {
         this.onHistogramIntervalChanged = cb;
     }
 
+    /** Register callback for when histogram sample stride changes. */
+    public setOnHistogramSampleStrideChanged(cb: (sampleStride: number) => void): void {
+        this.onHistogramSampleStrideChanged = cb;
+    }
+
     /** Register callback for when the panel is disposed. */
     public setOnDidDispose(cb: () => void): void {
         this.onDidDisposeCallback = cb;
@@ -167,7 +181,8 @@ export class InspectPanel {
         compareEnabled: boolean,
         hoverEnabled: boolean,
         histogramEnabled: boolean,
-        histogramIntervalMs: number
+        histogramIntervalMs: number,
+        histogramSampleStride: number
     ): void {
         if (this.panel) {
             this.panel.webview.postMessage({
@@ -176,7 +191,8 @@ export class InspectPanel {
                 compareEnabled,
                 hoverEnabled,
                 histogramEnabled,
-                histogramIntervalMs
+                histogramIntervalMs,
+                histogramSampleStride
             });
         }
     }
