@@ -17,6 +17,7 @@ function loadInspectorHarness() {
     const messages: Array<{ command: string; histogram?: { samples: number; autoMin: number; autoMax: number; timeMs: number } }> = [];
     let fullReadPixelsCalls = 0;
     let nowMs = 0;
+    let renderTargetReadPixelsCalls = 0;
 
     const material = {
         fragmentShader: SIMPLE_SHADER,
@@ -51,6 +52,34 @@ function loadInspectorHarness() {
         },
     };
 
+    const renderer = {
+        setRenderTarget: () => undefined,
+        render: () => undefined,
+        readRenderTargetPixels: (_target: unknown, _x: number, _y: number, w: number, h: number, buffer: Float32Array) => {
+            if (w === 2 && h === 2) {
+                renderTargetReadPixelsCalls++;
+                buffer.set([
+                    -1.0, 0.0, 0.5, 1.0,
+                    -0.5, 0.25, 0.75, 1.0,
+                    0.0, 0.5, 1.0, 1.0,
+                    1.0, 0.75, 1.5, 1.0,
+                ]);
+            }
+        },
+    };
+
+    function WebGLRenderTarget(this: Record<string, unknown>, width: number, height: number) {
+        this.width = width;
+        this.height = height;
+        this.texture = {};
+        this.dispose = () => undefined;
+    }
+
+    function ShaderMaterial(this: Record<string, unknown>, config: Record<string, unknown>) {
+        Object.assign(this, config);
+        this.dispose = () => undefined;
+    }
+
     const sandbox: Record<string, unknown> = {
         console,
         setTimeout: (fn: () => void) => {
@@ -75,6 +104,11 @@ function loadInspectorHarness() {
         },
         window: {},
         gl,
+        renderer,
+        supportsFloatFramebuffer: true,
+        quad: { material: null },
+        scene: {},
+        camera: {},
         document: {
             readyState: 'complete',
             addEventListener: () => undefined,
@@ -85,6 +119,10 @@ function loadInspectorHarness() {
         },
         THREE: {
             GLSL3: 'GLSL3',
+            FloatType: 'FloatType',
+            NearestFilter: 'NearestFilter',
+            WebGLRenderTarget,
+            ShaderMaterial,
         },
         vscode: {
             postMessage: (message: { command: string; histogram?: { samples: number; autoMin: number; autoMax: number; timeMs: number } }) => {
@@ -122,6 +160,7 @@ function loadInspectorHarness() {
         },
         messages,
         getFullReadPixelsCalls: () => fullReadPixelsCalls,
+        getRenderTargetReadPixelsCalls: () => renderTargetReadPixelsCalls,
         getLastSetIntervalMs: () => lastSetIntervalMs,
     };
 }
@@ -177,17 +216,23 @@ suite('Inspect runtime', () => {
         assert.strictEqual(getLastSetIntervalMs(), 100);
     });
 
-    test('histogram bins the full framebuffer and reports all analyzed pixels', () => {
-        const { sandbox, messages, getFullReadPixelsCalls } = loadInspectorHarness();
+    test('histogram bins raw values against the configured mapping range', () => {
+        const { sandbox, messages, getFullReadPixelsCalls, getRenderTargetReadPixelsCalls } = loadInspectorHarness();
 
+        sandbox.ShaderToy.inspector.handleMessage({
+            command: 'setInspectorMapping',
+            mapping: { mode: 'linear', min: -1, max: 1, highlightOutOfRange: false }
+        });
         sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
         sandbox.ShaderToy.inspector.afterFrame();
 
         const histogramMessage = messages.find(message => message.command === 'inspectorHistogram');
         assert.ok(histogramMessage, 'Expected histogram payload to be posted');
-        assert.strictEqual(getFullReadPixelsCalls(), 1, 'Expected a single full-frame readPixels call');
+        assert.strictEqual(getFullReadPixelsCalls(), 0, 'Expected raw histogram capture to avoid screen readPixels fallback');
+        assert.strictEqual(getRenderTargetReadPixelsCalls(), 1, 'Expected one raw render-target readback');
         assert.strictEqual(histogramMessage?.histogram?.samples, 4, 'Expected all framebuffer pixels to be analyzed');
-        assert.strictEqual(histogramMessage?.histogram?.autoMin, 0);
+        assert.strictEqual(histogramMessage?.histogram?.autoMin, -1);
         assert.strictEqual(histogramMessage?.histogram?.autoMax, 1);
         assert.strictEqual(histogramMessage?.histogram?.timeMs, 1.25);
     });

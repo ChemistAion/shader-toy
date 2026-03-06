@@ -662,13 +662,21 @@ vec4 _inspMap(vec4 v) {${oor}
     let _histogramDirty = false;
     let _histogramTimer = null;
     let _histogramPixelBuf = null;   // cached Uint8Array for readback
+    let _histogramFloatBuf = null;
     let _histogramQueuedPixelBuf = null;
+    let _histogramQueuedFloatBuf = null;
     let _histogramQueuedTotalPixels = 0;
     let _histogramQueuedGeneration = 0;
     let _histogramQueuedStartedAtMs = 0;
+    let _histogramQueuedValueMode = 'byte';
+    let _histogramQueuedDisplayMin = 0;
+    let _histogramQueuedDisplayMax = 1;
     let _histogramHasQueuedFrame = false;
     let _histogramProcessing = false;
     let _histogramGeneration = 0;
+    let _histogramMaterial = null;
+    let _histogramTarget = null;
+    let _lastHistogramSource = '';
     let _inspectorMaterial = null;
     let _originalMaterials = new Map();  // bufferIndex → original material
     let _originalFragmentShaders = new Map(); // bufferIndex → original fragment shader source
@@ -699,6 +707,14 @@ vec4 _inspMap(vec4 v) {${oor}
         return Date.now();
     }
 
+    function canUseRawHistogram() {
+        return typeof THREE !== 'undefined' &&
+            typeof renderer !== 'undefined' && renderer &&
+            typeof renderer.readRenderTargetPixels === 'function' &&
+            typeof supportsFloatFramebuffer !== 'undefined' &&
+            supportsFloatFramebuffer;
+    }
+
     function scheduleHistogramWork(callback) {
         if (typeof requestIdleCallback === 'function') {
             requestIdleCallback(callback, { timeout: 50 });
@@ -712,7 +728,7 @@ vec4 _inspMap(vec4 v) {${oor}
         }, 0);
     }
 
-    function ensureHistogramBuffer(needed, queued) {
+    function ensureHistogramByteBuffer(needed, queued) {
         if (queued) {
             if (!_histogramQueuedPixelBuf || _histogramQueuedPixelBuf.length < needed) {
                 _histogramQueuedPixelBuf = new Uint8Array(needed);
@@ -725,6 +741,80 @@ vec4 _inspMap(vec4 v) {${oor}
         return _histogramPixelBuf;
     }
 
+    function ensureHistogramFloatBuffer(totalPixels, queued) {
+        const needed = totalPixels * 4;
+        if (queued) {
+            if (!_histogramQueuedFloatBuf || _histogramQueuedFloatBuf.length < needed) {
+                _histogramQueuedFloatBuf = new Float32Array(needed);
+            }
+            return _histogramQueuedFloatBuf;
+        }
+        if (!_histogramFloatBuf || _histogramFloatBuf.length < needed) {
+            _histogramFloatBuf = new Float32Array(needed);
+        }
+        return _histogramFloatBuf;
+    }
+
+    function disposeHistogramResources() {
+        if (_histogramMaterial && typeof _histogramMaterial.dispose === 'function') {
+            _histogramMaterial.dispose();
+        }
+        if (_histogramTarget && typeof _histogramTarget.dispose === 'function') {
+            _histogramTarget.dispose();
+        }
+        _histogramMaterial = null;
+        _histogramTarget = null;
+        _lastHistogramSource = '';
+    }
+
+    function syncHistogramMaterial(origMat, preparedSource) {
+        if (!preparedSource || !canUseRawHistogram()) {
+            disposeHistogramResources();
+            return;
+        }
+
+        if (_histogramMaterial && _lastHistogramSource === preparedSource &&
+            _histogramMaterial.vertexShader === origMat.vertexShader &&
+            _histogramMaterial.glslVersion === origMat.glslVersion) {
+            _histogramMaterial.uniforms = origMat.uniforms;
+            return;
+        }
+
+        if (_histogramMaterial && typeof _histogramMaterial.dispose === 'function') {
+            _histogramMaterial.dispose();
+        }
+
+        _histogramMaterial = new THREE.ShaderMaterial({
+            glslVersion: origMat.glslVersion,
+            fragmentShader: preparedSource,
+            vertexShader: origMat.vertexShader,
+            uniforms: origMat.uniforms,
+            depthWrite: false,
+            depthTest: false
+        });
+        _lastHistogramSource = preparedSource;
+    }
+
+    function ensureHistogramTarget(width, height) {
+        if (!canUseRawHistogram()) return null;
+        if (_histogramTarget && _histogramTarget.width === width && _histogramTarget.height === height) {
+            return _histogramTarget;
+        }
+        if (_histogramTarget && typeof _histogramTarget.dispose === 'function') {
+            _histogramTarget.dispose();
+        }
+        _histogramTarget = new THREE.WebGLRenderTarget(width, height, {
+            type: THREE.FloatType,
+            depthBuffer: false,
+            stencilBuffer: false
+        });
+        if (_histogramTarget.texture) {
+            _histogramTarget.texture.minFilter = THREE.NearestFilter;
+            _histogramTarget.texture.magFilter = THREE.NearestFilter;
+        }
+        return _histogramTarget;
+    }
+
     function smoothHistogram(arr) {
         const out = new Float32Array(arr.length);
         for (let i = 0; i < arr.length; i++) {
@@ -735,7 +825,7 @@ vec4 _inspMap(vec4 v) {${oor}
         return out;
     }
 
-    function postHistogram(binsR, binsG, binsB, samples, minByte, maxByte, timeMs) {
+    function postHistogram(binsR, binsG, binsB, samples, displayMin, displayMax, timeMs) {
         if (typeof vscode !== 'undefined' && vscode) {
             vscode.postMessage({
                 command: 'inspectorHistogram',
@@ -746,8 +836,8 @@ vec4 _inspMap(vec4 v) {${oor}
                     bins: binsR.length,
                     samples: samples,
                     timeMs: timeMs,
-                    autoMin: minByte / 255,
-                    autoMax: maxByte / 255
+                    autoMin: displayMin,
+                    autoMax: displayMax
                 }
             });
         }
@@ -756,13 +846,25 @@ vec4 _inspMap(vec4 v) {${oor}
     function drainQueuedHistogram() {
         if (!_histogramHasQueuedFrame) return;
         const queuedPixels = _histogramQueuedPixelBuf;
+        const queuedFloatPixels = _histogramQueuedFloatBuf;
         const queuedTotalPixels = _histogramQueuedTotalPixels;
         const queuedGeneration = _histogramQueuedGeneration;
         const queuedStartedAtMs = _histogramQueuedStartedAtMs;
+        const queuedValueMode = _histogramQueuedValueMode;
+        const queuedDisplayMin = _histogramQueuedDisplayMin;
+        const queuedDisplayMax = _histogramQueuedDisplayMax;
         _histogramHasQueuedFrame = false;
         _histogramQueuedTotalPixels = 0;
         _histogramQueuedStartedAtMs = 0;
-        startHistogramProcessing(queuedPixels, queuedTotalPixels, queuedGeneration, queuedStartedAtMs);
+        startHistogramProcessing(
+            queuedValueMode === 'float' ? queuedFloatPixels : queuedPixels,
+            queuedTotalPixels,
+            queuedGeneration,
+            queuedStartedAtMs,
+            queuedValueMode,
+            queuedDisplayMin,
+            queuedDisplayMax
+        );
     }
 
     function cancelHistogramWork() {
@@ -771,10 +873,13 @@ vec4 _inspMap(vec4 v) {${oor}
         _histogramHasQueuedFrame = false;
         _histogramQueuedTotalPixels = 0;
         _histogramQueuedStartedAtMs = 0;
+        _histogramQueuedValueMode = 'byte';
+        _histogramQueuedDisplayMin = 0;
+        _histogramQueuedDisplayMax = 1;
         _histogramProcessing = false;
     }
 
-    function startHistogramProcessing(pixels, totalPixels, generation, startedAtMs) {
+    function startHistogramProcessing(pixels, totalPixels, generation, startedAtMs, valueMode, displayMin, displayMax) {
         if (!pixels || totalPixels <= 0) return;
 
         _histogramProcessing = true;
@@ -785,11 +890,12 @@ vec4 _inspMap(vec4 v) {${oor}
         const binsB = new Float32Array(BINS);
         const len = totalPixels * 4;
         const inv = BINS / 256;
+        const rangeMin = Number(displayMin);
+        const rangeMax = Number(displayMax);
+        const rangeSpan = Math.abs(rangeMax - rangeMin) > 1e-9 ? (rangeMax - rangeMin) : 1;
 
         let offset = 0;
         let samples = 0;
-        let minByte = 255;
-        let maxByte = 0;
 
         function step(deadline) {
             if (generation !== _histogramGeneration || !_active || !_histogramEnabled) {
@@ -805,14 +911,18 @@ vec4 _inspMap(vec4 v) {${oor}
                 const gv = pixels[offset + 1];
                 const bv = pixels[offset + 2];
 
-                binsR[Math.min((rv * inv) | 0, BINS - 1)]++;
-                binsG[Math.min((gv * inv) | 0, BINS - 1)]++;
-                binsB[Math.min((bv * inv) | 0, BINS - 1)]++;
-
-                const lo = Math.min(rv, gv, bv);
-                const hi = Math.max(rv, gv, bv);
-                if (lo < minByte) minByte = lo;
-                if (hi > maxByte) maxByte = hi;
+                if (valueMode === 'float') {
+                    const rIdx = Math.min(Math.max(Math.floor(((rv - rangeMin) / rangeSpan) * BINS), 0), BINS - 1);
+                    const gIdx = Math.min(Math.max(Math.floor(((gv - rangeMin) / rangeSpan) * BINS), 0), BINS - 1);
+                    const bIdx = Math.min(Math.max(Math.floor(((bv - rangeMin) / rangeSpan) * BINS), 0), BINS - 1);
+                    binsR[rIdx]++;
+                    binsG[gIdx]++;
+                    binsB[bIdx]++;
+                } else {
+                    binsR[Math.min((rv * inv) | 0, BINS - 1)]++;
+                    binsG[Math.min((gv * inv) | 0, BINS - 1)]++;
+                    binsB[Math.min((bv * inv) | 0, BINS - 1)]++;
+                }
 
                 offset += 4;
                 samples++;
@@ -833,7 +943,7 @@ vec4 _inspMap(vec4 v) {${oor}
             }
 
             _histogramProcessing = false;
-            postHistogram(binsR, binsG, binsB, samples, minByte, maxByte, getNowMs() - startedAtMs);
+            postHistogram(binsR, binsG, binsB, samples, displayMin, displayMax, getNowMs() - startedAtMs);
             drainQueuedHistogram();
         }
 
@@ -902,10 +1012,14 @@ vec4 _inspMap(vec4 v) {${oor}
                 // Prepare the fragment shader the same way the normal compile path does:
                 // adds layout(location=0) out, #define gl_FragColor, #define texture2D, etc.
                 let prepared = rewritten;
+                let histogramPrepared = rewriteForCompare(source, _variable, sourceLine);
                 if (window.ShaderToy && window.ShaderToy.shaderCompile &&
                     window.ShaderToy.shaderCompile.prepareFragmentShader) {
                     const isWebGL2 = origMat.glslVersion === THREE.GLSL3;
                     prepared = window.ShaderToy.shaderCompile.prepareFragmentShader(rewritten, isWebGL2);
+                    if (histogramPrepared) {
+                        histogramPrepared = window.ShaderToy.shaderCompile.prepareFragmentShader(histogramPrepared, isWebGL2);
+                    }
                 }
 
                 if (typeof currentShader !== 'undefined') {
@@ -920,6 +1034,7 @@ vec4 _inspMap(vec4 v) {${oor}
                 markShaderMaterialDirty(origMat);
                 finalBuffer.Shader = origMat;
                 _inspectorMaterial = origMat;
+                syncHistogramMaterial(origMat, histogramPrepared);
 
                 postStatus('ok', 'Inspecting: ' + _variable + ' (' + type + ')', _variable, type);
             }
@@ -944,6 +1059,7 @@ vec4 _inspMap(vec4 v) {${oor}
         }
         _originalMaterials.clear();
         _originalFragmentShaders.clear();
+        disposeHistogramResources();
         _inspectorMaterial = null;
         _lastRewrittenSource = '';
     }
@@ -1018,25 +1134,65 @@ vec4 _inspMap(vec4 v) {${oor}
             const w = canvas.width, h = canvas.height;
             if (w <= 0 || h <= 0) return;
 
-            const needed = w * h * 4;
             const totalPixels = w * h;
             const generation = ++_histogramGeneration;
             const startedAtMs = getNowMs();
-            const useQueuedBuffer = _histogramProcessing;
-            const targetBuf = ensureHistogramBuffer(needed, useQueuedBuffer);
+            const histogramMin = Number(_mapping.min);
+            const histogramMax = Number(_mapping.max);
 
-            // ONE readPixels for the entire framebuffer (single GPU stall)
+            if (canUseRawHistogram() && _histogramMaterial) {
+                const target = ensureHistogramTarget(w, h);
+                if (target) {
+                    const useQueuedBuffer = _histogramProcessing;
+                    const floatBuf = ensureHistogramFloatBuffer(totalPixels, useQueuedBuffer);
+                    const previousMaterial = (typeof quad !== 'undefined' && quad) ? quad.material : null;
+
+                    renderer.setRenderTarget(target);
+                    if (typeof quad !== 'undefined' && quad) {
+                        quad.material = _histogramMaterial;
+                    }
+                    renderer.render(scene, camera);
+                    renderer.readRenderTargetPixels(target, 0, 0, w, h, floatBuf);
+                    renderer.setRenderTarget(null);
+                    if (typeof quad !== 'undefined' && quad) {
+                        quad.material = previousMaterial;
+                    }
+
+                    if (useQueuedBuffer) {
+                        _histogramQueuedTotalPixels = totalPixels;
+                        _histogramQueuedGeneration = generation;
+                        _histogramQueuedStartedAtMs = startedAtMs;
+                        _histogramQueuedValueMode = 'float';
+                        _histogramQueuedDisplayMin = histogramMin;
+                        _histogramQueuedDisplayMax = histogramMax;
+                        _histogramHasQueuedFrame = true;
+                        return;
+                    }
+
+                    startHistogramProcessing(floatBuf, totalPixels, generation, startedAtMs, 'float', histogramMin, histogramMax);
+                    return;
+                }
+            }
+
+            const needed = w * h * 4;
+            const useQueuedBuffer = _histogramProcessing;
+            const targetBuf = ensureHistogramByteBuffer(needed, useQueuedBuffer);
+
+            // Fallback path — histogram from mapped screen output when raw float capture is unavailable.
             gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, targetBuf);
 
             if (useQueuedBuffer) {
                 _histogramQueuedTotalPixels = totalPixels;
                 _histogramQueuedGeneration = generation;
                 _histogramQueuedStartedAtMs = startedAtMs;
+                _histogramQueuedValueMode = 'byte';
+                _histogramQueuedDisplayMin = 0;
+                _histogramQueuedDisplayMax = 1;
                 _histogramHasQueuedFrame = true;
                 return;
             }
 
-            startHistogramProcessing(targetBuf, totalPixels, generation, startedAtMs);
+            startHistogramProcessing(targetBuf, totalPixels, generation, startedAtMs, 'byte', 0, 1);
         } catch (err) { /* ignore */ }
     }
 
@@ -1150,6 +1306,7 @@ vec4 _inspMap(vec4 v) {${oor}
         onHotReload: function () {
             _originalMaterials.clear();
             _originalFragmentShaders.clear();
+            disposeHistogramResources();
             _inspectorMaterial = null;
             _lastRewrittenSource = '';
             // Re-inspect with new materials if active
