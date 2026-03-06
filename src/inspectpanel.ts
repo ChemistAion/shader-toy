@@ -20,6 +20,7 @@ export class InspectPanel {
     private onMappingChanged: ((mapping: InspectorMapping) => void) | undefined;
     private onCompareChanged: ((enabled: boolean) => void) | undefined;
     private onHoverChanged: ((enabled: boolean) => void) | undefined;
+    private onHistogramChanged: ((enabled: boolean) => void) | undefined;
     private onDidDisposeCallback: (() => void) | undefined;
     private onReadyCallback: (() => void) | undefined;
 
@@ -76,6 +77,11 @@ export class InspectPanel {
                         this.onHoverChanged(!!message.enabled);
                     }
                     break;
+                case 'setHistogramEnabled':
+                    if (this.onHistogramChanged) {
+                        this.onHistogramChanged(!!message.enabled);
+                    }
+                    break;
                 case 'panelReady':
                     if (this.onReadyCallback) {
                         this.onReadyCallback();
@@ -126,6 +132,11 @@ export class InspectPanel {
         this.onHoverChanged = cb;
     }
 
+    /** Register callback for when histogram toggle changes. */
+    public setOnHistogramChanged(cb: (enabled: boolean) => void): void {
+        this.onHistogramChanged = cb;
+    }
+
     /** Register callback for when the panel is disposed. */
     public setOnDidDispose(cb: () => void): void {
         this.onDidDisposeCallback = cb;
@@ -137,13 +148,14 @@ export class InspectPanel {
     }
 
     /** Sync persisted panel controls into a freshly created webview. */
-    public postInspectorState(mapping: InspectorMapping, compareEnabled: boolean, hoverEnabled: boolean): void {
+    public postInspectorState(mapping: InspectorMapping, compareEnabled: boolean, hoverEnabled: boolean, histogramEnabled: boolean): void {
         if (this.panel) {
             this.panel.webview.postMessage({
                 command: 'syncState',
                 mapping: { ...mapping },
                 compareEnabled,
-                hoverEnabled
+                hoverEnabled,
+                histogramEnabled
             });
         }
     }

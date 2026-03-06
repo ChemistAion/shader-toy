@@ -998,6 +998,18 @@ vec4 _inspMap(vec4 v) {${oor}
             case 'setInspectorHover':
                 _hoverEnabled = !!msg.enabled;
                 break;
+
+            case 'setInspectorHistogram':
+                _histogramEnabled = !!msg.enabled;
+                if (_histogramEnabled) {
+                    startHistogramTimer();
+                    if (_active) {
+                        requestHistogramUpdate();
+                    }
+                } else {
+                    stopHistogramTimer();
+                }
+                break;
         }
     }
 
@@ -1010,6 +1022,7 @@ vec4 _inspMap(vec4 v) {${oor}
         getVariable: function () { return _variable; },
         getMapping: function () { return { ..._mapping }; },
         isHoverEnabled: function () { return _hoverEnabled; },
+        isHistogramEnabled: function () { return _histogramEnabled; },
         afterFrame: afterFrame,
 
         // Called on hot-reload to clear stale material references

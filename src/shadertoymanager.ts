@@ -39,6 +39,7 @@ export class ShaderToyManager {
     private _lastInspectorMapping: InspectorMapping = { ...DEFAULT_INSPECTOR_MAPPING };
     private _lastCompareEnabled = false;
     private _lastHoverEnabled = true;
+    private _lastHistogramEnabled = true;
 
     constructor(context: Context) {
         this.context = context;
@@ -209,6 +210,16 @@ export class ShaderToyManager {
             }
         });
 
+        this.inspectPanel.setOnHistogramChanged((enabled: boolean) => {
+            this._lastHistogramEnabled = enabled;
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorHistogram',
+                    enabled: enabled
+                });
+            }
+        });
+
         this.inspectPanel.setOnDidDispose(() => {
             this.stopSelectionListener();
             if (this.webviewPanel !== undefined) {
@@ -273,7 +284,12 @@ export class ShaderToyManager {
 
     private resendInspectPanelState = () => {
         if (!this.inspectPanel.isActive) return;
-        this.inspectPanel.postInspectorState(this._lastInspectorMapping, this._lastCompareEnabled, this._lastHoverEnabled);
+        this.inspectPanel.postInspectorState(
+            this._lastInspectorMapping,
+            this._lastCompareEnabled,
+            this._lastHoverEnabled,
+            this._lastHistogramEnabled
+        );
         if (this._lastInspectorVariable) {
             this.inspectPanel.postVariableUpdate(this._lastInspectorVariable, this._lastInspectorLine, this._lastInspectorType);
         }
@@ -294,6 +310,10 @@ export class ShaderToyManager {
         this.webviewPanel.Panel.webview.postMessage({
             command: 'setInspectorHover',
             enabled: this._lastHoverEnabled
+        });
+        this.webviewPanel.Panel.webview.postMessage({
+            command: 'setInspectorHistogram',
+            enabled: this._lastHistogramEnabled
         });
         if (this._lastInspectorVariable) {
             this.webviewPanel.Panel.webview.postMessage({

@@ -65,7 +65,12 @@ function loadInspectorHarness() {
     return {
         material,
         sandbox: sandbox as {
-            ShaderToy: { inspector: { handleMessage: (message: { command: string; [key: string]: unknown }) => void } };
+            ShaderToy: {
+                inspector: {
+                    handleMessage: (message: { command: string; [key: string]: unknown }) => void;
+                    isHistogramEnabled: () => boolean;
+                }
+            };
             buffers: Array<{ Shader: typeof material }>;
             forceRenderOneFrame: boolean;
         },
@@ -94,5 +99,15 @@ suite('Inspect runtime', () => {
 
         assert.strictEqual(material.fragmentShader, SIMPLE_SHADER);
         assert.strictEqual(sandbox.buffers[0].Shader, material);
+    });
+
+    test('toggles histogram capture through inspector messages', () => {
+        const { sandbox } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogram', enabled: false });
+        assert.strictEqual(sandbox.ShaderToy.inspector.isHistogramEnabled(), false);
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogram', enabled: true });
+        assert.strictEqual(sandbox.ShaderToy.inspector.isHistogramEnabled(), true);
     });
 });

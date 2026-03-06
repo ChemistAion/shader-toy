@@ -74,6 +74,15 @@
         color: var(--fg2);
         margin-top: 2px;
     }
+    .variable-error {
+        display: none;
+        margin-top: 6px;
+        font-size: 12px;
+        color: var(--error);
+    }
+    .variable-error.visible {
+        display: block;
+    }
     .variable-meta .type-badge {
         display: inline-block;
         background: var(--accent);
@@ -83,6 +92,15 @@
         font-size: 10px;
         font-weight: 600;
         margin-left: 4px;
+    }
+    .toggle-label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .toggle-label label {
+        cursor: pointer;
+        margin: 0;
     }
 
     /* ── Mapping Controls ───────────── */
@@ -165,6 +183,7 @@
         border-radius: 6px;
         padding: 10px 12px;
         margin-bottom: 12px;
+        transition: opacity 0.15s;
     }
     .pixel-row {
         display: flex;
@@ -189,28 +208,13 @@
     .pixel-values .ch-b { color: #569cd6; }
     .pixel-values .ch-a { color: #999; }
 
-    /* ── Status ──────────────────────── */
-    .status-section {
-        background: var(--bg2);
-        border-radius: 6px;
-        padding: 8px 12px;
-        font-size: 12px;
-        color: var(--fg2);
-    }
-    .status-section.error {
-        border-left: 3px solid var(--error);
-        color: var(--error);
-    }
-    .status-section.ok {
-        border-left: 3px solid var(--success);
-    }
-
     /* ── Histogram ─────────────────────── */
     .histogram-section {
         background: var(--bg2);
         border-radius: 6px;
         padding: 10px 12px;
         margin-top: 12px;
+        transition: opacity 0.15s;
     }
     .histogram-section .variable-label {
         margin-bottom: 6px;
@@ -251,6 +255,7 @@
     <div class="variable-label">Inspecting</div>
     <div class="variable-name empty" id="varName">Select an expression in the editor</div>
     <div class="variable-meta" id="varMeta"></div>
+    <div class="variable-error" id="varError"></div>
 </div>
 
 <div class="section">
@@ -279,9 +284,9 @@
 </div>
 
 <div class="pixel-section" id="pixelSection">
-    <div class="variable-label" style="display: flex; align-items: center; gap: 6px;">
+    <div class="variable-label toggle-label">
         <input type="checkbox" id="hoverToggle" checked />
-        <label for="hoverToggle" style="cursor: pointer; margin: 0;">Pixel Value (hover over preview)</label>
+        <label for="hoverToggle">Pixel Value (hover over preview)</label>
     </div>
     <div class="pixel-row">
         <div class="color-swatch" id="colorSwatch"></div>
@@ -294,12 +299,11 @@
     </div>
 </div>
 
-<div class="status-section" id="statusSection">
-    Ready — select a variable in the shader editor
-</div>
-
-<div class="histogram-section">
-    <div class="variable-label">Histogram</div>
+<div class="histogram-section" id="histogramSection">
+    <div class="variable-label toggle-label">
+        <input type="checkbox" id="histogramToggle" checked />
+        <label for="histogramToggle">Histogram</label>
+    </div>
     <div class="histogram-canvas-wrap">
         <canvas id="histogramCanvas"></canvas>
     </div>
@@ -318,8 +322,8 @@
     // DOM refs
     const varNameEl = document.getElementById('varName');
     const varMetaEl = document.getElementById('varMeta');
+    const varErrorEl = document.getElementById('varError');
     const statusDot = document.getElementById('statusDot');
-    const statusSection = document.getElementById('statusSection');
     const colorSwatch = document.getElementById('colorSwatch');
     const pixelValues = document.getElementById('pixelValues');
     const rangeMin = document.getElementById('rangeMin');
@@ -329,6 +333,8 @@
     const modeButtons = document.querySelectorAll('.mode-btn');
     const hoverToggle = document.getElementById('hoverToggle');
     const pixelSection = document.getElementById('pixelSection');
+    const histogramToggle = document.getElementById('histogramToggle');
+    const histogramSection = document.getElementById('histogramSection');
     const histCanvas = document.getElementById('histogramCanvas');
     const histCtx = histCanvas ? histCanvas.getContext('2d') : null;
     const histMinEl = document.getElementById('histMin');
@@ -341,7 +347,11 @@
         pixelSection.style.opacity = enabled ? '1' : '0.5';
     }
 
-    function applyInspectorState(mapping, compareEnabled, hoverEnabled) {
+    function setHistogramUi(enabled) {
+        histogramSection.style.opacity = enabled ? '1' : '0.5';
+    }
+
+    function applyInspectorState(mapping, compareEnabled, hoverEnabled, histogramEnabled) {
         const nextMapping = mapping || {};
         const nextMode = nextMapping.mode || 'linear';
         currentMode = nextMode;
@@ -353,7 +363,25 @@
         oorToggle.checked = !!nextMapping.highlightOutOfRange;
         compareToggle.checked = !!compareEnabled;
         hoverToggle.checked = !!hoverEnabled;
+        histogramToggle.checked = histogramEnabled !== false;
         setHoverUi(hoverToggle.checked);
+        setHistogramUi(histogramToggle.checked);
+    }
+
+    function applyStatus(message, status) {
+        statusDot.className = 'status-dot';
+        varErrorEl.textContent = '';
+        varErrorEl.classList.remove('visible');
+
+        if (status === 'ok') {
+            statusDot.classList.add('active');
+        } else if (status === 'error') {
+            statusDot.classList.add('error');
+            if (message) {
+                varErrorEl.textContent = message;
+                varErrorEl.classList.add('visible');
+            }
+        }
     }
 
     // ── Mapping change broadcast ───────────────────
@@ -401,12 +429,20 @@
         }
     });
 
+    histogramToggle.addEventListener('change', () => {
+        const enabled = histogramToggle.checked;
+        setHistogramUi(enabled);
+        if (vscode) {
+            vscode.postMessage({ command: 'setHistogramEnabled', enabled: enabled });
+        }
+    });
+
     // ── Incoming messages ──────────────────────────
     window.addEventListener('message', event => {
         const msg = event.data;
         switch (msg.command) {
             case 'syncState':
-                applyInspectorState(msg.mapping, msg.compareEnabled, msg.hoverEnabled);
+                applyInspectorState(msg.mapping, msg.compareEnabled, msg.hoverEnabled, msg.histogramEnabled);
                 break;
             case 'updateVariable':
                 if (msg.variable) {
@@ -423,16 +459,7 @@
                 break;
 
             case 'inspectorStatus':
-                statusSection.textContent = msg.message || '';
-                statusSection.className = 'status-section';
-                statusDot.className = 'status-dot';
-                if (msg.status === 'ok') {
-                    statusSection.classList.add('ok');
-                    statusDot.classList.add('active');
-                } else if (msg.status === 'error') {
-                    statusSection.classList.add('error');
-                    statusDot.classList.add('error');
-                }
+                applyStatus(msg.message || '', msg.status);
                 break;
 
             case 'pixelValue':
@@ -456,6 +483,7 @@
     });
 
     setHoverUi(hoverToggle.checked);
+    setHistogramUi(histogramToggle.checked);
     if (vscode) {
         vscode.postMessage({ command: 'panelReady' });
     }
