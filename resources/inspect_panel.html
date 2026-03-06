@@ -233,6 +233,32 @@
         width: 100%;
         height: 100%;
     }
+    .histogram-rate-controls {
+        position: absolute;
+        right: 6px;
+        bottom: 6px;
+        display: flex;
+        gap: 2px;
+        z-index: 1;
+    }
+    .histogram-rate-btn {
+        background: transparent;
+        border: 1px solid rgba(128, 128, 128, 0.3);
+        color: inherit;
+        padding: 1px 6px;
+        font-size: 10px;
+        font-family: 'Consolas', 'Menlo', monospace;
+        border-radius: 3px;
+        cursor: pointer;
+        line-height: 16px;
+    }
+    .histogram-rate-btn.active {
+        background: rgba(128, 128, 128, 0.25);
+        border-color: rgba(128, 128, 128, 0.5);
+    }
+    .histogram-rate-btn:hover {
+        background: rgba(128, 128, 128, 0.15);
+    }
     .histogram-stats {
         display: flex;
         justify-content: space-between;
@@ -306,6 +332,11 @@
     </div>
     <div class="histogram-canvas-wrap">
         <canvas id="histogramCanvas"></canvas>
+        <div class="histogram-rate-controls">
+            <button class="histogram-rate-btn active" data-interval-ms="1000">1Hz</button>
+            <button class="histogram-rate-btn" data-interval-ms="200">5Hz</button>
+            <button class="histogram-rate-btn" data-interval-ms="100">10Hz</button>
+        </div>
     </div>
     <div class="histogram-stats">
         <span id="histMin">0.00</span>
@@ -335,13 +366,16 @@
     const pixelSection = document.getElementById('pixelSection');
     const histogramToggle = document.getElementById('histogramToggle');
     const histogramSection = document.getElementById('histogramSection');
+    const histogramRateButtons = document.querySelectorAll('.histogram-rate-btn');
     const histCanvas = document.getElementById('histogramCanvas');
     const histCtx = histCanvas ? histCanvas.getContext('2d') : null;
     const histMinEl = document.getElementById('histMin');
     const histMaxEl = document.getElementById('histMax');
     const histSamplesEl = document.getElementById('histSamples');
 
+    const DEFAULT_HISTOGRAM_INTERVAL_MS = 1000;
     let currentMode = 'linear';
+    let currentHistogramIntervalMs = DEFAULT_HISTOGRAM_INTERVAL_MS;
 
     function setHoverUi(enabled) {
         pixelSection.style.opacity = enabled ? '1' : '0.5';
@@ -351,7 +385,21 @@
         histogramSection.style.opacity = enabled ? '1' : '0.5';
     }
 
-    function applyInspectorState(mapping, compareEnabled, hoverEnabled, histogramEnabled) {
+    function normalizeHistogramInterval(intervalMs) {
+        const numericInterval = Number(intervalMs);
+        return numericInterval === 200 || numericInterval === 100 || numericInterval === 1000
+            ? numericInterval
+            : DEFAULT_HISTOGRAM_INTERVAL_MS;
+    }
+
+    function setHistogramIntervalUi(intervalMs) {
+        currentHistogramIntervalMs = normalizeHistogramInterval(intervalMs);
+        histogramRateButtons.forEach(btn => {
+            btn.classList.toggle('active', Number(btn.dataset.intervalMs) === currentHistogramIntervalMs);
+        });
+    }
+
+    function applyInspectorState(mapping, compareEnabled, hoverEnabled, histogramEnabled, histogramIntervalMs) {
         const nextMapping = mapping || {};
         const nextMode = nextMapping.mode || 'linear';
         currentMode = nextMode;
@@ -366,6 +414,7 @@
         histogramToggle.checked = histogramEnabled !== false;
         setHoverUi(hoverToggle.checked);
         setHistogramUi(histogramToggle.checked);
+        setHistogramIntervalUi(histogramIntervalMs);
     }
 
     function applyStatus(message, status) {
@@ -437,12 +486,22 @@
         }
     });
 
+    histogramRateButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const intervalMs = normalizeHistogramInterval(btn.dataset.intervalMs);
+            setHistogramIntervalUi(intervalMs);
+            if (vscode) {
+                vscode.postMessage({ command: 'setHistogramInterval', intervalMs: intervalMs });
+            }
+        });
+    });
+
     // ── Incoming messages ──────────────────────────
     window.addEventListener('message', event => {
         const msg = event.data;
         switch (msg.command) {
             case 'syncState':
-                applyInspectorState(msg.mapping, msg.compareEnabled, msg.hoverEnabled, msg.histogramEnabled);
+                applyInspectorState(msg.mapping, msg.compareEnabled, msg.hoverEnabled, msg.histogramEnabled, msg.histogramIntervalMs);
                 break;
             case 'updateVariable':
                 if (msg.variable) {
@@ -484,6 +543,7 @@
 
     setHoverUi(hoverToggle.checked);
     setHistogramUi(histogramToggle.checked);
+    setHistogramIntervalUi(DEFAULT_HISTOGRAM_INTERVAL_MS);
     if (vscode) {
         vscode.postMessage({ command: 'panelReady' });
     }

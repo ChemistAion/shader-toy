@@ -13,6 +13,7 @@ function loadInspectorHarness() {
     const repoRoot = path.resolve(__dirname, '../../');
     const inspectPath = path.join(repoRoot, 'resources', 'webview', 'shader_inspect.js');
     const source = fs.readFileSync(inspectPath, 'utf8');
+    let lastSetIntervalMs = 0;
 
     const material = {
         fragmentShader: SIMPLE_SHADER,
@@ -28,7 +29,10 @@ function loadInspectorHarness() {
             return 1;
         },
         clearTimeout: () => undefined,
-        setInterval: () => 1,
+        setInterval: (_fn: () => void, intervalMs?: number) => {
+            lastSetIntervalMs = intervalMs ?? 0;
+            return 1;
+        },
         clearInterval: () => undefined,
         requestIdleCallback: (fn: () => void) => {
             fn();
@@ -69,11 +73,13 @@ function loadInspectorHarness() {
                 inspector: {
                     handleMessage: (message: { command: string; [key: string]: unknown }) => void;
                     isHistogramEnabled: () => boolean;
+                    getHistogramIntervalMs: () => number;
                 }
             };
             buffers: Array<{ Shader: typeof material }>;
             forceRenderOneFrame: boolean;
         },
+        getLastSetIntervalMs: () => lastSetIntervalMs,
     };
 }
 
@@ -109,5 +115,22 @@ suite('Inspect runtime', () => {
 
         sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogram', enabled: true });
         assert.strictEqual(sandbox.ShaderToy.inspector.isHistogramEnabled(), true);
+    });
+
+    test('defaults histogram refresh to 1Hz and switches to preset intervals', () => {
+        const { sandbox, getLastSetIntervalMs } = loadInspectorHarness();
+
+        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramIntervalMs(), 1000);
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        assert.strictEqual(getLastSetIntervalMs(), 1000);
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramInterval', intervalMs: 200 });
+        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramIntervalMs(), 200);
+        assert.strictEqual(getLastSetIntervalMs(), 200);
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramInterval', intervalMs: 100 });
+        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramIntervalMs(), 100);
+        assert.strictEqual(getLastSetIntervalMs(), 100);
     });
 });

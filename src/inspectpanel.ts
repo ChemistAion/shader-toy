@@ -21,6 +21,7 @@ export class InspectPanel {
     private onCompareChanged: ((enabled: boolean) => void) | undefined;
     private onHoverChanged: ((enabled: boolean) => void) | undefined;
     private onHistogramChanged: ((enabled: boolean) => void) | undefined;
+    private onHistogramIntervalChanged: ((intervalMs: number) => void) | undefined;
     private onDidDisposeCallback: (() => void) | undefined;
     private onReadyCallback: (() => void) | undefined;
 
@@ -82,6 +83,14 @@ export class InspectPanel {
                         this.onHistogramChanged(!!message.enabled);
                     }
                     break;
+                case 'setHistogramInterval':
+                {
+                    const intervalMs = Number(message.intervalMs);
+                    if (this.onHistogramIntervalChanged && Number.isFinite(intervalMs) && intervalMs > 0) {
+                        this.onHistogramIntervalChanged(intervalMs);
+                    }
+                    break;
+                }
                 case 'panelReady':
                     if (this.onReadyCallback) {
                         this.onReadyCallback();
@@ -137,6 +146,11 @@ export class InspectPanel {
         this.onHistogramChanged = cb;
     }
 
+    /** Register callback for when histogram refresh interval changes. */
+    public setOnHistogramIntervalChanged(cb: (intervalMs: number) => void): void {
+        this.onHistogramIntervalChanged = cb;
+    }
+
     /** Register callback for when the panel is disposed. */
     public setOnDidDispose(cb: () => void): void {
         this.onDidDisposeCallback = cb;
@@ -148,14 +162,21 @@ export class InspectPanel {
     }
 
     /** Sync persisted panel controls into a freshly created webview. */
-    public postInspectorState(mapping: InspectorMapping, compareEnabled: boolean, hoverEnabled: boolean, histogramEnabled: boolean): void {
+    public postInspectorState(
+        mapping: InspectorMapping,
+        compareEnabled: boolean,
+        hoverEnabled: boolean,
+        histogramEnabled: boolean,
+        histogramIntervalMs: number
+    ): void {
         if (this.panel) {
             this.panel.webview.postMessage({
                 command: 'syncState',
                 mapping: { ...mapping },
                 compareEnabled,
                 hoverEnabled,
-                histogramEnabled
+                histogramEnabled,
+                histogramIntervalMs
             });
         }
     }

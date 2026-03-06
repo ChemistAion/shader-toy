@@ -658,6 +658,7 @@ vec4 _inspMap(vec4 v) {${oor}
     let _compareMode = false;
     let _hoverEnabled = true;
     let _histogramEnabled = true;
+    let _histogramIntervalMs = 1000;
     let _histogramDirty = false;
     let _histogramTimer = null;
     let _histogramPixelBuf = null;   // cached Uint8Array for readback
@@ -675,6 +676,13 @@ vec4 _inspMap(vec4 v) {${oor}
         if (typeof forceRenderOneFrame !== 'undefined') {
             forceRenderOneFrame = true;
         }
+    }
+
+    function normalizeHistogramInterval(intervalMs) {
+        const numericInterval = Number(intervalMs);
+        return numericInterval === 200 || numericInterval === 100 || numericInterval === 1000
+            ? numericInterval
+            : 1000;
     }
 
     /** Get the shader source for the final (image) buffer */
@@ -937,7 +945,7 @@ vec4 _inspMap(vec4 v) {${oor}
         if (_histogramEnabled && _active) {
             // Initial snapshot after a short delay (let first frame render)
             _histogramDirty = true;
-            _histogramTimer = setInterval(requestHistogramUpdate, 500);
+            _histogramTimer = setInterval(requestHistogramUpdate, _histogramIntervalMs);
         }
     }
     function stopHistogramTimer() {
@@ -1003,11 +1011,15 @@ vec4 _inspMap(vec4 v) {${oor}
                 _histogramEnabled = !!msg.enabled;
                 if (_histogramEnabled) {
                     startHistogramTimer();
-                    if (_active) {
-                        requestHistogramUpdate();
-                    }
                 } else {
                     stopHistogramTimer();
+                }
+                break;
+
+            case 'setInspectorHistogramInterval':
+                _histogramIntervalMs = normalizeHistogramInterval(msg.intervalMs);
+                if (_histogramEnabled && _active) {
+                    startHistogramTimer();
                 }
                 break;
         }
@@ -1023,6 +1035,7 @@ vec4 _inspMap(vec4 v) {${oor}
         getMapping: function () { return { ..._mapping }; },
         isHoverEnabled: function () { return _hoverEnabled; },
         isHistogramEnabled: function () { return _histogramEnabled; },
+        getHistogramIntervalMs: function () { return _histogramIntervalMs; },
         afterFrame: afterFrame,
 
         // Called on hot-reload to clear stale material references

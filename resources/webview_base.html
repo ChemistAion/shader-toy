@@ -238,6 +238,7 @@
             case 'setInspectorCompare':
             case 'setInspectorHover':
             case 'setInspectorHistogram':
+            case 'setInspectorHistogramInterval':
                 if (window.ShaderToy && window.ShaderToy.inspector) {
                     window.ShaderToy.inspector.handleMessage(message);
                 }

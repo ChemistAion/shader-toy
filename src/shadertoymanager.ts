@@ -23,6 +23,7 @@ const DEFAULT_INSPECTOR_MAPPING: InspectorMapping = {
     max: 1,
     highlightOutOfRange: false
 };
+const DEFAULT_HISTOGRAM_INTERVAL_MS = 1000;
 
 export class ShaderToyManager {
     context: Context;
@@ -40,6 +41,7 @@ export class ShaderToyManager {
     private _lastCompareEnabled = false;
     private _lastHoverEnabled = true;
     private _lastHistogramEnabled = true;
+    private _lastHistogramIntervalMs = DEFAULT_HISTOGRAM_INTERVAL_MS;
 
     constructor(context: Context) {
         this.context = context;
@@ -220,6 +222,16 @@ export class ShaderToyManager {
             }
         });
 
+        this.inspectPanel.setOnHistogramIntervalChanged((intervalMs: number) => {
+            this._lastHistogramIntervalMs = intervalMs;
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorHistogramInterval',
+                    intervalMs: intervalMs
+                });
+            }
+        });
+
         this.inspectPanel.setOnDidDispose(() => {
             this.stopSelectionListener();
             if (this.webviewPanel !== undefined) {
@@ -288,7 +300,8 @@ export class ShaderToyManager {
             this._lastInspectorMapping,
             this._lastCompareEnabled,
             this._lastHoverEnabled,
-            this._lastHistogramEnabled
+            this._lastHistogramEnabled,
+            this._lastHistogramIntervalMs
         );
         if (this._lastInspectorVariable) {
             this.inspectPanel.postVariableUpdate(this._lastInspectorVariable, this._lastInspectorLine, this._lastInspectorType);
@@ -298,7 +311,6 @@ export class ShaderToyManager {
     /** Re-send inspector state to the preview webview after it is rebuilt. */
     private resendInspectorState = () => {
         if (!this.inspectPanel.isActive || !this.webviewPanel) return;
-        this.webviewPanel.Panel.webview.postMessage({ command: 'inspectorOn' });
         this.webviewPanel.Panel.webview.postMessage({
             command: 'setInspectorMapping',
             mapping: this._lastInspectorMapping
@@ -315,6 +327,10 @@ export class ShaderToyManager {
             command: 'setInspectorHistogram',
             enabled: this._lastHistogramEnabled
         });
+        this.webviewPanel.Panel.webview.postMessage({
+            command: 'setInspectorHistogramInterval',
+            intervalMs: this._lastHistogramIntervalMs
+        });
         if (this._lastInspectorVariable) {
             this.webviewPanel.Panel.webview.postMessage({
                 command: 'setInspectorVariable',
@@ -322,6 +338,7 @@ export class ShaderToyManager {
                 line: this._lastInspectorLine
             });
         }
+        this.webviewPanel.Panel.webview.postMessage({ command: 'inspectorOn' });
     };
 
     private resetStartingData = () => {
