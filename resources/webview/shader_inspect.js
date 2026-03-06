@@ -663,8 +663,19 @@ vec4 _inspMap(vec4 v) {${oor}
     let _histogramPixelBuf = null;   // cached Uint8Array for readback
     let _inspectorMaterial = null;
     let _originalMaterials = new Map();  // bufferIndex → original material
+    let _originalFragmentShaders = new Map(); // bufferIndex → original fragment shader source
     let _lastRewrittenSource = '';
     let _debounceTimer = null;
+
+    function markShaderMaterialDirty(material) {
+        material.needsUpdate = true;
+        if (typeof quad !== 'undefined' && quad) {
+            quad.material = material;
+        }
+        if (typeof forceRenderOneFrame !== 'undefined') {
+            forceRenderOneFrame = true;
+        }
+    }
 
     /** Get the shader source for the final (image) buffer */
     function getShaderSource() {
@@ -717,10 +728,12 @@ vec4 _inspMap(vec4 v) {${oor}
                 const finalIdx = buffers.length - 1;
                 const finalBuffer = buffers[finalIdx];
 
-                // Use the ORIGINAL material for reference (uniforms, glslVersion, vertexShader)
+                // Rewrite the original material in place so the existing render loop,
+                // texture bindings, and uniform update paths all keep targeting the same object.
                 const origMat = _originalMaterials.get(finalIdx) || finalBuffer.Shader;
                 if (!_originalMaterials.has(finalIdx)) {
                     _originalMaterials.set(finalIdx, finalBuffer.Shader);
+                    _originalFragmentShaders.set(finalIdx, finalBuffer.Shader.fragmentShader);
                 }
 
                 // Prepare the fragment shader the same way the normal compile path does:
@@ -732,23 +745,18 @@ vec4 _inspMap(vec4 v) {${oor}
                     prepared = window.ShaderToy.shaderCompile.prepareFragmentShader(rewritten, isWebGL2);
                 }
 
-                // Copy uniforms by reference (they are shared objects updated by the render loop)
-                const uniforms = {};
-                for (const [key, val] of Object.entries(origMat.uniforms)) {
-                    uniforms[key] = val;
+                if (typeof currentShader !== 'undefined') {
+                    currentShader = {
+                        Name: finalBuffer.Name,
+                        File: finalBuffer.File,
+                        LineOffset: finalBuffer.LineOffset
+                    };
                 }
 
-                _inspectorMaterial = new THREE.ShaderMaterial({
-                    glslVersion: origMat.glslVersion,
-                    fragmentShader: prepared,
-                    vertexShader: origMat.vertexShader,
-                    uniforms: uniforms,
-                    depthWrite: false,
-                    depthTest: false
-                });
-
-                // Swap material
-                finalBuffer.Shader = _inspectorMaterial;
+                origMat.fragmentShader = prepared;
+                markShaderMaterialDirty(origMat);
+                finalBuffer.Shader = origMat;
+                _inspectorMaterial = origMat;
 
                 postStatus('ok', 'Inspecting: ' + _variable + ' (' + type + ')', _variable, type);
             }
@@ -762,11 +770,17 @@ vec4 _inspMap(vec4 v) {${oor}
         if (typeof buffers !== 'undefined') {
             for (const [idx, mat] of _originalMaterials.entries()) {
                 if (buffers[idx]) {
+                    const originalFragmentShader = _originalFragmentShaders.get(idx);
+                    if (typeof originalFragmentShader === 'string') {
+                        mat.fragmentShader = originalFragmentShader;
+                        markShaderMaterialDirty(mat);
+                    }
                     buffers[idx].Shader = mat;
                 }
             }
         }
         _originalMaterials.clear();
+        _originalFragmentShaders.clear();
         _inspectorMaterial = null;
         _lastRewrittenSource = '';
     }
@@ -1001,6 +1015,7 @@ vec4 _inspMap(vec4 v) {${oor}
         // Called on hot-reload to clear stale material references
         onHotReload: function () {
             _originalMaterials.clear();
+            _originalFragmentShaders.clear();
             _inspectorMaterial = null;
             _lastRewrittenSource = '';
             // Re-inspect with new materials if active

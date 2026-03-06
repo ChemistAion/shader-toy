@@ -20,6 +20,8 @@ export class InspectPanel {
     private onMappingChanged: ((mapping: InspectorMapping) => void) | undefined;
     private onCompareChanged: ((enabled: boolean) => void) | undefined;
     private onHoverChanged: ((enabled: boolean) => void) | undefined;
+    private onDidDisposeCallback: (() => void) | undefined;
+    private onReadyCallback: (() => void) | undefined;
 
     constructor(context: Context) {
         this.context = context;
@@ -50,6 +52,9 @@ export class InspectPanel {
 
         this.panel.onDidDispose(() => {
             this.panel = undefined;
+            if (this.onDidDisposeCallback) {
+                this.onDidDisposeCallback();
+            }
         }, undefined, this.context.getVscodeExtensionContext().subscriptions);
 
         // Handle messages from the inspect panel
@@ -69,6 +74,11 @@ export class InspectPanel {
                 case 'setHoverEnabled':
                     if (this.onHoverChanged) {
                         this.onHoverChanged(!!message.enabled);
+                    }
+                    break;
+                case 'panelReady':
+                    if (this.onReadyCallback) {
+                        this.onReadyCallback();
                     }
                     break;
                 case 'navigateToLine':
@@ -114,6 +124,28 @@ export class InspectPanel {
     /** Register callback for when hover toggle changes. */
     public setOnHoverChanged(cb: (enabled: boolean) => void): void {
         this.onHoverChanged = cb;
+    }
+
+    /** Register callback for when the panel is disposed. */
+    public setOnDidDispose(cb: () => void): void {
+        this.onDidDisposeCallback = cb;
+    }
+
+    /** Register callback for when the webview is ready to receive initial state. */
+    public setOnReady(cb: () => void): void {
+        this.onReadyCallback = cb;
+    }
+
+    /** Sync persisted panel controls into a freshly created webview. */
+    public postInspectorState(mapping: InspectorMapping, compareEnabled: boolean, hoverEnabled: boolean): void {
+        if (this.panel) {
+            this.panel.webview.postMessage({
+                command: 'syncState',
+                mapping: { ...mapping },
+                compareEnabled,
+                hoverEnabled
+            });
+        }
     }
 
     /** Forward variable info to the panel. */

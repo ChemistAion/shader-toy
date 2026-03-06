@@ -337,6 +337,25 @@
 
     let currentMode = 'linear';
 
+    function setHoverUi(enabled) {
+        pixelSection.style.opacity = enabled ? '1' : '0.5';
+    }
+
+    function applyInspectorState(mapping, compareEnabled, hoverEnabled) {
+        const nextMapping = mapping || {};
+        const nextMode = nextMapping.mode || 'linear';
+        currentMode = nextMode;
+        modeButtons.forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.mode === nextMode);
+        });
+        rangeMin.value = String(typeof nextMapping.min === 'number' ? nextMapping.min : 0);
+        rangeMax.value = String(typeof nextMapping.max === 'number' ? nextMapping.max : 1);
+        oorToggle.checked = !!nextMapping.highlightOutOfRange;
+        compareToggle.checked = !!compareEnabled;
+        hoverToggle.checked = !!hoverEnabled;
+        setHoverUi(hoverToggle.checked);
+    }
+
     // ── Mapping change broadcast ───────────────────
     function broadcastMapping() {
         if (!vscode) return;
@@ -376,7 +395,7 @@
     // Hover toggle
     hoverToggle.addEventListener('change', () => {
         const enabled = hoverToggle.checked;
-        pixelSection.style.opacity = enabled ? '1' : '0.5';
+        setHoverUi(enabled);
         if (vscode) {
             vscode.postMessage({ command: 'setHoverEnabled', enabled: enabled });
         }
@@ -386,6 +405,9 @@
     window.addEventListener('message', event => {
         const msg = event.data;
         switch (msg.command) {
+            case 'syncState':
+                applyInspectorState(msg.mapping, msg.compareEnabled, msg.hoverEnabled);
+                break;
             case 'updateVariable':
                 if (msg.variable) {
                     varNameEl.textContent = msg.variable;
@@ -432,6 +454,11 @@
                 break;
         }
     });
+
+    setHoverUi(hoverToggle.checked);
+    if (vscode) {
+        vscode.postMessage({ command: 'panelReady' });
+    }
 
     // ── Histogram renderer ─────────────────────────
     function drawHistogram(h) {
