@@ -823,24 +823,14 @@ vec4 _inspMap(vec4 v) {${oor}
         return _histogramTarget;
     }
 
-    function smoothHistogram(arr) {
-        const out = new Float32Array(arr.length);
-        for (let i = 0; i < arr.length; i++) {
-            const prev = i > 0 ? arr[i - 1] : 0;
-            const next = i < arr.length - 1 ? arr[i + 1] : 0;
-            out[i] = (prev + arr[i] + next) / 3;
-        }
-        return out;
-    }
-
     function postHistogram(binsR, binsG, binsB, samples, domainMin, domainMax, timeMs) {
         if (typeof vscode !== 'undefined' && vscode) {
             vscode.postMessage({
                 command: 'inspectorHistogram',
                 histogram: {
-                    binsR: Array.from(smoothHistogram(binsR)),
-                    binsG: Array.from(smoothHistogram(binsG)),
-                    binsB: Array.from(smoothHistogram(binsB)),
+                    binsR: binsR,
+                    binsG: binsG,
+                    binsB: binsB,
                     bins: binsR.length,
                     samples: samples,
                     timeMs: timeMs,
@@ -887,7 +877,7 @@ vec4 _inspMap(vec4 v) {${oor}
         _histogramProcessing = false;
     }
 
-    function startHistogramProcessing(pixels, totalPixels, generation, startedAtMs, valueMode, displayMin, displayMax) {
+    function startHistogramProcessing(pixels, totalPixels, generation, initialTimeMs, valueMode, displayMin, displayMax) {
         if (!pixels || totalPixels <= 0) return;
 
         _histogramProcessing = true;
@@ -896,7 +886,6 @@ vec4 _inspMap(vec4 v) {${oor}
         const binsR = new Float32Array(BINS);
         const binsG = new Float32Array(BINS);
         const binsB = new Float32Array(BINS);
-        const len = totalPixels * 4;
         const byteScale = 1 / 255;
         const domainEpsilon = valueMode === 'float' ? 1e-9 : 1;
 
@@ -907,6 +896,7 @@ vec4 _inspMap(vec4 v) {${oor}
         let domainMinRaw = Number.POSITIVE_INFINITY;
         let domainMaxRaw = Number.NEGATIVE_INFINITY;
         let stableDomain = null;
+        let activeProcessingMs = 0;
         const sampleStride = normalizeHistogramSampleStride(_histogramSampleStride);
 
         function getStableDomain(domainMin, domainMax) {
@@ -933,6 +923,7 @@ vec4 _inspMap(vec4 v) {${oor}
                 return;
             }
 
+            const stepStartedAtMs = getNowMs();
             let processed = 0;
             const useDeadline = deadline && typeof deadline.timeRemaining === 'function';
             while (pixelIndex < totalPixels) {
@@ -947,7 +938,6 @@ vec4 _inspMap(vec4 v) {${oor}
                     if (lo < domainMinRaw) domainMinRaw = lo;
                     if (hi > domainMaxRaw) domainMaxRaw = hi;
                 } else {
-                    const stableDomain = getStableDomain(domainMinRaw, domainMaxRaw);
                     if (stableDomain.collapsed) {
                         const centerIdx = BINS >> 1;
                         binsR[centerIdx]++;
@@ -976,6 +966,8 @@ vec4 _inspMap(vec4 v) {${oor}
                 }
             }
 
+            activeProcessingMs += getNowMs() - stepStartedAtMs;
+
             if (pixelIndex < totalPixels) {
                 scheduleHistogramWork(step);
                 return;
@@ -997,7 +989,7 @@ vec4 _inspMap(vec4 v) {${oor}
                 samples,
                 toDisplayValue(domainMinRaw),
                 toDisplayValue(domainMaxRaw),
-                getNowMs() - startedAtMs
+                initialTimeMs + activeProcessingMs
             );
             drainQueuedHistogram();
         }
@@ -1191,7 +1183,7 @@ vec4 _inspMap(vec4 v) {${oor}
 
             const totalPixels = w * h;
             const generation = ++_histogramGeneration;
-            const startedAtMs = getNowMs();
+            const snapshotStartedAtMs = getNowMs();
             const histogramMin = Number(_mapping.min);
             const histogramMax = Number(_mapping.max);
 
@@ -1212,11 +1204,12 @@ vec4 _inspMap(vec4 v) {${oor}
                     if (typeof quad !== 'undefined' && quad) {
                         quad.material = previousMaterial;
                     }
+                    const captureTimeMs = getNowMs() - snapshotStartedAtMs;
 
                     if (useQueuedBuffer) {
                         _histogramQueuedTotalPixels = totalPixels;
                         _histogramQueuedGeneration = generation;
-                        _histogramQueuedStartedAtMs = startedAtMs;
+                        _histogramQueuedStartedAtMs = captureTimeMs;
                         _histogramQueuedValueMode = 'float';
                         _histogramQueuedDisplayMin = histogramMin;
                         _histogramQueuedDisplayMax = histogramMax;
@@ -1224,7 +1217,7 @@ vec4 _inspMap(vec4 v) {${oor}
                         return;
                     }
 
-                    startHistogramProcessing(floatBuf, totalPixels, generation, startedAtMs, 'float', histogramMin, histogramMax);
+                    startHistogramProcessing(floatBuf, totalPixels, generation, captureTimeMs, 'float', histogramMin, histogramMax);
                     return;
                 }
             }
@@ -1235,11 +1228,12 @@ vec4 _inspMap(vec4 v) {${oor}
 
             // Fallback path — histogram from mapped screen output when raw float capture is unavailable.
             gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, targetBuf);
+            const captureTimeMs = getNowMs() - snapshotStartedAtMs;
 
             if (useQueuedBuffer) {
                 _histogramQueuedTotalPixels = totalPixels;
                 _histogramQueuedGeneration = generation;
-                _histogramQueuedStartedAtMs = startedAtMs;
+                _histogramQueuedStartedAtMs = captureTimeMs;
                 _histogramQueuedValueMode = 'byte';
                 _histogramQueuedDisplayMin = 0;
                 _histogramQueuedDisplayMax = 1;
@@ -1247,7 +1241,7 @@ vec4 _inspMap(vec4 v) {${oor}
                 return;
             }
 
-            startHistogramProcessing(targetBuf, totalPixels, generation, startedAtMs, 'byte', 0, 1);
+            startHistogramProcessing(targetBuf, totalPixels, generation, captureTimeMs, 'byte', 0, 1);
         } catch (err) { /* ignore */ }
     }
 

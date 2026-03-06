@@ -229,7 +229,7 @@ suite('Inspect runtime', () => {
         assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramSampleStride(), 1);
     });
 
-    test('histogram reports the observed raw domain for panel-side cropping', () => {
+    test('histogram reports the observed raw domain with active histogram timing', () => {
         const { sandbox, messages, getFullReadPixelsCalls, getRenderTargetReadPixelsCalls } = loadInspectorHarness();
 
         sandbox.ShaderToy.inspector.handleMessage({
@@ -247,7 +247,7 @@ suite('Inspect runtime', () => {
         assert.strictEqual(histogramMessage?.histogram?.samples, 4, 'Expected all framebuffer pixels to be analyzed');
         assert.strictEqual(histogramMessage?.histogram?.autoMin, -1);
         assert.strictEqual(histogramMessage?.histogram?.autoMax, 1.5);
-        assert.strictEqual(histogramMessage?.histogram?.timeMs, 1.25);
+        assert.strictEqual(histogramMessage?.histogram?.timeMs, 3.75);
     });
 
     test('histogram sample stride reduces the analyzed sample count', () => {
