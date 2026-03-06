@@ -9,7 +9,7 @@ import { Context } from './context';
 import { removeDuplicates } from './utility';
 import { FramesPanel } from './framespanel';
 import { ErrorsPanel } from './errorspanel';
-import { analyzeShader, ShaderWarning, WARNING_CATEGORIES } from './shaderanalysis';
+import { analyzeShader } from './shaderanalysis';
 
 type Webview = {
     Panel: vscode.WebviewPanel,
@@ -29,6 +29,7 @@ export class ShaderToyManager {
     framesPanel: FramesPanel;
     errorsPanel: ErrorsPanel;
     private analysisDiagnosticCollection: vscode.DiagnosticCollection;
+    private cachedCompileErrors: Map<string, Array<{ line: number; message: string; file?: string }>> = new Map();
 
     constructor(context: Context) {
         this.context = context;
@@ -41,6 +42,11 @@ export class ShaderToyManager {
         });
         this.errorsPanel = new ErrorsPanel(context);
         this.analysisDiagnosticCollection = vscode.languages.createDiagnosticCollection('shader-toy.analysis');
+
+        // Clear analysis diagnostics when errors panel is closed
+        this.errorsPanel.onDidDispose(() => {
+            this.analysisDiagnosticCollection.clear();
+        });
     }
 
     public migrateToNewContext = async (context: Context) => {
@@ -171,6 +177,16 @@ export class ShaderToyManager {
 
     public showErrorsPanel = () => {
         this.errorsPanel.show();
+
+        // Post any cached compile errors accumulated before the panel was opened
+        if (this.cachedCompileErrors.size > 0) {
+            const allErrors: Array<{ line: number; message: string; file?: string }> = [];
+            for (const errors of this.cachedCompileErrors.values()) {
+                allErrors.push(...errors);
+            }
+            this.errorsPanel.postCompileErrors(allErrors);
+        }
+
         // Run analysis on current document immediately
         if (this.context.activeEditor) {
             this.runShaderAnalysis(this.context.activeEditor.document);
@@ -351,15 +367,22 @@ export class ShaderToyManager {
 
                     this.context.showDiagnostics(diagnosticBatch, severity);
 
-                    // Forward compile errors to the errors panel
-                    if (this.errorsPanel.isActive && message.type === 'error') {
-                        this.errorsPanel.postCompileErrors(
-                            diagnosticBatch.diagnostics.map((d: { line: number; message: string }) => ({
-                                line: d.line,
-                                message: d.message,
-                                file: diagnosticBatch.filename
-                            }))
-                        );
+                    // Cache and forward compile errors to the errors panel
+                    if (message.type === 'error') {
+                        const errors = diagnosticBatch.diagnostics.map((d: { line: number; message: string }) => ({
+                            line: d.line,
+                            message: d.message,
+                            file: diagnosticBatch.filename
+                        }));
+                        this.cachedCompileErrors.set(diagnosticBatch.filename, errors);
+
+                        if (this.errorsPanel.isActive) {
+                            const allErrors: Array<{ line: number; message: string; file?: string }> = [];
+                            for (const cached of this.cachedCompileErrors.values()) {
+                                allErrors.push(...cached);
+                            }
+                            this.errorsPanel.postCompileErrors(allErrors);
+                        }
                     }
                     return;
                 }
@@ -385,6 +408,7 @@ export class ShaderToyManager {
     private updateWebview = async <T extends Webview | StaticWebview>(webviewPanel: T, document: vscode.TextDocument): Promise<T> => {
         this.context.clearDiagnostics();
         this.analysisDiagnosticCollection.clear();
+        this.cachedCompileErrors.clear();
         this.errorsPanel.clearErrors();
         const webviewContentProvider = new WebviewContentProvider(this.context, document.getText(), document.fileName);
         const localResources = await webviewContentProvider.parseShaderTree(false);
