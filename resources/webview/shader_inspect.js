@@ -658,7 +658,9 @@ vec4 _inspMap(vec4 v) {${oor}
     let _compareMode = false;
     let _hoverEnabled = true;
     let _histogramEnabled = true;
-    let _histogramFrame = 0;
+    let _histogramDirty = false;
+    let _histogramTimer = null;
+    let _histogramPixelBuf = null;   // cached Uint8Array for readback
     let _inspectorMaterial = null;
     let _originalMaterials = new Map();  // bufferIndex → original material
     let _lastRewrittenSource = '';
@@ -809,7 +811,7 @@ vec4 _inspMap(vec4 v) {${oor}
         if (!_active) return;
         if (typeof gl === 'undefined') return;
 
-        // Hover pixel readback
+        // Hover pixel readback (single pixel — negligible cost)
         if (_hoverEnabled && _mouseInCanvas && _mouseX >= 0 && _mouseY >= 0) {
             try {
                 const pixel = new Uint8Array(4);
@@ -824,78 +826,111 @@ vec4 _inspMap(vec4 v) {${oor}
             } catch (err) { /* ignore */ }
         }
 
-        // Histogram — sparse grid readback every N frames
-        if (_histogramEnabled && ++_histogramFrame >= 10) {
-            _histogramFrame = 0;
-            computeHistogram();
+        // Histogram — snapshot framebuffer when dirty, then bin on idle
+        if (_histogramEnabled && _histogramDirty) {
+            _histogramDirty = false;
+            snapshotForHistogram();
         }
     }
 
-    /** Sample a sparse pixel grid and compute per-channel histogram (128 bins). */
-    function computeHistogram() {
+    /** One-shot full-framebuffer readPixels, then schedule CPU binning off the render path. */
+    function snapshotForHistogram() {
         try {
             const canvas = document.getElementById('canvas');
             if (!canvas) return;
             const w = canvas.width, h = canvas.height;
             if (w <= 0 || h <= 0) return;
 
-            const GRID = 32;   // 32×32 = 1024 samples
-            const BINS = 128;
-            const binsR = new Float32Array(BINS);
-            const binsG = new Float32Array(BINS);
-            const binsB = new Float32Array(BINS);
-            const pixel = new Uint8Array(4);
-            let minVal = 1, maxVal = 0, samples = 0;
-
-            const stepX = Math.max(1, Math.floor(w / GRID));
-            const stepY = Math.max(1, Math.floor(h / GRID));
-
-            for (let gy = 0; gy < GRID; gy++) {
-                const py = Math.min(gy * stepY, h - 1);
-                for (let gx = 0; gx < GRID; gx++) {
-                    const px = Math.min(gx * stepX, w - 1);
-                    gl.readPixels(px, py, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
-                    const r = pixel[0] / 255, g = pixel[1] / 255, b = pixel[2] / 255;
-                    // Track actual range
-                    const lo = Math.min(r, g, b), hi = Math.max(r, g, b);
-                    if (lo < minVal) minVal = lo;
-                    if (hi > maxVal) maxVal = hi;
-                    // Bin each channel (clamp to [0,1] for uint8 readback)
-                    binsR[Math.min(Math.floor(r * BINS), BINS - 1)]++;
-                    binsG[Math.min(Math.floor(g * BINS), BINS - 1)]++;
-                    binsB[Math.min(Math.floor(b * BINS), BINS - 1)]++;
-                    samples++;
-                }
+            // Reuse / grow the cached pixel buffer
+            const needed = w * h * 4;
+            if (!_histogramPixelBuf || _histogramPixelBuf.length < needed) {
+                _histogramPixelBuf = new Uint8Array(needed);
             }
 
-            if (samples === 0) return;
+            // ONE readPixels for the entire framebuffer (single GPU stall)
+            gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, _histogramPixelBuf);
 
-            // 3-point smooth
-            function smooth(arr) {
-                const out = new Float32Array(arr.length);
-                for (let i = 0; i < arr.length; i++) {
-                    const prev = i > 0 ? arr[i - 1] : 0;
-                    const next = i < arr.length - 1 ? arr[i + 1] : 0;
-                    out[i] = (prev + arr[i] + next) / 3;
-                }
-                return out;
-            }
-
-            if (typeof vscode !== 'undefined' && vscode) {
-                vscode.postMessage({
-                    command: 'inspectorHistogram',
-                    histogram: {
-                        binsR: Array.from(smooth(binsR)),
-                        binsG: Array.from(smooth(binsG)),
-                        binsB: Array.from(smooth(binsB)),
-                        bins: BINS,
-                        samples: samples,
-                        autoMin: minVal,
-                        autoMax: maxVal
-                    }
-                });
-            }
+            // Schedule CPU-side binning during idle time
+            const buf = _histogramPixelBuf;
+            const totalPixels = w * h;
+            const schedule = typeof requestIdleCallback === 'function' ? requestIdleCallback : setTimeout;
+            schedule(function () { binHistogram(buf, totalPixels); });
         } catch (err) { /* ignore */ }
+    }
+
+    /** Pure CPU work — bin pixel data into per-channel histogram (128 bins). */
+    function binHistogram(pixels, totalPixels) {
+        const BINS = 128;
+        const binsR = new Float32Array(BINS);
+        const binsG = new Float32Array(BINS);
+        const binsB = new Float32Array(BINS);
+        let minVal = 1, maxVal = 0;
+
+        // Stride through every Nth pixel for speed (cap at ~4096 samples)
+        const stride = Math.max(1, Math.floor(totalPixels / 4096));
+        let samples = 0;
+        const len = totalPixels * 4;
+        const inv = BINS / 256;   // map 0-255 → 0-127
+
+        for (let i = 0; i < len; i += stride * 4) {
+            const rv = pixels[i], gv = pixels[i + 1], bv = pixels[i + 2];
+            binsR[Math.min((rv * inv) | 0, BINS - 1)]++;
+            binsG[Math.min((gv * inv) | 0, BINS - 1)]++;
+            binsB[Math.min((bv * inv) | 0, BINS - 1)]++;
+            const lo = Math.min(rv, gv, bv), hi = Math.max(rv, gv, bv);
+            if (lo < minVal) minVal = lo;
+            if (hi > maxVal) maxVal = hi;
+            samples++;
+        }
+
+        if (samples === 0) return;
+
+        // 3-point smooth
+        function smooth(arr) {
+            const out = new Float32Array(arr.length);
+            for (let i = 0; i < arr.length; i++) {
+                const prev = i > 0 ? arr[i - 1] : 0;
+                const next = i < arr.length - 1 ? arr[i + 1] : 0;
+                out[i] = (prev + arr[i] + next) / 3;
+            }
+            return out;
+        }
+
+        if (typeof vscode !== 'undefined' && vscode) {
+            vscode.postMessage({
+                command: 'inspectorHistogram',
+                histogram: {
+                    binsR: Array.from(smooth(binsR)),
+                    binsG: Array.from(smooth(binsG)),
+                    binsB: Array.from(smooth(binsB)),
+                    bins: BINS,
+                    samples: samples,
+                    autoMin: minVal / 255,
+                    autoMax: maxVal / 255
+                }
+            });
+        }
+    }
+
+    /** Mark histogram as needing refresh (called after inspection changes, on a timer). */
+    function requestHistogramUpdate() {
+        _histogramDirty = true;
+    }
+
+    /** Start / stop the periodic histogram refresh timer. */
+    function startHistogramTimer() {
+        stopHistogramTimer();
+        if (_histogramEnabled && _active) {
+            // Initial snapshot after a short delay (let first frame render)
+            _histogramDirty = true;
+            _histogramTimer = setInterval(requestHistogramUpdate, 500);
+        }
+    }
+    function stopHistogramTimer() {
+        if (_histogramTimer) {
+            clearInterval(_histogramTimer);
+            _histogramTimer = null;
+        }
     }
 
     // ── Message Handling ────────────────────────────────────────────
@@ -907,6 +942,7 @@ vec4 _inspMap(vec4 v) {${oor}
                 _line = msg.line || 0;
                 if (_active && _variable) {
                     updateInspection();
+                    requestHistogramUpdate();
                 }
                 break;
 
@@ -916,6 +952,7 @@ vec4 _inspMap(vec4 v) {${oor}
                     _lastRewrittenSource = ''; // force recompile
                     if (_active && _variable) {
                         updateInspection();
+                        requestHistogramUpdate();
                     }
                 }
                 break;
@@ -924,11 +961,13 @@ vec4 _inspMap(vec4 v) {${oor}
                 if (!_active) {
                     _active = true;
                     if (_variable) updateInspection();
+                    startHistogramTimer();
                 }
                 break;
 
             case 'inspectorOff':
                 _active = false;
+                stopHistogramTimer();
                 restoreOriginal();
                 postStatus('off', 'Inspector off');
                 break;
@@ -938,6 +977,7 @@ vec4 _inspMap(vec4 v) {${oor}
                 _lastRewrittenSource = ''; // force recompile
                 if (_active && _variable) {
                     updateInspection();
+                    requestHistogramUpdate();
                 }
                 break;
 
@@ -966,6 +1006,7 @@ vec4 _inspMap(vec4 v) {${oor}
             // Re-inspect with new materials if active
             if (_active && _variable) {
                 updateInspection();
+                requestHistogramUpdate();
             }
         },
 
