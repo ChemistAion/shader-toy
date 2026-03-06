@@ -7,7 +7,6 @@ import { RenderStartingData, DiagnosticBatch } from './typenames';
 import { WebviewContentProvider } from './webviewcontentprovider';
 import { Context } from './context';
 import { removeDuplicates } from './utility';
-import { FramesPanel } from './framespanel';
 import { ErrorsPanel } from './errorspanel';
 import { analyzeShader } from './shaderanalysis';
 
@@ -26,22 +25,15 @@ export class ShaderToyManager {
 
     webviewPanel: Webview | undefined;
     staticWebviews: StaticWebview[] = [];
-    framesPanel: FramesPanel;
     errorsPanel: ErrorsPanel;
     private analysisDiagnosticCollection: vscode.DiagnosticCollection;
     private cachedCompileErrors: Map<string, Array<{ line: number; message: string; file?: string }>> = new Map();
 
     constructor(context: Context) {
         this.context = context;
-        this.framesPanel = new FramesPanel(context);
-        this.framesPanel.onDidDispose(() => {
-            this.postCommand('disableFrameTiming');
-        });
-        this.framesPanel.onDidChangeVisibility((visible) => {
-            this.postCommand(visible ? 'enableFrameTiming' : 'disableFrameTiming');
-        });
         this.errorsPanel = new ErrorsPanel(context);
         this.analysisDiagnosticCollection = vscode.languages.createDiagnosticCollection('shader-toy.analysis');
+        this.context.getVscodeExtensionContext().subscriptions.push(this.analysisDiagnosticCollection);
 
         // Clear analysis diagnostics when errors panel is closed
         this.errorsPanel.onDidDispose(() => {
@@ -51,7 +43,6 @@ export class ShaderToyManager {
 
     public migrateToNewContext = async (context: Context) => {
         this.context = context;
-        this.framesPanel.updateContext(context);
         if (this.webviewPanel && this.context.activeEditor) {
             await this.updateWebview(this.webviewPanel, this.context.activeEditor.document);
         }
@@ -170,11 +161,6 @@ export class ShaderToyManager {
         this.staticWebviews.forEach((webview: StaticWebview) => webview.Panel.webview.postMessage({command: command}));
     };
 
-    public showFrameTimePanel = () => {
-        this.framesPanel.show();
-        this.postCommand('enableFrameTiming');
-    };
-
     public showErrorsPanel = () => {
         this.errorsPanel.show();
 
@@ -241,11 +227,6 @@ export class ShaderToyManager {
         newWebviewPanel.webview.onDidReceiveMessage(
             (message: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
                 switch (message.command) {
-                case 'frameData':
-                    if (this.framesPanel.isActive) {
-                        this.framesPanel.postFrameData(message);
-                    }
-                    return;
                 case 'readDDSFile':
                 {
                     const requestId: number = message.requestId;
