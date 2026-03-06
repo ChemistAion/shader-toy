@@ -4,7 +4,7 @@
 > **Scope:** This report covers only the inspect-feature commit range above `master`, from merge-base `fd6be52c63c35229cf9592aa12035065f24f4fb4` through `HEAD`.
 > **Method:** Every section below is based on local `git show` / `git diff` inspection of the actual commits in that range, not on commit subjects alone.
 > **Focus:** The inspect-specific control path and runtime path: `package.json`, `src/extension.ts`, `src/webviewcontentprovider.ts`, `src/inspectpanel.ts`, `src/shadertoymanager.ts`, `resources/inspect_panel.html`, `resources/webview_base.html`, `resources/webview/shader_inspect.js`, and `test/inspect_runtime.test.ts`.
-> **Exclusions:** No attempt is made to retell repository-wide history before the merge-base or unrelated feature branches, except where a chore commit directly affected the inspect implementation workflow or reference corpus.
+> **Exclusions:** No attempt is made to retell repository-wide history before the merge-base or unrelated feature branches, except where a chore commit directly affected the inspect implementation workflow or reference corpus. Routine follow-up maintenance commits to this report are not enumerated individually.
 
 ---
 
@@ -22,19 +22,19 @@
 
 ## 1. Executive summary
 
-The inspect branch does **not** land the variable inspector as a single monolithic feature. It grows it in eleven functional steps and five chore steps: first as a three-party IPC scaffold, then as a correctness pass for shader-source discovery and reload persistence, then as a set of render-loop subfeatures (hover readback, histogram), and finally as a hardening/polish pass that turns the feature from “works in the happy path” into a stateful, replay-safe subsystem.
+The inspect branch does **not** land the variable inspector as a single monolithic feature. It grows it in thirteen functional steps and five chore steps: first as a three-party IPC scaffold, then as a correctness pass for shader-source discovery and reload persistence, then as a set of render-loop subfeatures (hover readback, histogram), and finally as a hardening/polish pass that turns the feature from “works in the happy path” into a stateful, replay-safe subsystem.
 
 Three architectural moves define the branch:
 
 1. **A separate inspect panel was introduced as a first-class UI peer to the preview webview**, rather than as an overlay stuffed into the preview itself. That forced the extension host to become the message hub between editor selection, preview runtime, and panel UI.
 2. **`ShaderToyManager` gradually became the state authority** for inspect. The initial version only forwarded selection and control messages; by the end of the branch it checkpointed variable, line, inferred type, mapping mode, compare mode, hover enablement, histogram enablement, and histogram interval, and replayed that bundle after preview rebuilds or panel recreation.
-3. **The preview-side engine evolved from naive, directly-coupled readback to a disciplined post-render pipeline.** Hover readback moved to `afterFrame()`, histogram generation moved from repeated point samples to one framebuffer snapshot plus deferred CPU binning, timer-driven refresh was normalized into explicit 1Hz / 5Hz / 10Hz presets, stage5F aligned histogram analysis with asynchronous full-frame evaluation plus timing telemetry, and stage5G aligned the histogram’s capture domain with the raw inspector range via a dedicated float pass.
+3. **The preview-side engine evolved from naive, directly-coupled readback to a disciplined post-render pipeline.** Hover readback moved to `afterFrame()`, histogram generation moved from repeated point samples to one framebuffer snapshot plus deferred CPU binning, timer-driven refresh was normalized into explicit 1Hz / 5Hz / 10Hz presets, stage5F aligned histogram analysis with asynchronous full-frame evaluation plus timing telemetry, stage5G aligned the histogram’s capture domain with the raw inspector range via a dedicated float pass, stage5H split observed-domain measurement from panel-side crop presentation, and stage5I added an explicit sample-density control that is persisted end-to-end.
 
-The final result at `704fe4c` is a coherent inspect architecture with a clean split of responsibilities:
+The final result at `d143f20` is a coherent inspect architecture with a clean split of responsibilities:
 
 - **Extension host:** selection capture, persisted inspect state, IPC fan-out/fan-in.
-- **Preview runtime (`shader_inspect.js`):** type inference, shader rewriting, in-place material mutation, post-render readback, raw-range histogram capture, and async full-frame histogram evaluation.
-- **Inspect panel:** control surface and telemetry surface, with explicit `panelReady`/`syncState` rehydration.
+- **Preview runtime (`shader_inspect.js`):** type inference, shader rewriting, in-place material mutation, post-render readback, raw-range histogram capture, observed-domain histogram analysis, and async sample-stride-aware evaluation.
+- **Inspect panel:** control surface and telemetry surface, with explicit `panelReady`/`syncState` rehydration, crop overlays, and histogram guidance overlays.
 
 That split is the branch’s real achievement. The visible UI is only the surface expression of a deeper contract between state replay, preview shader mutation, and post-render telemetry.
 
@@ -60,6 +60,8 @@ That split is the branch’s real achievement. The visible UI is only the surfac
 | 14 | 2026-03-06 | `37952f7` | `stage5F: align histogram with async full-frame evaluation` | Kept the preset cadence surface intact while upgrading histogram analysis to queued async full-frame binning with timing telemetry. |
 | 15 | 2026-03-06 | `6edfee4` | `chore: INSPECT implementation full scope report` | Added the full-scope inspect progression report and indexed it in `.github/README.md`; no inspect runtime change. |
 | 16 | 2026-03-06 | `704fe4c` | `stage5G: align histogram capture with raw inspector range` | Switched histogram capture from mapped screen output to a dedicated raw float inspector pass aligned with the active mapping range. |
+| 17 | 2026-03-06 | `356fffd` | `stage5H: adopt cropped-domain histogram overlays` | Shifted histogram display to the observed raw domain and added panel-side crop guides / mapping overlays so the active mapping range can be read against that domain. |
+| 18 | 2026-03-06 | `d143f20` | `stage5I: add histogram sample-stride controls` | Added live sample-stride controls, wired them through panel → host → preview state replay, and made histogram density an explicit user-controlled trade-off. |
 
 ---
 
@@ -78,12 +80,16 @@ ShaderToyManager (extension host state hub)
         │                  • hover toggle
         │                  • histogram toggle
         │                  • histogram interval presets
+        │                  • histogram sample-stride controls
+        │                  • crop / mapping overlays
         │
         └──────────────► Preview webview
                            • shader_inspect.js
                            • shader rewrite + recompile
                            • hover pixel readback
                            • histogram capture
+                           • raw float histogram pass
+                           • observed-domain analysis
                            • status / telemetry emission
 ```
 
@@ -97,8 +103,8 @@ The core design choice is that the preview webview and the inspect panel **never
 | Preview document assembly | Inject the inspect runtime into preview HTML | `src/webviewcontentprovider.ts`, `resources/webview_base.html` |
 | State authority / hub | Cache inspect settings, listen to selection changes, relay messages, replay state after rebuilds | `src/shadertoymanager.ts` |
 | Panel IPC facade | Create and own the separate inspector panel, translate webview messages to callbacks, push state into the panel | `src/inspectpanel.ts` |
-| Panel UI | Render control surface and telemetry surface; emit `panelReady`, mapping, compare, hover, histogram, interval messages | `resources/inspect_panel.html` |
-| Preview engine | Infer types, rewrite shader source, mutate final material in place, read pixels after render, capture raw histogram values through a float pass when available, asynchronously bin the full framebuffer, emit status/pixel/histogram telemetry | `resources/webview/shader_inspect.js` |
+| Panel UI | Render control surface and telemetry surface; emit `panelReady`, mapping, compare, hover, histogram, interval, and sample-stride messages; draw crop overlays and mapping guides over histogram data | `resources/inspect_panel.html` |
+| Preview engine | Infer types, rewrite shader source, mutate final material in place, read pixels after render, capture raw histogram values through a float pass when available, scan/bin the observed raw domain asynchronously, and honor sample-stride controls when emitting histogram telemetry | `resources/webview/shader_inspect.js` |
 | Regression harness | Assert runtime contracts outside VS Code UI | `test/inspect_runtime.test.ts` |
 
 ### 3.3 Final persisted state in `ShaderToyManager`
@@ -113,6 +119,7 @@ By the end of the branch, the manager caches the full user-visible inspect confi
 - `_lastHoverEnabled`
 - `_lastHistogramEnabled`
 - `_lastHistogramIntervalMs`
+- `_lastHistogramSampleStride`
 
 That list is the best concise description of what “inspect state” means at the end of the branch. The earlier commits each add pieces of that surface.
 
@@ -127,6 +134,7 @@ That list is the best concise description of what “inspect state” means at t
 | `setHoverEnabled` | Enable/disable hover pixel readback |
 | `setHistogramEnabled` | Enable/disable histogram capture |
 | `setHistogramInterval` | Request one of the normalized refresh presets |
+| `setHistogramSampleStride` | Request one of the normalized histogram sample-density presets |
 | `panelReady` | Signal that the panel webview is loaded and can receive replayed state |
 | `navigateToLine` | Ask host to reveal a file/line |
 
@@ -134,7 +142,7 @@ That list is the best concise description of what “inspect state” means at t
 
 | Message | Purpose |
 |---|---|
-| `syncState` | Replay mapping / compare / hover / histogram / interval state |
+| `syncState` | Replay mapping / compare / hover / histogram / interval / sample-stride state |
 | `updateVariable` | Push selected expression, line, and inferred type |
 | `inspectorStatus` | Push current inspect status/error message |
 | `pixelValue` | Push hover readback RGBA + position |
@@ -151,6 +159,7 @@ That list is the best concise description of what “inspect state” means at t
 | `setInspectorHover` | Toggle hover readback |
 | `setInspectorHistogram` | Toggle histogram capture |
 | `setInspectorHistogramInterval` | Update refresh cadence |
+| `setInspectorHistogramSampleStride` | Update histogram sample density |
 
 #### Preview → Host
 
@@ -181,12 +190,13 @@ That list is the best concise description of what “inspect state” means at t
    - fallback screen-space `gl.readPixels(0, 0, w, h, ...)` when raw capture is unavailable,
    - reusable byte/float buffers plus queued secondary-buffer capture when a previous CPU pass is still running,
    - generation/cancel logic so stale async work is discarded cleanly,
-   - deferred CPU binning during idle time over the **full framebuffer** in chunks,
-   - raw-value binning against the current inspector mapping range on the float path,
+   - deferred CPU histogram work during idle time over the sampled framebuffer domain in chunks,
+   - a two-phase scan/bin pass so the observed raw domain is measured first and only then binned,
+   - optional sample-stride presets (`1`, `8`, `64`) that thin both the scan and the bin pass,
    - 128 bins per channel,
    - 3-point smoothing before emission,
-   - `timeMs` telemetry plus an explicit display range so the panel can show evaluation cost and the histogram’s capture domain.
-7. The panel redraws from host-fed telemetry and restores its own UI state via `syncState` when recreated.
+   - `timeMs` telemetry plus an observed-domain range so the panel can show evaluation cost and render crop overlays against that domain.
+7. The panel redraws from host-fed telemetry, restores its own UI state via `syncState` when recreated, and overlays crop guides / mapping curves against the observed histogram domain.
 
 ### 3.6 Final test anchor
 
@@ -196,7 +206,9 @@ That list is the best concise description of what “inspect state” means at t
 - inspector restoration returns the original fragment shader,
 - histogram enablement toggles correctly,
 - histogram refresh interval defaults to `1000` ms and can switch to `200` and `100` ms,
-- histogram evaluation bins the full framebuffer through the raw render-target path when available and reports timing metadata.
+- histogram evaluation reports the observed raw domain for panel-side cropping,
+- histogram sample stride defaults to `1` and switches across bounded presets,
+- histogram sample stride reduces the analyzed sample count when enabled.
 
 That is a deliberately architectural test surface: it asserts lifecycle and state transitions rather than pixel-perfect visuals.
 
@@ -840,7 +852,7 @@ Stage5E closes the loop on inspect-state completeness. After this commit, every 
 - bounded by normalization logic,
 - at least partially protected by tests.
 
-This is the point where the branch’s control surface becomes configuration-complete. The next two commits keep that state model intact while first deepening the async histogram pipeline and then changing the histogram capture domain itself.
+This is the point where the branch’s control surface becomes configuration-complete. The next four commits keep that state model intact while first deepening the async histogram pipeline, then changing the histogram capture domain, then separating observed-domain measurement from crop presentation, and finally exposing histogram density as another persisted control.
 
 ---
 
@@ -948,7 +960,7 @@ Stage5F is the final histogram-algorithm step in the current history:
 - stage5E made cadence explicit and replay-safe,
 - stage5F made the analysis itself full-frame, asynchronous, and measurable.
 
-That means the histogram subsystem is now configurable, full-frame-aware, and explicit about runtime cost—but it is still capturing mapped output rather than the raw inspector-value domain. The next commit changes exactly that.
+That means the histogram subsystem is now configurable, full-frame-aware, and explicit about runtime cost—but it is still capturing mapped output rather than the raw inspector-value domain. The next runtime commit changes exactly that.
 
 ---
 
@@ -1085,7 +1097,216 @@ Stage5G is the current endpoint of histogram maturation:
 - stage5F made evaluation asynchronous and full-frame,
 - stage5G aligned the capture domain with the actual inspector range.
 
-That is the point where histogram stops being merely “a graph of the inspected image” and becomes much closer to “a graph of the inspected values themselves.”
+That is the point where histogram stops being merely “a graph of the inspected image” and becomes much closer to “a graph of the inspected values themselves.” But it still conflates two concepts: the **observed raw domain** and the **user’s chosen mapping crop**. The next commit separates those concerns.
+
+---
+
+### 4.17 `356fffd` — `stage5H: adopt cropped-domain histogram overlays`
+
+**Touched files**
+
+- `resources/inspect_panel.html`
+- `resources/webview/shader_inspect.js`
+- `test/inspect_runtime.test.ts`
+
+**What changed**
+
+This commit changes both the **meaning** of histogram metadata and the way the panel visualizes it.
+
+#### Panel-side overlay model
+
+`resources/inspect_panel.html` gained a substantial new overlay vocabulary:
+
+- `lastHistogram` caching so the panel can redraw the current histogram when mapping controls change,
+- `normalizeCropRange()`,
+- `mapValueToX(...)`,
+- `clamp(...)`,
+- `createOverlayPattern(...)`,
+- `drawCropOverlays(...)`,
+- `evaluateCurve(...)`,
+- `drawMappingCurves(...)`.
+
+Those helpers let the panel do something it could not do before: distinguish between:
+
+- the **observed histogram domain** reported by the preview runtime, and
+- the **currently selected mapping crop** entered by the user.
+
+The visual effect is important:
+
+- histogram bars are now drawn over the observed domain,
+- crop-excluded regions are shaded with patterned overlays,
+- crop boundaries are marked with guide lines,
+- the active mapping curve is drawn over the histogram.
+
+This means the panel stops being just a passive chart and becomes an explanatory visualization of how the current mapping parameters relate to the actual inspected value distribution.
+
+#### Preview/runtime semantic shift
+
+The runtime change is subtler but more fundamental.
+
+Before stage5H, `startHistogramProcessing(...)` effectively binned values directly against a preselected display range. After this commit, it moves to a **two-phase scan/bin model**:
+
+1. **scan phase** — walk the sampled pixels and discover `domainMinRaw` / `domainMaxRaw`,
+2. **bin phase** — use that observed domain as the stable domain for histogram binning.
+
+Related changes:
+
+- `postHistogram(...)` now reports `domainMin` / `domainMax` rather than the prior display-oriented range semantics,
+- byte mode is normalized through `toDisplayValue(...)`,
+- collapsed-domain handling is preserved, but now happens relative to the observed domain.
+
+This is a major conceptual refinement: the preview runtime becomes responsible for measuring the distribution honestly, while the panel becomes responsible for showing how the current mapping window sits inside that distribution.
+
+#### Test correction
+
+The runtime test formerly asserting a mapping-clamped max value was updated:
+
+- the histogram test now expects `autoMax` to be `1.5` rather than `1`,
+- the test name shifts to “reports the observed raw domain for panel-side cropping.”
+
+That test rename is telling. It captures the exact semantic change of the commit.
+
+**Why it mattered**
+
+Stage5G fixed the histogram capture source, but it still left the histogram chart semantically overloaded: the observed data domain and the user’s mapping crop were still entangled. That makes the chart less explanatory than it could be, because it is hard to tell whether the histogram is showing:
+
+- the actual distribution of inspected values, or
+- the range selected by the mapping controls.
+
+Stage5H separates those responsibilities cleanly:
+
+- the runtime reports the observed raw domain,
+- the panel overlays the user’s crop and mapping curve on top of that domain.
+
+That is a strong architectural choice because it puts measurement in the runtime and interpretation in the UI.
+
+**Effect on the implementation arc**
+
+Stage5H is the commit where histogram stops being just “raw-domain capture” and becomes “raw-domain capture **plus** an explanatory overlay model.” It is the point where the panel starts communicating not just what values exist, but how the current inspector mapping is transforming or excluding those values.
+
+This is also the moment where histogram presentation becomes meaningfully interactive even without new preview recompilation work: changing mapping values can redraw the interpretation layer immediately from cached histogram data.
+
+---
+
+### 4.18 `d143f20` — `stage5I: add histogram sample-stride controls`
+
+**Touched files**
+
+- `resources/inspect_panel.html`
+- `resources/webview/shader_inspect.js`
+- `resources/webview_base.html`
+- `src/inspectpanel.ts`
+- `src/shadertoymanager.ts`
+- `test/inspect_runtime.test.ts`
+
+**What changed**
+
+This commit turns histogram sampling density into a first-class, persisted inspect control.
+
+#### Panel/UI control surface
+
+`resources/inspect_panel.html` adds a new control cluster inside the histogram canvas area:
+
+- `1:1`
+- `1:8`
+- `1:64`
+
+These are not refresh-rate controls; they are **sample-stride controls**. The panel also adds:
+
+- `DEFAULT_HISTOGRAM_SAMPLE_STRIDE = 1`,
+- `currentHistogramSampleStride`,
+- `normalizeHistogramSampleStride(...)`,
+- `setHistogramSampleStrideUi(...)`,
+- message emission via `setHistogramSampleStride`.
+
+`applyInspectorState(...)` now restores sample stride alongside interval, hover, compare, and histogram enablement, which means this is immediately treated as durable inspector configuration, not as an ad hoc local tweak.
+
+#### Host-state extension
+
+For the first time since stage5E, the host-side inspect state grows again.
+
+`src/inspectpanel.ts` adds:
+
+- `onHistogramSampleStrideChanged`,
+- `setOnHistogramSampleStrideChanged(...)`,
+- `histogramSampleStride` in `postInspectorState(...)`.
+
+`src/shadertoymanager.ts` adds:
+
+- `DEFAULT_HISTOGRAM_SAMPLE_STRIDE = 1`,
+- `_lastHistogramSampleStride`,
+- panel callback wiring for `setInspectorHistogramSampleStride`,
+- replay of sample stride to both the panel and the preview runtime.
+
+`resources/webview_base.html` forwards the new message to `window.ShaderToy.inspector.handleMessage(...)`.
+
+This is a classic continuation of the manager-as-authority pattern: once the sample stride becomes user-visible, it is immediately promoted into replayable host state.
+
+#### Preview/runtime sampling behavior
+
+`resources/webview/shader_inspect.js` adds:
+
+- `_histogramSampleStride = 1`,
+- `normalizeHistogramSampleStride(...)`,
+- `getHistogramSampleStride()` for tests,
+- message handling for `setInspectorHistogramSampleStride`,
+- `requestHistogramUpdateNow()` to cancel in-flight histogram work and force an immediate refresh.
+
+The important algorithmic shift is in `startHistogramProcessing(...)`:
+
+- the processing loop moves from pure `offset += 4` iteration to `pixelIndex += sampleStride`,
+- both the **scan phase** and **bin phase** now honor the current sample stride.
+
+That means sample stride is not just a display-time decimation knob; it changes the measurement workload itself. When the stride increases, the runtime both:
+
+- looks at fewer pixels to estimate the observed domain,
+- and bins fewer pixels into the histogram.
+
+#### Test expansion
+
+The runtime tests now explicitly cover this new state/control surface:
+
+- default sample stride is `1`,
+- setting it to `64` works,
+- invalid values normalize back to `1`,
+- a stride of `8` reduces the analyzed sample count in the emitted histogram.
+
+This is an important testing step because it proves not just that the control exists, but that it materially changes the runtime behavior it claims to control.
+
+**Why it mattered**
+
+By stage5H, the histogram was semantically much stronger, but the cost/fidelity trade-off was still mostly implicit:
+
+- refresh cadence was configurable,
+- histogram enablement was configurable,
+- capture domain and overlay semantics were improved,
+- but sampling density was still effectively fixed.
+
+Stage5I introduces a user-facing performance dial that is conceptually different from cadence:
+
+- cadence answers **how often** the histogram refreshes,
+- sample stride answers **how densely** each refresh samples the frame.
+
+That distinction matters because it gives users another way to tune responsiveness versus fidelity without disabling the feature or slowing it to a crawl.
+
+**Effect on the implementation arc**
+
+Stage5I is the current endpoint of the histogram-control surface:
+
+- stage5A introduced the feature,
+- stage5B fixed the basic cost model,
+- stage5D exposed enablement,
+- stage5E exposed cadence,
+- stage5F made processing asynchronous and full-frame-aware,
+- stage5G corrected the capture source,
+- stage5H separated observed-domain measurement from crop presentation,
+- stage5I exposed sample density as a first-class, replay-safe knob.
+
+At this point the histogram subsystem is not just configurable; it is configurable along the three axes that actually matter for an inspect tool:
+
+- **what values are being measured**,
+- **how those values are presented relative to the mapping crop**,
+- **how much work each refresh is allowed to do**.
 
 ---
 
@@ -1102,6 +1323,7 @@ A good way to see the progression is by state surface growth:
 - stage5C: mapping + compare + type
 - stage5D: histogram enablement
 - stage5E: histogram interval
+- stage5I: histogram sample stride
 
 By `HEAD`, the manager is effectively the inspect session model.
 
@@ -1146,13 +1368,15 @@ The histogram progression is especially instructive:
 - stage5D adds user enable/disable state,
 - stage5E adds bounded cadence presets,
 - stage5F upgrades the deferred path from sampled approximation to queued async full-frame evaluation with timing telemetry,
-- stage5G aligns the capture source with the raw inspector range via a dedicated float pass.
+- stage5G aligns the capture source with the raw inspector range via a dedicated float pass,
+- stage5H separates observed-domain measurement from crop interpretation through panel overlays,
+- stage5I adds explicit sample-density control.
 
-That is a healthy feature maturation pattern: first demonstrate usefulness, then shape cost, then expose controls, then tighten fidelity plus observability, and finally align the capture domain with the values the user is actually reasoning about.
+That is a healthy feature maturation pattern: first demonstrate usefulness, then shape cost, then expose controls, then tighten fidelity plus observability, then align the capture domain with the values the user is actually reasoning about, and finally expose the density/fidelity trade-off directly.
 
 ### 5.6 Settings are normalized at both ends of the IPC boundary
 
-Histogram interval is the clearest example, but the pattern shows up elsewhere too: panel state is not blindly trusted. The panel and preview both normalize or bound inputs.
+Histogram interval and histogram sample stride are the clearest examples, but the pattern shows up elsewhere too: panel state is not blindly trusted. The panel and preview both normalize or bound inputs.
 
 That makes the system more robust against stale UI state, malformed messages, and replay-order issues.
 
@@ -1165,7 +1389,9 @@ The runtime tests introduced late in the branch do not try to prove visually per
 - enable/disable toggles,
 - timer configuration,
 - full-frame histogram evaluation and timing payloads,
-- raw render-target histogram capture against the configured inspector range.
+- raw render-target histogram capture against the configured inspector range,
+- observed-domain reporting for panel-side cropping,
+- sample-stride control and its effect on analyzed sample count.
 
 That is a pragmatic and architecture-aware choice for a webview/WebGL feature.
 
@@ -1259,7 +1485,7 @@ This is the commit that turns the histogram from “well-controlled and efficien
 
 ### 6.8 `704fe4c` — raw-range histogram capture
 
-Read this last to understand the current endpoint of the branch’s histogram work:
+Read this next to understand how the histogram switched from screen-output capture to a raw float capture path:
 
 - dedicated histogram material + float render target,
 - raw `renderer.readRenderTargetPixels(...)` capture,
@@ -1270,16 +1496,39 @@ Read this last to understand the current endpoint of the branch’s histogram wo
 
 If future work touches histogram correctness rather than just cost, this is one of the first commits to revisit.
 
+### 6.9 `356fffd` — observed-domain overlays and crop guides
+
+Read this next to understand the semantic cleanup after raw capture:
+
+- two-phase scan/bin over the observed domain,
+- panel-side crop overlays instead of runtime-side crop assumptions,
+- mapping-curve guides over the histogram,
+- tests updated to assert the observed raw domain rather than the mapping-clamped domain.
+
+This is the commit that makes the histogram chart much more explanatory for humans, not just more accurate for the runtime.
+
+### 6.10 `d143f20` — sample-stride controls
+
+Read this last to understand the current endpoint of the branch’s histogram control surface:
+
+- 1:1 / 1:8 / 1:64 sample-stride controls in the panel,
+- host-side persistence and replay of sample stride,
+- preview-side stride-aware scan/bin loops,
+- immediate refresh when sample density changes,
+- tests that prove stride normalization and reduced sample counts.
+
+If future work touches histogram ergonomics or cost/fidelity tuning, this is one of the first commits to revisit.
+
 ---
 
 ## 7. Conclusion
 
-This commit range is best understood as the construction of an **inspect subsystem contract**, not merely the construction of a panel. The branch begins by proving that FragCoord-style inspect machinery can be transplanted into the preview, then spends the rest of its life making that machinery line-accurate, replay-safe, render-loop-correct, operationally affordable, and finally more faithful in both its histogram evaluation model and its histogram capture domain.
+This commit range is best understood as the construction of an **inspect subsystem contract**, not merely the construction of a panel. The branch begins by proving that FragCoord-style inspect machinery can be transplanted into the preview, then spends the rest of its life making that machinery line-accurate, replay-safe, render-loop-correct, operationally affordable, and finally more faithful in its histogram evaluation model, its histogram capture domain, and its user-facing fidelity controls.
 
-The final architecture at `704fe4c` is strong because it settles on a clear split:
+The final architecture at `d143f20` is strong because it settles on a clear split:
 
 - the **manager** owns state and replay,
-- the **preview runtime** owns rewriting, readback, raw-range capture, and async histogram evaluation,
-- the **panel** owns controls and telemetry presentation.
+- the **preview runtime** owns rewriting, readback, raw-range capture, observed-domain analysis, and async stride-aware histogram evaluation,
+- the **panel** owns controls and telemetry presentation, including crop overlays that interpret the observed domain against the active mapping range.
 
-That split is the durable outcome of the branch. Future engineering work on inspect should preserve it, especially the host-side checkpointing model, the thin `webview_base.html` bridge, and the post-render readback discipline established across stages 4 through 5G.
+That split is the durable outcome of the branch. Future engineering work on inspect should preserve it, especially the host-side checkpointing model, the thin `webview_base.html` bridge, and the post-render readback discipline established across stages 4 through 5I.
