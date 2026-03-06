@@ -825,7 +825,7 @@ vec4 _inspMap(vec4 v) {${oor}
         return out;
     }
 
-    function postHistogram(binsR, binsG, binsB, samples, displayMin, displayMax, timeMs) {
+    function postHistogram(binsR, binsG, binsB, samples, domainMin, domainMax, timeMs) {
         if (typeof vscode !== 'undefined' && vscode) {
             vscode.postMessage({
                 command: 'inspectorHistogram',
@@ -836,8 +836,8 @@ vec4 _inspMap(vec4 v) {${oor}
                     bins: binsR.length,
                     samples: samples,
                     timeMs: timeMs,
-                    autoMin: displayMin,
-                    autoMax: displayMax
+                    autoMin: domainMin,
+                    autoMax: domainMax
                 }
             });
         }
@@ -889,13 +889,31 @@ vec4 _inspMap(vec4 v) {${oor}
         const binsG = new Float32Array(BINS);
         const binsB = new Float32Array(BINS);
         const len = totalPixels * 4;
-        const inv = BINS / 256;
-        const rangeMin = Number(displayMin);
-        const rangeMax = Number(displayMax);
-        const rangeSpan = Math.abs(rangeMax - rangeMin) > 1e-9 ? (rangeMax - rangeMin) : 1;
+        const byteScale = 1 / 255;
+        const domainEpsilon = valueMode === 'float' ? 1e-9 : 1;
 
         let offset = 0;
         let samples = 0;
+        let phase = 'scan';
+        let domainMinRaw = Number.POSITIVE_INFINITY;
+        let domainMaxRaw = Number.NEGATIVE_INFINITY;
+
+        function getStableDomain(domainMin, domainMax) {
+            if (!Number.isFinite(domainMin) || !Number.isFinite(domainMax)) {
+                return valueMode === 'float'
+                    ? { min: 0, max: 1, span: 1, collapsed: false }
+                    : { min: 0, max: 255, span: 255, collapsed: false };
+            }
+            const span = domainMax - domainMin;
+            if (Math.abs(span) <= domainEpsilon) {
+                return { min: domainMin, max: domainMax, span: 1, collapsed: true };
+            }
+            return { min: domainMin, max: domainMax, span: span, collapsed: false };
+        }
+
+        function toDisplayValue(value) {
+            return valueMode === 'float' ? value : value * byteScale;
+        }
 
         function step(deadline) {
             if (generation !== _histogramGeneration || !_active || !_histogramEnabled) {
@@ -911,21 +929,30 @@ vec4 _inspMap(vec4 v) {${oor}
                 const gv = pixels[offset + 1];
                 const bv = pixels[offset + 2];
 
-                if (valueMode === 'float') {
-                    const rIdx = Math.min(Math.max(Math.floor(((rv - rangeMin) / rangeSpan) * BINS), 0), BINS - 1);
-                    const gIdx = Math.min(Math.max(Math.floor(((gv - rangeMin) / rangeSpan) * BINS), 0), BINS - 1);
-                    const bIdx = Math.min(Math.max(Math.floor(((bv - rangeMin) / rangeSpan) * BINS), 0), BINS - 1);
-                    binsR[rIdx]++;
-                    binsG[gIdx]++;
-                    binsB[bIdx]++;
+                if (phase === 'scan') {
+                    const lo = Math.min(rv, gv, bv);
+                    const hi = Math.max(rv, gv, bv);
+                    if (lo < domainMinRaw) domainMinRaw = lo;
+                    if (hi > domainMaxRaw) domainMaxRaw = hi;
                 } else {
-                    binsR[Math.min((rv * inv) | 0, BINS - 1)]++;
-                    binsG[Math.min((gv * inv) | 0, BINS - 1)]++;
-                    binsB[Math.min((bv * inv) | 0, BINS - 1)]++;
+                    const stableDomain = getStableDomain(domainMinRaw, domainMaxRaw);
+                    if (stableDomain.collapsed) {
+                        const centerIdx = BINS >> 1;
+                        binsR[centerIdx]++;
+                        binsG[centerIdx]++;
+                        binsB[centerIdx]++;
+                    } else {
+                        const rIdx = Math.min(Math.max(Math.floor(((rv - stableDomain.min) / stableDomain.span) * BINS), 0), BINS - 1);
+                        const gIdx = Math.min(Math.max(Math.floor(((gv - stableDomain.min) / stableDomain.span) * BINS), 0), BINS - 1);
+                        const bIdx = Math.min(Math.max(Math.floor(((bv - stableDomain.min) / stableDomain.span) * BINS), 0), BINS - 1);
+                        binsR[rIdx]++;
+                        binsG[gIdx]++;
+                        binsB[bIdx]++;
+                    }
+                    samples++;
                 }
 
                 offset += 4;
-                samples++;
                 processed++;
 
                 if (useDeadline) {
@@ -942,8 +969,23 @@ vec4 _inspMap(vec4 v) {${oor}
                 return;
             }
 
+            if (phase === 'scan') {
+                phase = 'bin';
+                offset = 0;
+                scheduleHistogramWork(step);
+                return;
+            }
+
             _histogramProcessing = false;
-            postHistogram(binsR, binsG, binsB, samples, displayMin, displayMax, getNowMs() - startedAtMs);
+            postHistogram(
+                binsR,
+                binsG,
+                binsB,
+                samples,
+                toDisplayValue(domainMinRaw),
+                toDisplayValue(domainMaxRaw),
+                getNowMs() - startedAtMs
+            );
             drainQueuedHistogram();
         }
 

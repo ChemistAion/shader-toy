@@ -216,7 +216,7 @@ suite('Inspect runtime', () => {
         assert.strictEqual(getLastSetIntervalMs(), 100);
     });
 
-    test('histogram bins raw values against the configured mapping range', () => {
+    test('histogram reports the observed raw domain for panel-side cropping', () => {
         const { sandbox, messages, getFullReadPixelsCalls, getRenderTargetReadPixelsCalls } = loadInspectorHarness();
 
         sandbox.ShaderToy.inspector.handleMessage({
@@ -233,7 +233,7 @@ suite('Inspect runtime', () => {
         assert.strictEqual(getRenderTargetReadPixelsCalls(), 1, 'Expected one raw render-target readback');
         assert.strictEqual(histogramMessage?.histogram?.samples, 4, 'Expected all framebuffer pixels to be analyzed');
         assert.strictEqual(histogramMessage?.histogram?.autoMin, -1);
-        assert.strictEqual(histogramMessage?.histogram?.autoMax, 1);
+        assert.strictEqual(histogramMessage?.histogram?.autoMax, 1.5);
         assert.strictEqual(histogramMessage?.histogram?.timeMs, 1.25);
     });
 });

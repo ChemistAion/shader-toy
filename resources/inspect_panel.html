@@ -376,6 +376,7 @@
     const DEFAULT_HISTOGRAM_INTERVAL_MS = 1000;
     let currentMode = 'linear';
     let currentHistogramIntervalMs = DEFAULT_HISTOGRAM_INTERVAL_MS;
+    let lastHistogram = null;
 
     function setHoverUi(enabled) {
         pixelSection.style.opacity = enabled ? '1' : '0.5';
@@ -415,6 +416,7 @@
         setHoverUi(hoverToggle.checked);
         setHistogramUi(histogramToggle.checked);
         setHistogramIntervalUi(histogramIntervalMs);
+        if (lastHistogram) drawHistogram(lastHistogram);
     }
 
     function applyStatus(message, status) {
@@ -436,6 +438,7 @@
     // ── Mapping change broadcast ───────────────────
     function broadcastMapping() {
         if (!vscode) return;
+        if (lastHistogram) drawHistogram(lastHistogram);
         vscode.postMessage({
             command: 'setMapping',
             mapping: {
@@ -548,9 +551,130 @@
         vscode.postMessage({ command: 'panelReady' });
     }
 
+    function normalizeCropRange() {
+        const minValue = Number.parseFloat(rangeMin.value);
+        const maxValue = Number.parseFloat(rangeMax.value);
+        if (!Number.isFinite(minValue) && !Number.isFinite(maxValue)) {
+            return { min: 0, max: 1 };
+        }
+        if (!Number.isFinite(minValue)) {
+            return { min: maxValue, max: maxValue };
+        }
+        if (!Number.isFinite(maxValue)) {
+            return { min: minValue, max: minValue };
+        }
+        return minValue <= maxValue
+            ? { min: minValue, max: maxValue }
+            : { min: maxValue, max: minValue };
+    }
+
+    function mapValueToX(value, domainMin, domainMax, width) {
+        const span = domainMax - domainMin;
+        if (Math.abs(span) <= 1e-9) {
+            return width * 0.5;
+        }
+        return ((value - domainMin) / span) * width;
+    }
+
+    function clamp(value, min, max) {
+        return Math.min(Math.max(value, min), max);
+    }
+
+    function createOverlayPattern(colorA, colorB) {
+        const tile = document.createElement('canvas');
+        tile.width = 8;
+        tile.height = 8;
+        const ctx = tile.getContext('2d');
+        if (!ctx) return colorA;
+        ctx.fillStyle = colorA;
+        ctx.fillRect(0, 0, 8, 8);
+        ctx.fillStyle = colorB;
+        ctx.fillRect(0, 0, 4, 4);
+        ctx.fillRect(4, 4, 4, 4);
+        return histCtx.createPattern(tile, 'repeat') || colorA;
+    }
+
+    function drawCropOverlays(W, H, domainMin, domainMax, cropMin, cropMax) {
+        const leftEdge = clamp(mapValueToX(cropMin, domainMin, domainMax, W), 0, W);
+        const rightEdge = clamp(mapValueToX(cropMax, domainMin, domainMax, W), 0, W);
+        const leftPattern = createOverlayPattern('rgba(255, 0, 255, 0.10)', 'rgba(255, 0, 255, 0.18)');
+        const rightPattern = createOverlayPattern('rgba(0, 255, 255, 0.10)', 'rgba(0, 255, 255, 0.18)');
+
+        if (leftEdge > 0) {
+            histCtx.fillStyle = leftPattern;
+            histCtx.fillRect(0, 0, leftEdge, H);
+        }
+        if (rightEdge < W) {
+            histCtx.fillStyle = rightPattern;
+            histCtx.fillRect(rightEdge, 0, W - rightEdge, H);
+        }
+
+        histCtx.save();
+        histCtx.setLineDash([4, 4]);
+        histCtx.lineWidth = 1;
+        histCtx.strokeStyle = 'rgba(255, 0, 255, 0.70)';
+        histCtx.beginPath();
+        histCtx.moveTo(leftEdge + 0.5, 0);
+        histCtx.lineTo(leftEdge + 0.5, H);
+        histCtx.stroke();
+
+        histCtx.strokeStyle = 'rgba(0, 255, 255, 0.70)';
+        histCtx.beginPath();
+        histCtx.moveTo(rightEdge + 0.5, 0);
+        histCtx.lineTo(rightEdge + 0.5, H);
+        histCtx.stroke();
+        histCtx.restore();
+
+        return { leftEdge, rightEdge };
+    }
+
+    function evaluateCurve(mode, t) {
+        const clamped = clamp(t, 0, 1);
+        if (mode === 'sigmoid') {
+            return 1 / (1 + Math.exp(-8 * (2 * clamped - 1)));
+        }
+        if (mode === 'log') {
+            return Math.log2(1 + clamped * 255) / Math.log2(256);
+        }
+        return clamped;
+    }
+
+    function drawMappingCurves(W, H, domainMin, domainMax, cropMin, cropMax) {
+        const startValue = Math.max(domainMin, cropMin);
+        const endValue = Math.min(domainMax, cropMax);
+        if (!(endValue > startValue)) return;
+
+        const styleByMode = {
+            linear: { color: 'rgba(255, 255, 255, 0.95)' },
+            sigmoid: { color: 'rgba(255, 192, 96, 0.95)' },
+            log: { color: 'rgba(144, 208, 255, 0.95)' }
+        };
+        const activeStyle = styleByMode[currentMode] || styleByMode.linear;
+
+        const steps = Math.max(32, Math.floor(W / 3));
+        const cropSpan = Math.abs(cropMax - cropMin) > 1e-9 ? (cropMax - cropMin) : 1;
+
+        histCtx.save();
+        histCtx.lineWidth = 2;
+        histCtx.strokeStyle = activeStyle.color;
+        histCtx.beginPath();
+        for (let i = 0; i <= steps; i++) {
+            const value = startValue + ((endValue - startValue) * i / steps);
+            const normalized = (value - cropMin) / cropSpan;
+            const mapped = evaluateCurve(currentMode, normalized);
+            const x = mapValueToX(value, domainMin, domainMax, W);
+            const y = H - mapped * (H - 2) - 1;
+            if (i === 0) histCtx.moveTo(x, y);
+            else histCtx.lineTo(x, y);
+        }
+        histCtx.stroke();
+        histCtx.restore();
+    }
+
     // ── Histogram renderer ─────────────────────────
     function drawHistogram(h) {
         if (!histCanvas || !histCtx) return;
+        lastHistogram = h;
 
         // Size canvas to container (DPR-aware)
         const wrap = histCanvas.parentElement;
@@ -562,6 +686,9 @@
 
         const W = cw, H = ch;
         const bins = h.bins || 128;
+        const domainMin = Number.isFinite(h.autoMin) ? h.autoMin : 0;
+        const domainMax = Number.isFinite(h.autoMax) ? h.autoMax : 1;
+        const cropRange = normalizeCropRange();
 
         // Clear
         histCtx.clearRect(0, 0, W, H);
@@ -599,9 +726,12 @@
             histCtx.fill();
         }
 
+        drawCropOverlays(W, H, domainMin, domainMax, cropRange.min, cropRange.max);
+        drawMappingCurves(W, H, domainMin, domainMax, cropRange.min, cropRange.max);
+
         // Stats labels
-        histMinEl.textContent = h.autoMin.toFixed(2);
-        histMaxEl.textContent = h.autoMax.toFixed(2);
+        histMinEl.textContent = domainMin.toFixed(2);
+        histMaxEl.textContent = domainMax.toFixed(2);
         histSamplesEl.textContent = `Samples: ${h.samples}px / Time: ${(Number(h.timeMs) || 0).toFixed(2)}ms`;
     }
 })();
