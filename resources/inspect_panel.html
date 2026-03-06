@@ -602,7 +602,7 @@
         // Stats labels
         histMinEl.textContent = h.autoMin.toFixed(2);
         histMaxEl.textContent = h.autoMax.toFixed(2);
-        histSamplesEl.textContent = h.samples + ' px';
+        histSamplesEl.textContent = `Samples: ${h.samples}px / Time: ${(Number(h.timeMs) || 0).toFixed(2)}ms`;
     }
 })();
 </script>
