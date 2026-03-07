@@ -140,6 +140,7 @@
         gap: 8px;
         align-items: center;
         margin-top: 8px;
+        flex-wrap: wrap;
     }
     .range-row label {
         font-size: 12px;
@@ -168,6 +169,10 @@
         gap: 6px;
         margin-top: 8px;
     }
+    .range-row .checkbox-row {
+        margin-top: 0;
+        margin-left: auto;
+    }
     .checkbox-row label {
         font-size: 12px;
         color: var(--fg2);
@@ -179,14 +184,16 @@
 
     .compare-controls {
         margin-top: 8px;
-        display: grid;
-        gap: 8px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
     }
     .compare-split-row {
         display: flex;
         align-items: center;
         gap: 8px;
         color: var(--fg2);
+        flex: 1;
     }
     .compare-split-row input[type="range"] {
         flex: 1;
@@ -326,12 +333,12 @@
     <div class="range-row">
         <label>Min <input type="number" id="rangeMin" value="0" step="0.1" /></label>
         <label>Max <input type="number" id="rangeMax" value="1" step="0.1" /></label>
-    </div>
-    <div class="checkbox-row">
-        <label>
-            <input type="checkbox" id="oorToggle" />
-            Highlight out-of-range
-        </label>
+        <div class="checkbox-row">
+            <label>
+                <input type="checkbox" id="oorToggle" />
+                Highlight out-of-range
+            </label>
+        </div>
     </div>
     <div class="compare-controls">
         <div class="checkbox-row">
@@ -341,7 +348,6 @@
             </label>
         </div>
         <div class="compare-split-row" id="compareSplitRow">
-            <label for="compareSplit">Split</label>
             <input type="range" id="compareSplit" min="0.1" max="0.9" step="0.01" value="0.5" />
             <span class="compare-split-value" id="compareSplitValue">50%</span>
         </div>
