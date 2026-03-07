@@ -374,6 +374,20 @@ suite('Inspect runtime', () => {
         ]);
     });
 
+    test('requests a redraw for hover updates while paused', () => {
+        const { sandbox, triggerCanvasEvent } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.forceRenderOneFrame = false;
+        sandbox.freezeSimulationOnNextForcedRender = false;
+        (sandbox as unknown as { paused: boolean }).paused = true;
+
+        triggerCanvasEvent('mousemove', { clientX: 1, clientY: 1 });
+
+        assert.strictEqual(sandbox.forceRenderOneFrame, true);
+        assert.strictEqual(sandbox.freezeSimulationOnNextForcedRender, true);
+    });
+
     test('requests a frozen redraw for compare split updates while paused', () => {
         const { sandbox } = loadInspectorHarness();
 
