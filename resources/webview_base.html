@@ -231,20 +231,7 @@
             case 'screenshot':
                 saveScreenshot();
                 break;
-            case 'setInspectorVariable':
-            case 'setInspectorMapping':
-            case 'inspectorOn':
-            case 'inspectorOff':
-            case 'setInspectorCompare':
-            case 'setInspectorCompareSplit':
-            case 'setInspectorHover':
-            case 'setInspectorHistogram':
-            case 'setInspectorHistogramInterval':
-            case 'setInspectorHistogramSampleStride':
-                if (window.ShaderToy && window.ShaderToy.inspector) {
-                    window.ShaderToy.inspector.handleMessage(message);
-                }
-                break;
+            <!-- Inspector Message Routing -->
         }
     });
 
@@ -451,21 +438,14 @@
             buffer.Shader.uniforms['time'].value = time;
             buffer.Shader.uniforms['mouse'].value = normalizedMouse;
 
-            if (window.ShaderToy && window.ShaderToy.inspector && window.ShaderToy.inspector.renderBuffer) {
-                if (window.ShaderToy.inspector.renderBuffer(buffer, index, buffers.length)) {
-                    continue;
-                }
-            }
+            <!-- Inspector Final Pass -->
 
             quad.material = buffer.Shader;
             renderer.setRenderTarget(buffer.Target);
             renderer.render(scene, camera);
         }
 
-        // Inspector pixel readback (GL state is valid, screen framebuffer bound after final pass)
-        if (window.ShaderToy && window.ShaderToy.inspector && window.ShaderToy.inspector.afterFrame) {
-            window.ShaderToy.inspector.afterFrame();
-        }
+        <!-- Inspector After Frame -->
         
         // Uniforms Update
 

@@ -363,6 +363,61 @@ export class WebviewContentProvider {
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Packages
         {
+            const inspectorMessageRouting: WebviewExtension = {
+                generateContent: () => [
+                    "case 'setInspectorVariable':",
+                    "case 'setInspectorMapping':",
+                    "case 'inspectorOn':",
+                    "case 'inspectorOff':",
+                    "case 'setInspectorCompare':",
+                    "case 'setInspectorCompareSplit':",
+                    "case 'setInspectorHover':",
+                    "case 'setInspectorHistogram':",
+                    "case 'setInspectorHistogramInterval':",
+                    "case 'setInspectorHistogramSampleStride':",
+                    '    if (window.ShaderToy && window.ShaderToy.inspector) {',
+                    '        window.ShaderToy.inspector.handleMessage(message);',
+                    '    }',
+                    '    break;'
+                ].join('\n')
+            };
+            const inspectorFinalPass: WebviewExtension = {
+                generateContent: () => [
+                    'if (window.ShaderToy && window.ShaderToy.inspector && window.ShaderToy.inspector.renderBuffer) {',
+                    '    if (window.ShaderToy.inspector.renderBuffer(buffer, index, buffers.length)) {',
+                    '        continue;',
+                    '    }',
+                    '}'
+                ].join('\n')
+            };
+            const inspectorAfterFrame: WebviewExtension = {
+                generateContent: () => [
+                    '// Inspector pixel readback (GL state is valid, screen framebuffer bound after final pass)',
+                    'if (window.ShaderToy && window.ShaderToy.inspector && window.ShaderToy.inspector.afterFrame) {',
+                    '    window.ShaderToy.inspector.afterFrame();',
+                    '}'
+                ].join('\n')
+            };
+            const omitInspectorContent: WebviewExtension = {
+                generateContent: () => ''
+            };
+
+            this.webviewAssembler.addReplaceModule(
+                generateStandalone ? omitInspectorContent : inspectorMessageRouting,
+                '<!-- Inspector Message Routing -->',
+                '<!-- Inspector Message Routing -->'
+            );
+            this.webviewAssembler.addReplaceModule(
+                generateStandalone ? omitInspectorContent : inspectorFinalPass,
+                '<!-- Inspector Final Pass -->',
+                '<!-- Inspector Final Pass -->'
+            );
+            this.webviewAssembler.addReplaceModule(
+                generateStandalone ? omitInspectorContent : inspectorAfterFrame,
+                '<!-- Inspector After Frame -->',
+                '<!-- Inspector After Frame -->'
+            );
+
             const jqueryExtension = new JQueryExtension(getWebviewResourcePath, generateStandalone);
             this.webviewAssembler.addReplaceModule(jqueryExtension, '<script src="<!-- JQuery.js -->"></script>', '<!-- JQuery.js -->');
 
@@ -393,8 +448,12 @@ export class WebviewContentProvider {
             const webviewRenderLoop = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/render_loop.js', getResourceText);
             this.webviewAssembler.addReplaceModule(webviewRenderLoop, '<!-- Webview render_loop.js -->', '<!-- Webview render_loop.js -->');
 
-            const webviewShaderInspect = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/shader_inspect.js', getResourceText);
-            this.webviewAssembler.addReplaceModule(webviewShaderInspect, '<!-- Webview shader_inspect.js -->', '<!-- Webview shader_inspect.js -->');
+            if (generateStandalone) {
+                this.webviewAssembler.addReplaceModule(omitInspectorContent, '<!-- Webview shader_inspect.js -->', '<!-- Webview shader_inspect.js -->');
+            } else {
+                const webviewShaderInspect = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/shader_inspect.js', getResourceText);
+                this.webviewAssembler.addReplaceModule(webviewShaderInspect, '<!-- Webview shader_inspect.js -->', '<!-- Webview shader_inspect.js -->');
+            }
         }
 
         // Keep the GLSL #line "self" sentinel source-id consistent between extension and webview.
