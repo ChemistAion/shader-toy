@@ -21,6 +21,9 @@ export class InspectPanel {
     private onCompareChanged: ((enabled: boolean) => void) | undefined;
     private onCompareSplitChanged: ((split: number) => void) | undefined;
     private onHoverChanged: ((enabled: boolean) => void) | undefined;
+    private onHistogramChanged: ((enabled: boolean) => void) | undefined;
+    private onHistogramIntervalChanged: ((intervalMs: number) => void) | undefined;
+    private onHistogramSampleStrideChanged: ((sampleStride: number) => void) | undefined;
     private onDidDisposeCallback: (() => void) | undefined;
     private onReadyCallback: (() => void) | undefined;
 
@@ -77,9 +80,24 @@ export class InspectPanel {
                         this.onCompareSplitChanged(Number(message.split));
                     }
                     break;
-                case 'setHover':
+                case 'setHoverEnabled':
                     if (this.onHoverChanged) {
                         this.onHoverChanged(!!message.enabled);
+                    }
+                    break;
+                case 'setHistogramEnabled':
+                    if (this.onHistogramChanged) {
+                        this.onHistogramChanged(!!message.enabled);
+                    }
+                    break;
+                case 'setHistogramInterval':
+                    if (this.onHistogramIntervalChanged) {
+                        this.onHistogramIntervalChanged(Number(message.intervalMs));
+                    }
+                    break;
+                case 'setHistogramSampleStride':
+                    if (this.onHistogramSampleStrideChanged) {
+                        this.onHistogramSampleStrideChanged(Number(message.sampleStride));
                     }
                     break;
                 case 'panelReady':
@@ -137,6 +155,21 @@ export class InspectPanel {
         this.onHoverChanged = cb;
     }
 
+    /** Register callback for when the panel's histogram setting changes. */
+    public setOnHistogramChanged(cb: (enabled: boolean) => void): void {
+        this.onHistogramChanged = cb;
+    }
+
+    /** Register callback for when the panel's histogram interval changes. */
+    public setOnHistogramIntervalChanged(cb: (intervalMs: number) => void): void {
+        this.onHistogramIntervalChanged = cb;
+    }
+
+    /** Register callback for when the panel's histogram sample stride changes. */
+    public setOnHistogramSampleStrideChanged(cb: (sampleStride: number) => void): void {
+        this.onHistogramSampleStrideChanged = cb;
+    }
+
     /** Register callback for when the panel is disposed. */
     public setOnDidDispose(cb: () => void): void {
         this.onDidDisposeCallback = cb;
@@ -152,7 +185,10 @@ export class InspectPanel {
         mapping: InspectorMapping,
         compareEnabled: boolean,
         compareSplit: number,
-        hoverEnabled: boolean
+        hoverEnabled: boolean,
+        histogramEnabled: boolean,
+        histogramIntervalMs: number,
+        histogramSampleStride: number
     ): void {
         if (this.panel) {
             this.panel.webview.postMessage({
@@ -160,7 +196,10 @@ export class InspectPanel {
                 mapping: { ...mapping },
                 compareEnabled,
                 compareSplit,
-                hoverEnabled
+                hoverEnabled,
+                histogramEnabled,
+                histogramIntervalMs,
+                histogramSampleStride
             });
         }
     }
@@ -189,9 +228,19 @@ export class InspectPanel {
     public postPixel(rgba: number[], position: { x: number; y: number }): void {
         if (this.panel) {
             this.panel.webview.postMessage({
-                command: 'inspectorPixel',
+                command: 'pixelValue',
                 rgba,
                 position
+            });
+        }
+    }
+
+    /** Forward histogram data from the preview. */
+    public postHistogram(histogram: unknown): void {
+        if (this.panel) {
+            this.panel.webview.postMessage({
+                command: 'histogram',
+                histogram
             });
         }
     }

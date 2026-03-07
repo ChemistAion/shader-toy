@@ -181,6 +181,9 @@ suite('Webview Split', () => {
             assert.ok(html.includes("case 'setInspectorCompare':"));
             assert.ok(html.includes("case 'setInspectorCompareSplit':"));
             assert.ok(html.includes("case 'setInspectorHover':"));
+            assert.ok(html.includes("case 'setInspectorHistogram':"));
+            assert.ok(html.includes("case 'setInspectorHistogramInterval':"));
+            assert.ok(html.includes("case 'setInspectorHistogramSampleStride':"));
         } finally {
             moduleWithLoad._load = originalLoad;
         }
