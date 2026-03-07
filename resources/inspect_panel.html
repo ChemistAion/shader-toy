@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Variable Inspector</title>
+<style>
+    :root {
+        --bg: #1e1e1e;
+        --bg2: #252526;
+        --bg3: #2d2d2d;
+        --fg: #cccccc;
+        --fg2: #999999;
+        --accent: #007acc;
+        --success: #4ec9b0;
+        --error: #f44747;
+        --border: #3c3c3c;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 13px;
+        color: var(--fg);
+        background: var(--bg);
+        padding: 12px;
+        line-height: 1.5;
+    }
+    .header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 12px;
+    }
+    .header h1 { font-size: 14px; font-weight: 600; }
+    .status-dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: var(--fg2);
+        margin-left: auto;
+    }
+    .status-dot.active { background: var(--success); }
+    .status-dot.error { background: var(--error); }
+    .variable-section {
+        background: var(--bg2);
+        border-radius: 6px;
+        padding: 10px 12px;
+        margin-bottom: 12px;
+    }
+    .variable-label {
+        font-size: 11px;
+        color: var(--fg2);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+    }
+    .variable-name {
+        font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+        font-size: 16px;
+        color: var(--success);
+        word-break: break-all;
+    }
+    .variable-name.empty { color: var(--fg2); font-style: italic; font-size: 13px; }
+    .variable-meta {
+        font-size: 11px;
+        color: var(--fg2);
+        margin-top: 2px;
+    }
+    .variable-error {
+        display: none;
+        margin-top: 6px;
+        font-size: 12px;
+        color: var(--error);
+    }
+    .variable-error.visible {
+        display: block;
+    }
+    .type-badge {
+        display: inline-block;
+        background: var(--accent);
+        color: white;
+        padding: 1px 6px;
+        border-radius: 3px;
+        font-size: 10px;
+        font-weight: 600;
+        margin-left: 4px;
+    }
+    .section { margin-bottom: 12px; }
+    .section-title {
+        font-size: 11px;
+        color: var(--fg2);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 6px;
+    }
+
+    .mode-buttons {
+        display: flex;
+        gap: 4px;
+    }
+    .mode-btn {
+        flex: 1;
+        padding: 5px 8px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg3);
+        color: var(--fg2);
+        cursor: pointer;
+        font-size: 12px;
+    }
+    .mode-btn.active {
+        background: var(--accent);
+        color: white;
+        border-color: var(--accent);
+    }
+
+    .range-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-top: 8px;
+        flex-wrap: wrap;
+    }
+    .range-row label {
+        font-size: 12px;
+        color: var(--fg2);
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .range-row input[type="number"] {
+        width: 70px;
+        padding: 3px 6px;
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        background: var(--bg3);
+        color: var(--fg);
+        font-size: 12px;
+    }
+    .range-row input[type="number"]:focus {
+        outline: none;
+        border-color: var(--accent);
+    }
+
+    .checkbox-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: auto;
+    }
+    .checkbox-row label {
+        font-size: 12px;
+        color: var(--fg2);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+</style>
+</head>
+<body>
+
+<div class="header">
+    <h1>Variable Inspector</h1>
+    <span class="status-dot" id="statusDot"></span>
+</div>
+
+<div class="variable-section">
+    <div class="variable-label">Inspecting</div>
+    <div class="variable-name empty" id="varName">Select an expression in the editor</div>
+    <div class="variable-meta" id="varMeta"></div>
+    <div class="variable-error" id="varError"></div>
+</div>
+
+<div class="section">
+    <div class="section-title">Mapping Mode</div>
+    <div class="mode-buttons">
+        <button class="mode-btn active" data-mode="linear">linear</button>
+        <button class="mode-btn" data-mode="sigmoid">sigmoid</button>
+        <button class="mode-btn" data-mode="log">log</button>
+    </div>
+    <div class="range-row">
+        <label>Min <input type="number" id="rangeMin" value="0" step="0.1" /></label>
+        <label>Max <input type="number" id="rangeMax" value="1" step="0.1" /></label>
+        <div class="checkbox-row">
+            <label>
+                <input type="checkbox" id="oorToggle" />
+                Highlight out-of-range
+            </label>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const vscode = (typeof acquireVsCodeApi === 'function') ? acquireVsCodeApi() : null;
+    const varNameEl = document.getElementById('varName');
+    const varMetaEl = document.getElementById('varMeta');
+    const varErrorEl = document.getElementById('varError');
+    const statusDot = document.getElementById('statusDot');
+    const rangeMin = document.getElementById('rangeMin');
+    const rangeMax = document.getElementById('rangeMax');
+    const oorToggle = document.getElementById('oorToggle');
+    const modeButtons = document.querySelectorAll('.mode-btn');
+    let currentMode = 'linear';
+    function applyInspectorState(mapping) {
+        const nextMapping = mapping || {};
+        currentMode = nextMapping.mode || 'linear';
+        modeButtons.forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.mode === currentMode);
+        });
+        rangeMin.value = String(typeof nextMapping.min === 'number' ? nextMapping.min : 0);
+        rangeMax.value = String(typeof nextMapping.max === 'number' ? nextMapping.max : 1);
+        oorToggle.checked = !!nextMapping.highlightOutOfRange;
+    }
+
+    function applyStatus(message, status) {
+        statusDot.className = 'status-dot';
+        varErrorEl.textContent = '';
+        varErrorEl.classList.remove('visible');
+
+        if (status === 'ok') {
+            statusDot.classList.add('active');
+        } else if (status === 'error') {
+            statusDot.classList.add('error');
+            if (message) {
+                varErrorEl.textContent = message;
+                varErrorEl.classList.add('visible');
+            }
+        }
+    }
+
+    function broadcastMapping() {
+        if (!vscode) return;
+        vscode.postMessage({
+            command: 'setMapping',
+            mapping: {
+                mode: currentMode,
+                min: parseFloat(rangeMin.value) || 0,
+                max: parseFloat(rangeMax.value) || 1,
+                highlightOutOfRange: oorToggle.checked
+            }
+        });
+    }
+    modeButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            modeButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentMode = btn.dataset.mode;
+            broadcastMapping();
+        });
+    });
+    rangeMin.addEventListener('change', broadcastMapping);
+    rangeMax.addEventListener('change', broadcastMapping);
+    oorToggle.addEventListener('change', broadcastMapping);
+    window.addEventListener('message', event => {
+        const msg = event.data;
+        switch (msg.command) {
+            case 'syncState':
+                applyInspectorState(msg.mapping);
+                break;
+            case 'updateVariable':
+                if (msg.variable) {
+                    varNameEl.textContent = msg.variable;
+                    varNameEl.classList.remove('empty');
+                    let meta = `Line ${msg.line}`;
+                    if (msg.type) meta += ` <span class="type-badge">${msg.type}</span>`;
+                    varMetaEl.innerHTML = meta;
+                } else {
+                    varNameEl.textContent = 'Select an expression in the editor';
+                    varNameEl.classList.add('empty');
+                    varMetaEl.innerHTML = '';
+                }
+                break;
+
+            case 'inspectorStatus':
+                applyStatus(msg.message || '', msg.status);
+                break;
+        }
+    });
+
+    applyInspectorState({ mode: 'linear', min: 0, max: 1, highlightOutOfRange: false });
+    if (vscode) {
+        vscode.postMessage({ command: 'panelReady' });
+    }
+
+        if (leftEdge > 0) {
+            histCtx.fillStyle = leftPattern;
+            histCtx.fillRect(0, 0, leftEdge, H);
+        }
+        if (rightEdge < W) {
+            histCtx.fillStyle = rightPattern;
+            histCtx.fillRect(rightEdge, 0, W - rightEdge, H);
+        }
+
+        histCtx.save();
+        histCtx.setLineDash([4, 4]);
+        histCtx.lineWidth = 1;
+        histCtx.strokeStyle = 'rgba(255, 0, 255, 0.70)';
+        histCtx.beginPath();
+        histCtx.moveTo(leftEdge + 0.5, 0);
+        histCtx.lineTo(leftEdge + 0.5, H);
+        histCtx.stroke();
+
+        histCtx.strokeStyle = 'rgba(0, 255, 255, 0.70)';
+        histCtx.beginPath();
+        histCtx.moveTo(rightEdge + 0.5, 0);
+        histCtx.lineTo(rightEdge + 0.5, H);
+        histCtx.stroke();
+        histCtx.restore();
+
+        return { leftEdge, rightEdge };
+    }
+
+    function evaluateCurve(mode, t) {
+        const clamped = clamp(t, 0, 1);
+        if (mode === 'sigmoid') {
+            return 1 / (1 + Math.exp(-8 * (2 * clamped - 1)));
+        }
+        if (mode === 'log') {
+            return Math.log2(1 + clamped * 255) / Math.log2(256);
+        }
+        return clamped;
+    }
+
+    function drawMappingCurves(W, H, domainMin, domainMax, cropMin, cropMax) {
+        const startValue = Math.max(domainMin, cropMin);
+        const endValue = Math.min(domainMax, cropMax);
+        if (!(endValue > startValue)) return;
+
+        const styleByMode = {
+            linear: { color: 'rgba(255, 255, 255, 0.95)' },
+            sigmoid: { color: 'rgba(255, 192, 96, 0.95)' },
+            log: { color: 'rgba(144, 208, 255, 0.95)' }
+        };
+        const activeStyle = styleByMode[currentMode] || styleByMode.linear;
+
+        const steps = Math.max(32, Math.floor(W / 3));
+        const cropSpan = Math.abs(cropMax - cropMin) > 1e-9 ? (cropMax - cropMin) : 1;
+
+        histCtx.save();
+        histCtx.lineWidth = 2;
+        histCtx.strokeStyle = activeStyle.color;
+        histCtx.beginPath();
+        for (let i = 0; i <= steps; i++) {
+            const value = startValue + ((endValue - startValue) * i / steps);
+            const normalized = (value - cropMin) / cropSpan;
+            const mapped = evaluateCurve(currentMode, normalized);
+            const x = mapValueToX(value, domainMin, domainMax, W);
+            const y = H - mapped * (H - 2) - 1;
+            if (i === 0) histCtx.moveTo(x, y);
+            else histCtx.lineTo(x, y);
+        }
+        histCtx.stroke();
+        histCtx.restore();
+    }
+
+    // ── Histogram renderer ─────────────────────────
+    function drawHistogram(h) {
+        if (!histCanvas || !histCtx) return;
+        lastHistogram = h;
+
+        // Size canvas to container (DPR-aware)
+        const wrap = histCanvas.parentElement;
+        const dpr = window.devicePixelRatio || 1;
+        const cw = wrap.clientWidth, ch = wrap.clientHeight;
+        histCanvas.width = cw * dpr;
+        histCanvas.height = ch * dpr;
+        histCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        const W = cw, H = ch;
+        const bins = h.bins || 128;
+        const domainMin = Number.isFinite(h.autoMin) ? h.autoMin : 0;
+        const domainMax = Number.isFinite(h.autoMax) ? h.autoMax : 1;
+        const cropRange = normalizeCropRange();
+        const typeInfo = getTypeInfo(currentVariableType);
+        const componentCount = Number.isFinite(h.componentCount) ? Math.max(1, Math.min(4, h.componentCount)) : typeInfo.componentCount;
+
+        // Clear
+        histCtx.clearRect(0, 0, W, H);
+
+        // Find global max across all channels for vertical scaling
+        let peak = 1;
+        for (let i = 0; i < bins; i++) {
+            if (h.binsR[i] > peak) peak = h.binsR[i];
+            if (componentCount >= 2 && h.binsG[i] > peak) peak = h.binsG[i];
+            if (componentCount >= 3 && h.binsB[i] > peak) peak = h.binsB[i];
+            if (componentCount >= 4 && h.binsA[i] > peak) peak = h.binsA[i];
+        }
+
+        const barW = W / bins;
+        const pad = H * 0.05;  // 5% bottom padding
+
+        // Draw channels (B, G, R order so red is on top)
+        const channels = componentCount === 1
+            ? [{ data: h.binsR, color: typeInfo.histogramColor || 'rgba(220, 220, 220, 0.70)' }]
+            : [
+                ...(componentCount >= 4 ? [{ data: h.binsA, color: 'rgba(255, 231, 122, 0.55)' }] : []),
+                ...(componentCount >= 3 ? [{ data: h.binsB, color: 'rgba(86, 156, 214, 0.6)' }] : []),
+                ...(componentCount >= 2 ? [{ data: h.binsG, color: 'rgba(78, 201, 176, 0.6)' }] : []),
+                { data: h.binsR, color: 'rgba(244, 71, 71, 0.55)' }
+            ];
+
+        for (const ch of channels) {
+            histCtx.fillStyle = ch.color;
+            histCtx.beginPath();
+            histCtx.moveTo(0, H);
+            for (let i = 0; i < bins; i++) {
+                const barH = (ch.data[i] / peak) * (H - pad);
+                const x = i * barW;
+                histCtx.lineTo(x, H - barH);
+                histCtx.lineTo(x + barW, H - barH);
+            }
+            histCtx.lineTo(W, H);
+            histCtx.closePath();
+            histCtx.fill();
+        }
+
+        drawCropOverlays(W, H, domainMin, domainMax, cropRange.min, cropRange.max);
+        drawMappingCurves(W, H, domainMin, domainMax, cropRange.min, cropRange.max);
+
+        // Stats labels
+        histMinEl.textContent = domainMin.toFixed(2);
+        histMaxEl.textContent = domainMax.toFixed(2);
+        histSamplesEl.textContent = `Samples: ${h.samples}px / Time: ${(Number(h.timeMs) || 0).toFixed(2)}ms${h.stalled ? ' STALL' : ''}`;
+        histSamplesEl.classList.toggle('stall', !!h.stalled);
+    }
+})();
+</script>
+</body>
+</html>

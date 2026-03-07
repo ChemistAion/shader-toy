@@ -112,6 +112,7 @@
 <!-- Webview ui_controls.js -->
 <!-- Webview gl_context.js -->
 <!-- Webview time_input.js -->
+<!-- Webview shader_inspect.js -->
 <!-- Webview render_loop.js -->
 
 <script type="text/javascript">
@@ -230,6 +231,7 @@
             case 'screenshot':
                 saveScreenshot();
                 break;
+            <!-- Inspector Message Routing -->
         }
     });
 
@@ -418,7 +420,8 @@
 
         // Audio Update
 
-        for (let buffer of buffers) {
+        for (let index = 0; index < buffers.length; index++) {
+            const buffer = buffers[index];
             if (failedBufferNames.has(buffer.Name)) {
                 continue;
             }
@@ -435,10 +438,14 @@
             buffer.Shader.uniforms['time'].value = time;
             buffer.Shader.uniforms['mouse'].value = normalizedMouse;
 
+            <!-- Inspector Final Pass -->
+
             quad.material = buffer.Shader;
             renderer.setRenderTarget(buffer.Target);
             renderer.render(scene, camera);
         }
+
+        <!-- Inspector After Frame -->
         
         // Uniforms Update
 

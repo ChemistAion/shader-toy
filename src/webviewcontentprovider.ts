@@ -54,7 +54,6 @@ import { IvertexErrorRewriteExtension } from './extensions/user_interface/error_
 import { GlslifyErrorsExtension } from './extensions/user_interface/error_display/glslify_errors_extension';
 
 import { PauseWholeRenderExtension } from './extensions/pause_whole_render_extension';
-import { AdvanceTimeExtension } from './extensions/advance_time_extension';
 import { AdvanceTimeIfNotPausedExtension } from './extensions/advance_time_if_not_paused_extension';
 
 import { BuffersInitExtension } from './extensions/buffers/buffers_init_extension';
@@ -363,6 +362,44 @@ export class WebviewContentProvider {
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Packages
         {
+            const inspectorMessageRouting: WebviewExtension = {
+                generateContent: () => [
+                    "case 'setInspectorVariable':",
+                    "case 'setInspectorMapping':",
+                    "case 'inspectorOn':",
+                    "case 'inspectorOff':",
+                    '    if (window.ShaderToy && window.ShaderToy.inspector) {',
+                    '        window.ShaderToy.inspector.handleMessage(message);',
+                    '    }',
+                    '    break;'
+                ].join('\n')
+            };
+            const inspectorFinalPass: WebviewExtension = {
+                generateContent: () => ''
+            };
+            const inspectorAfterFrame: WebviewExtension = {
+                generateContent: () => ''
+            };
+            const omitInspectorContent: WebviewExtension = {
+                generateContent: () => ''
+            };
+
+            this.webviewAssembler.addReplaceModule(
+                generateStandalone ? omitInspectorContent : inspectorMessageRouting,
+                '<!-- Inspector Message Routing -->',
+                '<!-- Inspector Message Routing -->'
+            );
+            this.webviewAssembler.addReplaceModule(
+                generateStandalone ? omitInspectorContent : inspectorFinalPass,
+                '<!-- Inspector Final Pass -->',
+                '<!-- Inspector Final Pass -->'
+            );
+            this.webviewAssembler.addReplaceModule(
+                generateStandalone ? omitInspectorContent : inspectorAfterFrame,
+                '<!-- Inspector After Frame -->',
+                '<!-- Inspector After Frame -->'
+            );
+
             const jqueryExtension = new JQueryExtension(getWebviewResourcePath, generateStandalone);
             this.webviewAssembler.addReplaceModule(jqueryExtension, '<script src="<!-- JQuery.js -->"></script>', '<!-- JQuery.js -->');
 
@@ -392,6 +429,13 @@ export class WebviewContentProvider {
 
             const webviewRenderLoop = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/render_loop.js', getResourceText);
             this.webviewAssembler.addReplaceModule(webviewRenderLoop, '<!-- Webview render_loop.js -->', '<!-- Webview render_loop.js -->');
+
+            if (generateStandalone) {
+                this.webviewAssembler.addReplaceModule(omitInspectorContent, '<!-- Webview shader_inspect.js -->', '<!-- Webview shader_inspect.js -->');
+            } else {
+                const webviewShaderInspect = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/shader_inspect.js', getResourceText);
+                this.webviewAssembler.addReplaceModule(webviewShaderInspect, '<!-- Webview shader_inspect.js -->', '<!-- Webview shader_inspect.js -->');
+            }
         }
 
         // Keep the GLSL #line "self" sentinel source-id consistent between extension and webview.
@@ -421,14 +465,10 @@ export class WebviewContentProvider {
         if (this.context.getConfig<boolean>('pauseWholeRender')) {
             const pauseWholeRenderExtension = new PauseWholeRenderExtension();
             this.webviewAssembler.addWebviewModule(pauseWholeRenderExtension, '// Pause Whole Render');
+        }
 
-            const advanceTimeExtension = new AdvanceTimeExtension();
-            this.webviewAssembler.addWebviewModule(advanceTimeExtension, '// Advance Time');
-        }
-        else {
-            const advanceTimeExtension = new AdvanceTimeIfNotPausedExtension();
-            this.webviewAssembler.addWebviewModule(advanceTimeExtension, '// Advance Time');
-        }
+        const advanceTimeExtension = new AdvanceTimeIfNotPausedExtension();
+        this.webviewAssembler.addWebviewModule(advanceTimeExtension, '// Advance Time');
 
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Screenshot Logic
