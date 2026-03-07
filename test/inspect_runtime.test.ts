@@ -295,6 +295,91 @@ suite('Inspect runtime', () => {
         assert.strictEqual(sandbox.buffers[0].Shader, material);
     });
 
+    test('toggles histogram capture through inspector messages', () => {
+        const { sandbox } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogram', enabled: false });
+        assert.strictEqual(sandbox.ShaderToy.inspector.isHistogramEnabled(), false);
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogram', enabled: true });
+        assert.strictEqual(sandbox.ShaderToy.inspector.isHistogramEnabled(), true);
+    });
+
+    test('defaults histogram refresh to 5Hz and switches to preset intervals', () => {
+        const { sandbox, getLastSetIntervalMs } = loadInspectorHarness();
+
+        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramIntervalMs(), 200);
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        assert.strictEqual(getLastSetIntervalMs(), 200);
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramInterval', intervalMs: 100 });
+        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramIntervalMs(), 100);
+        assert.strictEqual(getLastSetIntervalMs(), 100);
+    });
+
+    test('defaults histogram sample stride to 1:8 and switches to preset strides', () => {
+        const { sandbox } = loadInspectorHarness();
+
+        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramSampleStride(), 8);
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramSampleStride', sampleStride: 64 });
+        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramSampleStride(), 64);
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramSampleStride', sampleStride: 256 });
+        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramSampleStride(), 8);
+    });
+
+    test('histogram reports the observed raw domain with active histogram timing', () => {
+        const { sandbox, messages, getFullReadPixelsCalls, getRenderTargetReadPixelsCalls } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({
+            command: 'setInspectorMapping',
+            mapping: { mode: 'linear', min: -1, max: 1, highlightOutOfRange: false }
+        });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramSampleStride', sampleStride: 1 });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        sandbox.ShaderToy.inspector.afterFrame();
+
+        const histogramMessage = messages.find(message => message.command === 'inspectorHistogram');
+        assert.ok(histogramMessage, 'Expected histogram payload to be posted');
+        assert.strictEqual(getFullReadPixelsCalls(), 0, 'Expected raw histogram capture to avoid screen readPixels fallback');
+        assert.strictEqual(getRenderTargetReadPixelsCalls(), 1, 'Expected one raw render-target readback');
+        assert.strictEqual(histogramMessage?.histogram?.samples, 4);
+        assert.strictEqual(histogramMessage?.histogram?.autoMin, -1);
+        assert.strictEqual(histogramMessage?.histogram?.autoMax, 1);
+        assert.strictEqual(histogramMessage?.histogram?.componentCount, 1);
+        assert.strictEqual(histogramMessage?.histogram?.timeMs, 3.75);
+    });
+
+    test('histogram sample stride reduces the analyzed sample count', () => {
+        const { sandbox, messages, getLastRenderTargetReadSize } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramSampleStride', sampleStride: 8 });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        sandbox.ShaderToy.inspector.afterFrame();
+
+        const histogramMessage = messages.find(message => message.command === 'inspectorHistogram');
+        assert.ok(histogramMessage, 'Expected histogram payload to be posted');
+        assert.deepStrictEqual(getLastRenderTargetReadSize(), { width: 1, height: 1 });
+        assert.strictEqual(histogramMessage?.histogram?.samples, 1);
+    });
+
+    test('finishes the active histogram and marks it stalled when newer updates are dropped', () => {
+        const { sandbox, messages, flushIdleCallbacks } = loadInspectorHarness({ deferIdleCallbacks: true });
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        sandbox.ShaderToy.inspector.afterFrame();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramSampleStride', sampleStride: 64 });
+        sandbox.ShaderToy.inspector.afterFrame();
+        flushIdleCallbacks();
+
+        const histogramMessages = messages.filter(message => message.command === 'inspectorHistogram');
+        assert.strictEqual(histogramMessages.length, 1);
+        assert.strictEqual(histogramMessages[0].histogram?.stalled, true);
+    });
+
     test('ignores non-variable inspector targets and keeps the last valid inspection active', () => {
         const { material, sandbox, messages } = loadInspectorHarness();
 

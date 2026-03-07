@@ -12,6 +12,7 @@
         --fg: #cccccc;
         --fg2: #999999;
         --accent: #007acc;
+        --accent-hover: #1a8ad4;
         --success: #4ec9b0;
         --error: #f44747;
         --border: #3c3c3c;
@@ -33,26 +34,32 @@
         border-bottom: 1px solid var(--border);
         margin-bottom: 12px;
     }
+    .header .icon { font-size: 18px; }
     .header h1 { font-size: 14px; font-weight: 600; }
-    .status-dot {
-        width: 8px; height: 8px; border-radius: 50%;
+    .header .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
         background: var(--fg2);
         margin-left: auto;
     }
-    .status-dot.active { background: var(--success); }
-    .status-dot.error { background: var(--error); }
-    .variable-section {
+    .header .status-dot.active { background: var(--success); }
+    .header .status-dot.error { background: var(--error); }
+    .variable-section,
+    .pixel-section,
+    .histogram-section {
         background: var(--bg2);
         border-radius: 6px;
         padding: 10px 12px;
         margin-bottom: 12px;
     }
-    .variable-label {
+    .variable-label,
+    .section-title {
         font-size: 11px;
         color: var(--fg2);
         text-transform: uppercase;
         letter-spacing: 0.5px;
-        margin-bottom: 4px;
+        margin-bottom: 6px;
     }
     .variable-name {
         font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
@@ -66,16 +73,7 @@
         color: var(--fg2);
         margin-top: 2px;
     }
-    .variable-error {
-        display: none;
-        margin-top: 6px;
-        font-size: 12px;
-        color: var(--error);
-    }
-    .variable-error.visible {
-        display: block;
-    }
-    .type-badge {
+    .variable-meta .type-badge {
         display: inline-block;
         background: var(--accent);
         color: white;
@@ -85,15 +83,14 @@
         font-weight: 600;
         margin-left: 4px;
     }
-    .section { margin-bottom: 12px; }
-    .section-title {
-        font-size: 11px;
-        color: var(--fg2);
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin-bottom: 6px;
+    .variable-error {
+        display: none;
+        margin-top: 6px;
+        font-size: 12px;
+        color: var(--error);
     }
-
+    .variable-error.visible { display: block; }
+    .section { margin-bottom: 12px; }
     .mode-buttons {
         display: flex;
         gap: 4px;
@@ -107,13 +104,14 @@
         color: var(--fg2);
         cursor: pointer;
         font-size: 12px;
+        transition: all 0.15s;
     }
+    .mode-btn:hover { border-color: var(--accent-hover); color: var(--fg); }
     .mode-btn.active {
         background: var(--accent);
         color: white;
         border-color: var(--accent);
     }
-
     .range-row {
         display: flex;
         gap: 8px;
@@ -137,30 +135,129 @@
         color: var(--fg);
         font-size: 12px;
     }
-    .range-row input[type="number"]:focus {
-        outline: none;
-        border-color: var(--accent);
-    }
-
     .checkbox-row {
         display: flex;
         align-items: center;
         gap: 6px;
+        margin-top: 8px;
+    }
+    .range-row .checkbox-row {
+        margin-top: 0;
         margin-left: auto;
     }
-    .checkbox-row label {
+    .checkbox-row label,
+    .toggle-label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
         font-size: 12px;
         color: var(--fg2);
         cursor: pointer;
+    }
+    .compare-controls {
+        margin-top: 8px;
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: 10px;
+    }
+    .compare-split-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--fg2);
+        flex: 1;
+    }
+    .compare-split-row input[type="range"] { flex: 1; }
+    .compare-split-row.disabled { opacity: 0.45; }
+    .compare-split-value {
+        min-width: 44px;
+        text-align: right;
+        color: var(--fg);
+        font-variant-numeric: tabular-nums;
+    }
+    .pixel-section,
+    .histogram-section {
+        transition: opacity 0.15s;
+    }
+    .pixel-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .color-swatch {
+        width: 32px;
+        height: 32px;
+        border-radius: 4px;
+        border: 1px solid var(--border);
+        background: black;
+        flex-shrink: 0;
+    }
+    .pixel-values,
+    .histogram-stats {
+        font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+        font-size: 11px;
+    }
+    .pixel-values {
+        line-height: 1.6;
+    }
+    .histogram-canvas-wrap {
+        position: relative;
+        width: 100%;
+        height: 100px;
+        background: var(--bg);
+        border-radius: 4px;
+        border: 1px solid var(--border);
+        overflow: hidden;
+    }
+    .histogram-canvas-wrap canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+    }
+    .histogram-rate-controls,
+    .histogram-sample-controls {
+        position: absolute;
+        bottom: 6px;
+        display: flex;
+        gap: 2px;
+        z-index: 1;
+    }
+    .histogram-rate-controls { right: 6px; }
+    .histogram-sample-controls { left: 6px; }
+    .histogram-rate-btn {
+        background: transparent;
+        border: 1px solid rgba(128, 128, 128, 0.3);
+        color: inherit;
+        padding: 1px 6px;
+        font-size: 10px;
+        font-family: 'Consolas', 'Menlo', monospace;
+        border-radius: 3px;
+        cursor: pointer;
+        line-height: 16px;
+    }
+    .histogram-rate-btn.active {
+        background: rgba(128, 128, 128, 0.25);
+        border-color: rgba(128, 128, 128, 0.5);
+    }
+    .histogram-rate-btn:hover {
+        background: rgba(128, 128, 128, 0.15);
+    }
+    .histogram-stats {
+        display: flex;
+        justify-content: space-between;
+        color: var(--fg2);
+        margin-top: 3px;
+    }
+    .histogram-stats .stall {
+        color: var(--error);
+        font-weight: 700;
     }
 </style>
 </head>
 <body>
 
 <div class="header">
+    <span class="icon">🔬</span>
     <h1>Variable Inspector</h1>
     <span class="status-dot" id="statusDot"></span>
 </div>
@@ -189,60 +286,182 @@
             </label>
         </div>
     </div>
-</div>
-
-<div class="section">
-    <div class="section-title">Compare</div>
-    <div class="range-row">
-        <div class="checkbox-row" style="margin-left: 0;">
+    <div class="compare-controls">
+        <div class="checkbox-row">
             <label>
                 <input type="checkbox" id="compareToggle" />
-                Side-by-side split
+                Compare split view
             </label>
         </div>
-        <label style="flex: 1 1 180px;">Split
-            <input type="range" id="compareSplit" min="0.1" max="0.9" step="0.01" value="0.5" style="width: 100%;" />
-        </label>
-        <span id="compareSplitValue" style="font-size: 12px; color: var(--fg2); min-width: 3ch; text-align: right;">50%</span>
+        <div class="compare-split-row" id="compareSplitRow">
+            <input type="range" id="compareSplit" min="0.1" max="0.9" step="0.01" value="0.5" />
+            <span class="compare-split-value" id="compareSplitValue">50%</span>
+        </div>
     </div>
 </div>
 
-<div class="section">
-    <div class="section-title">Hover Readback</div>
-    <div class="range-row">
-        <div class="checkbox-row" style="margin-left: 0;">
-            <label>
-                <input type="checkbox" id="hoverToggle" checked />
-                Read hovered pixel
-            </label>
+<div class="pixel-section" id="pixelSection">
+    <div class="variable-label toggle-label">
+        <input type="checkbox" id="hoverToggle" checked />
+        <label for="hoverToggle">Pixel Value (hover over preview)</label>
+    </div>
+    <div class="pixel-row">
+        <div class="color-swatch" id="colorSwatch"></div>
+        <div class="pixel-values" id="pixelValues"></div>
+    </div>
+</div>
+
+<div class="histogram-section" id="histogramSection">
+    <div class="variable-label toggle-label">
+        <input type="checkbox" id="histogramToggle" checked />
+        <label for="histogramToggle">Histogram</label>
+    </div>
+    <div class="histogram-canvas-wrap">
+        <canvas id="histogramCanvas"></canvas>
+        <div class="histogram-sample-controls">
+            <button class="histogram-rate-btn" data-sample-stride="1">1:1</button>
+            <button class="histogram-rate-btn active" data-sample-stride="8">1:8</button>
+            <button class="histogram-rate-btn" data-sample-stride="64">1:64</button>
+        </div>
+        <div class="histogram-rate-controls">
+            <button class="histogram-rate-btn" data-interval-ms="1000">1Hz</button>
+            <button class="histogram-rate-btn active" data-interval-ms="200">5Hz</button>
+            <button class="histogram-rate-btn" data-interval-ms="100">10Hz</button>
         </div>
     </div>
-    <div class="variable-section" style="margin-bottom: 0; margin-top: 8px;">
-        <div class="variable-label">Hovered Pixel</div>
-        <div class="variable-name empty" id="pixelValue">Move over the preview</div>
-        <div class="variable-meta" id="pixelMeta"></div>
+    <div class="histogram-stats">
+        <span id="histMin">0.00</span>
+        <span id="histSamples"></span>
+        <span id="histMax">1.00</span>
     </div>
 </div>
 
 <script>
 (function () {
     const vscode = (typeof acquireVsCodeApi === 'function') ? acquireVsCodeApi() : null;
+    const DEFAULT_HISTOGRAM_INTERVAL_MS = 200;
+    const DEFAULT_HISTOGRAM_SAMPLE_STRIDE = 8;
+
     const varNameEl = document.getElementById('varName');
     const varMetaEl = document.getElementById('varMeta');
     const varErrorEl = document.getElementById('varError');
     const statusDot = document.getElementById('statusDot');
+    const colorSwatch = document.getElementById('colorSwatch');
+    const pixelValues = document.getElementById('pixelValues');
     const rangeMin = document.getElementById('rangeMin');
     const rangeMax = document.getElementById('rangeMax');
     const oorToggle = document.getElementById('oorToggle');
     const compareToggle = document.getElementById('compareToggle');
     const compareSplit = document.getElementById('compareSplit');
+    const compareSplitRow = document.getElementById('compareSplitRow');
     const compareSplitValue = document.getElementById('compareSplitValue');
     const hoverToggle = document.getElementById('hoverToggle');
-    const pixelValueEl = document.getElementById('pixelValue');
-    const pixelMetaEl = document.getElementById('pixelMeta');
+    const pixelSection = document.getElementById('pixelSection');
+    const histogramToggle = document.getElementById('histogramToggle');
+    const histogramSection = document.getElementById('histogramSection');
+    const histogramRateButtons = document.querySelectorAll('[data-interval-ms]');
+    const histogramSampleButtons = document.querySelectorAll('[data-sample-stride]');
+    const histCanvas = document.getElementById('histogramCanvas');
+    const histCtx = histCanvas ? histCanvas.getContext('2d') : null;
+    const histMinEl = document.getElementById('histMin');
+    const histMaxEl = document.getElementById('histMax');
+    const histSamplesEl = document.getElementById('histSamples');
     const modeButtons = document.querySelectorAll('.mode-btn');
+
     let currentMode = 'linear';
-    function applyInspectorState(mapping, compareEnabled, split, hoverEnabled) {
+    let currentVariableType = '';
+    let currentCompareSplit = 0.5;
+    let currentHistogramIntervalMs = DEFAULT_HISTOGRAM_INTERVAL_MS;
+    let currentHistogramSampleStride = DEFAULT_HISTOGRAM_SAMPLE_STRIDE;
+    let lastHistogram = null;
+
+    function getTypeInfo(type) {
+        switch (type) {
+            case 'vec2':
+            case 'ivec2':
+            case 'uvec2':
+                return { componentCount: 2, labels: ['X', 'Y'], histogramColor: 'rgba(220, 220, 220, 0.70)' };
+            case 'vec3':
+            case 'ivec3':
+            case 'uvec3':
+                return { componentCount: 3, labels: ['X', 'Y', 'Z'], histogramColor: 'rgba(220, 220, 220, 0.70)' };
+            case 'vec4':
+            case 'ivec4':
+            case 'uvec4':
+                return { componentCount: 4, labels: ['X', 'Y', 'Z', 'W'], histogramColor: 'rgba(220, 220, 220, 0.70)' };
+            default:
+                return { componentCount: 1, labels: ['Value'], histogramColor: 'rgba(220, 220, 220, 0.70)' };
+        }
+    }
+
+    function formatPixelValues(values) {
+        const typeInfo = getTypeInfo(currentVariableType);
+        const rows = [];
+        for (let i = 0; i < typeInfo.componentCount; i++) {
+            rows.push(`<span>${typeInfo.labels[i]}: ${Number(values[i] || 0).toFixed(4)}</span>`);
+        }
+        return rows.join('<br/>');
+    }
+
+    function resetPixelValueLabels() {
+        pixelValues.innerHTML = formatPixelValues([0, 0, 0, 0]).replace(/0\.0000/g, '—');
+    }
+
+    function setHoverUi(enabled) {
+        pixelSection.style.opacity = enabled ? '1' : '0.5';
+    }
+
+    function setHistogramUi(enabled) {
+        histogramSection.style.opacity = enabled ? '1' : '0.5';
+    }
+
+    function normalizeHistogramInterval(intervalMs) {
+        const numericInterval = Number(intervalMs);
+        return numericInterval === 100 || numericInterval === 200 || numericInterval === 1000
+            ? numericInterval
+            : DEFAULT_HISTOGRAM_INTERVAL_MS;
+    }
+
+    function normalizeHistogramSampleStride(sampleStride) {
+        const numericStride = Number(sampleStride);
+        return numericStride === 1 || numericStride === 8 || numericStride === 64
+            ? numericStride
+            : DEFAULT_HISTOGRAM_SAMPLE_STRIDE;
+    }
+
+    function setHistogramIntervalUi(intervalMs) {
+        currentHistogramIntervalMs = normalizeHistogramInterval(intervalMs);
+        histogramRateButtons.forEach(btn => {
+            btn.classList.toggle('active', Number(btn.dataset.intervalMs) === currentHistogramIntervalMs);
+        });
+    }
+
+    function setHistogramSampleStrideUi(sampleStride) {
+        currentHistogramSampleStride = normalizeHistogramSampleStride(sampleStride);
+        histogramSampleButtons.forEach(btn => {
+            btn.classList.toggle('active', Number(btn.dataset.sampleStride) === currentHistogramSampleStride);
+        });
+    }
+
+    function normalizeCompareSplit(split) {
+        const numericSplit = Number(split);
+        if (!Number.isFinite(numericSplit)) return 0.5;
+        return Math.max(0.1, Math.min(0.9, numericSplit));
+    }
+
+    function setCompareSplitUi(split) {
+        currentCompareSplit = normalizeCompareSplit(split);
+        compareSplit.value = String(currentCompareSplit);
+        compareSplitValue.textContent = `${Math.round(currentCompareSplit * 100)}%`;
+    }
+
+    function setCompareUi(enabled) {
+        compareToggle.checked = !!enabled;
+        compareSplit.disabled = !enabled;
+        compareSplitRow.classList.toggle('disabled', !enabled);
+    }
+
+    function applyInspectorState(mapping, compareEnabled, compareSplitRaw, hoverEnabled, histogramEnabled, histogramIntervalMs, histogramSampleStride) {
         const nextMapping = mapping || {};
         currentMode = nextMapping.mode || 'linear';
         modeButtons.forEach(btn => {
@@ -251,18 +470,21 @@
         rangeMin.value = String(typeof nextMapping.min === 'number' ? nextMapping.min : 0);
         rangeMax.value = String(typeof nextMapping.max === 'number' ? nextMapping.max : 1);
         oorToggle.checked = !!nextMapping.highlightOutOfRange;
-        compareToggle.checked = !!compareEnabled;
-        const nextSplit = typeof split === 'number' ? split : 0.5;
-        compareSplit.value = String(nextSplit);
-        compareSplitValue.textContent = `${Math.round(nextSplit * 100)}%`;
+        setCompareUi(compareEnabled);
+        setCompareSplitUi(compareSplitRaw);
         hoverToggle.checked = hoverEnabled !== false;
+        histogramToggle.checked = histogramEnabled !== false;
+        setHoverUi(hoverToggle.checked);
+        setHistogramUi(histogramToggle.checked);
+        setHistogramIntervalUi(histogramIntervalMs);
+        setHistogramSampleStrideUi(histogramSampleStride);
+        if (lastHistogram) drawHistogram(lastHistogram);
     }
 
     function applyStatus(message, status) {
         statusDot.className = 'status-dot';
         varErrorEl.textContent = '';
         varErrorEl.classList.remove('visible');
-
         if (status === 'ok') {
             statusDot.classList.add('active');
         } else if (status === 'error') {
@@ -275,6 +497,7 @@
     }
 
     function broadcastMapping() {
+        if (lastHistogram) drawHistogram(lastHistogram);
         if (!vscode) return;
         vscode.postMessage({
             command: 'setMapping',
@@ -287,47 +510,9 @@
         });
     }
 
-    function broadcastCompareEnabled() {
-        if (!vscode) return;
-        vscode.postMessage({
-            command: 'setCompare',
-            enabled: compareToggle.checked
-        });
-    }
-
-    function broadcastCompareSplit() {
-        const split = parseFloat(compareSplit.value) || 0.5;
-        compareSplitValue.textContent = `${Math.round(split * 100)}%`;
-        if (!vscode) return;
-        vscode.postMessage({
-            command: 'setCompareSplit',
-            split
-        });
-    }
-
-    function broadcastHoverEnabled() {
-        if (!vscode) return;
-        vscode.postMessage({
-            command: 'setHover',
-            enabled: hoverToggle.checked
-        });
-    }
-
-    function applyPixel(rgba, position) {
-        if (!Array.isArray(rgba) || rgba.length < 4) return;
-        const formatted = rgba.map(channel => Number(channel).toFixed(3)).join(', ');
-        pixelValueEl.textContent = formatted;
-        pixelValueEl.classList.remove('empty');
-        if (position && typeof position.x === 'number' && typeof position.y === 'number') {
-            pixelMetaEl.textContent = `x=${position.x}, y=${position.y}`;
-        } else {
-            pixelMetaEl.textContent = '';
-        }
-    }
-
     modeButtons.forEach(btn => {
         btn.addEventListener('click', () => {
-            modeButtons.forEach(b => b.classList.remove('active'));
+            modeButtons.forEach(other => other.classList.remove('active'));
             btn.classList.add('active');
             currentMode = btn.dataset.mode;
             broadcastMapping();
@@ -336,19 +521,236 @@
     rangeMin.addEventListener('change', broadcastMapping);
     rangeMax.addEventListener('change', broadcastMapping);
     oorToggle.addEventListener('change', broadcastMapping);
-    compareToggle.addEventListener('change', broadcastCompareEnabled);
-    compareSplit.addEventListener('input', broadcastCompareSplit);
-    hoverToggle.addEventListener('change', broadcastHoverEnabled);
+
+    compareToggle.addEventListener('change', () => {
+        setCompareUi(compareToggle.checked);
+        if (vscode) {
+            vscode.postMessage({ command: 'setCompare', enabled: compareToggle.checked });
+        }
+    });
+
+    compareSplit.addEventListener('input', () => {
+        setCompareSplitUi(compareSplit.value);
+        if (vscode) {
+            vscode.postMessage({ command: 'setCompareSplit', split: currentCompareSplit });
+        }
+    });
+
+    hoverToggle.addEventListener('change', () => {
+        const enabled = hoverToggle.checked;
+        setHoverUi(enabled);
+        if (vscode) {
+            vscode.postMessage({ command: 'setHoverEnabled', enabled: enabled });
+        }
+    });
+
+    histogramToggle.addEventListener('change', () => {
+        const enabled = histogramToggle.checked;
+        setHistogramUi(enabled);
+        if (vscode) {
+            vscode.postMessage({ command: 'setHistogramEnabled', enabled: enabled });
+        }
+    });
+
+    histogramRateButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const intervalMs = normalizeHistogramInterval(btn.dataset.intervalMs);
+            setHistogramIntervalUi(intervalMs);
+            if (vscode) {
+                vscode.postMessage({ command: 'setHistogramInterval', intervalMs: intervalMs });
+            }
+        });
+    });
+
+    histogramSampleButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const sampleStride = normalizeHistogramSampleStride(btn.dataset.sampleStride);
+            setHistogramSampleStrideUi(sampleStride);
+            if (vscode) {
+                vscode.postMessage({ command: 'setHistogramSampleStride', sampleStride: sampleStride });
+            }
+        });
+    });
+
+    function normalizeCropRange() {
+        const minValue = Number.parseFloat(rangeMin.value);
+        const maxValue = Number.parseFloat(rangeMax.value);
+        if (!Number.isFinite(minValue) && !Number.isFinite(maxValue)) return { min: 0, max: 1 };
+        if (!Number.isFinite(minValue)) return { min: maxValue, max: maxValue };
+        if (!Number.isFinite(maxValue)) return { min: minValue, max: minValue };
+        return minValue <= maxValue ? { min: minValue, max: maxValue } : { min: maxValue, max: minValue };
+    }
+
+    function mapValueToX(value, domainMin, domainMax, width) {
+        const span = domainMax - domainMin;
+        if (Math.abs(span) <= 1e-9) return width * 0.5;
+        return ((value - domainMin) / span) * width;
+    }
+
+    function clamp(value, min, max) {
+        return Math.min(Math.max(value, min), max);
+    }
+
+    function createOverlayPattern(colorA, colorB) {
+        const tile = document.createElement('canvas');
+        tile.width = 8;
+        tile.height = 8;
+        const ctx = tile.getContext('2d');
+        if (!ctx || !histCtx) return colorA;
+        ctx.fillStyle = colorA;
+        ctx.fillRect(0, 0, 8, 8);
+        ctx.fillStyle = colorB;
+        ctx.fillRect(0, 0, 4, 4);
+        ctx.fillRect(4, 4, 4, 4);
+        return histCtx.createPattern(tile, 'repeat') || colorA;
+    }
+
+    function drawCropOverlays(width, height, domainMin, domainMax, cropMin, cropMax) {
+        const leftEdge = clamp(mapValueToX(cropMin, domainMin, domainMax, width), 0, width);
+        const rightEdge = clamp(mapValueToX(cropMax, domainMin, domainMax, width), 0, width);
+        if (!histCtx) return;
+        const leftPattern = createOverlayPattern('rgba(255, 0, 255, 0.10)', 'rgba(255, 0, 255, 0.18)');
+        const rightPattern = createOverlayPattern('rgba(0, 255, 255, 0.10)', 'rgba(0, 255, 255, 0.18)');
+        if (leftEdge > 0) {
+            histCtx.fillStyle = leftPattern;
+            histCtx.fillRect(0, 0, leftEdge, height);
+        }
+        if (rightEdge < width) {
+            histCtx.fillStyle = rightPattern;
+            histCtx.fillRect(rightEdge, 0, width - rightEdge, height);
+        }
+        histCtx.save();
+        histCtx.setLineDash([4, 4]);
+        histCtx.lineWidth = 1;
+        histCtx.strokeStyle = 'rgba(255, 0, 255, 0.70)';
+        histCtx.beginPath();
+        histCtx.moveTo(leftEdge + 0.5, 0);
+        histCtx.lineTo(leftEdge + 0.5, height);
+        histCtx.stroke();
+        histCtx.strokeStyle = 'rgba(0, 255, 255, 0.70)';
+        histCtx.beginPath();
+        histCtx.moveTo(rightEdge + 0.5, 0);
+        histCtx.lineTo(rightEdge + 0.5, height);
+        histCtx.stroke();
+        histCtx.restore();
+    }
+
+    function evaluateCurve(mode, t) {
+        const clamped = clamp(t, 0, 1);
+        if (mode === 'sigmoid') {
+            return 1 / (1 + Math.exp(-8 * (2 * clamped - 1)));
+        }
+        if (mode === 'log') {
+            return Math.log2(1 + clamped * 255) / Math.log2(256);
+        }
+        return clamped;
+    }
+
+    function drawMappingCurves(width, height, domainMin, domainMax, cropMin, cropMax) {
+        if (!histCtx) return;
+        const startValue = Math.max(domainMin, cropMin);
+        const endValue = Math.min(domainMax, cropMax);
+        if (!(endValue > startValue)) return;
+        const styleByMode = {
+            linear: { color: 'rgba(255, 255, 255, 0.95)' },
+            sigmoid: { color: 'rgba(255, 192, 96, 0.95)' },
+            log: { color: 'rgba(144, 208, 255, 0.95)' }
+        };
+        const activeStyle = styleByMode[currentMode] || styleByMode.linear;
+        const steps = Math.max(32, Math.floor(width / 3));
+        const cropSpan = Math.abs(cropMax - cropMin) > 1e-9 ? (cropMax - cropMin) : 1;
+        histCtx.save();
+        histCtx.lineWidth = 2;
+        histCtx.strokeStyle = activeStyle.color;
+        histCtx.beginPath();
+        for (let index = 0; index <= steps; index++) {
+            const value = startValue + ((endValue - startValue) * index / steps);
+            const normalized = (value - cropMin) / cropSpan;
+            const mapped = evaluateCurve(currentMode, normalized);
+            const x = mapValueToX(value, domainMin, domainMax, width);
+            const y = height - mapped * (height - 2) - 1;
+            if (index === 0) {
+                histCtx.moveTo(x, y);
+            } else {
+                histCtx.lineTo(x, y);
+            }
+        }
+        histCtx.stroke();
+        histCtx.restore();
+    }
+
+    function drawHistogram(histogram) {
+        if (!histCanvas || !histCtx || !histogram) return;
+        lastHistogram = histogram;
+        const wrap = histCanvas.parentElement;
+        const dpr = window.devicePixelRatio || 1;
+        const width = wrap.clientWidth;
+        const height = wrap.clientHeight;
+        histCanvas.width = width * dpr;
+        histCanvas.height = height * dpr;
+        histCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        const bins = histogram.bins || 128;
+        const domainMin = Number.isFinite(histogram.autoMin) ? histogram.autoMin : 0;
+        const domainMax = Number.isFinite(histogram.autoMax) ? histogram.autoMax : 1;
+        const cropRange = normalizeCropRange();
+        const typeInfo = getTypeInfo(currentVariableType);
+        const componentCount = Number.isFinite(histogram.componentCount)
+            ? Math.max(1, Math.min(4, histogram.componentCount))
+            : typeInfo.componentCount;
+
+        histCtx.clearRect(0, 0, width, height);
+        let peak = 1;
+        for (let index = 0; index < bins; index++) {
+            if (histogram.binsR[index] > peak) peak = histogram.binsR[index];
+            if (componentCount >= 2 && histogram.binsG[index] > peak) peak = histogram.binsG[index];
+            if (componentCount >= 3 && histogram.binsB[index] > peak) peak = histogram.binsB[index];
+            if (componentCount >= 4 && histogram.binsA[index] > peak) peak = histogram.binsA[index];
+        }
+
+        const barWidth = width / bins;
+        const pad = height * 0.05;
+        const channels = componentCount === 1
+            ? [{ data: histogram.binsR, color: typeInfo.histogramColor }]
+            : [
+                ...(componentCount >= 4 ? [{ data: histogram.binsA, color: 'rgba(255, 231, 122, 0.55)' }] : []),
+                ...(componentCount >= 3 ? [{ data: histogram.binsB, color: 'rgba(86, 156, 214, 0.6)' }] : []),
+                ...(componentCount >= 2 ? [{ data: histogram.binsG, color: 'rgba(78, 201, 176, 0.6)' }] : []),
+                { data: histogram.binsR, color: 'rgba(244, 71, 71, 0.55)' }
+            ];
+        channels.forEach(channel => {
+            histCtx.fillStyle = channel.color;
+            histCtx.beginPath();
+            histCtx.moveTo(0, height);
+            for (let index = 0; index < bins; index++) {
+                const barHeight = (channel.data[index] / peak) * (height - pad);
+                const x = index * barWidth;
+                histCtx.lineTo(x, height - barHeight);
+                histCtx.lineTo(x + barWidth, height - barHeight);
+            }
+            histCtx.lineTo(width, height);
+            histCtx.closePath();
+            histCtx.fill();
+        });
+
+        drawCropOverlays(width, height, domainMin, domainMax, cropRange.min, cropRange.max);
+        drawMappingCurves(width, height, domainMin, domainMax, cropRange.min, cropRange.max);
+        histMinEl.textContent = domainMin.toFixed(2);
+        histMaxEl.textContent = domainMax.toFixed(2);
+        histSamplesEl.textContent = `Samples: ${histogram.samples}px / Time: ${(Number(histogram.timeMs) || 0).toFixed(2)}ms${histogram.stalled ? ' STALL' : ''}`;
+        histSamplesEl.classList.toggle('stall', !!histogram.stalled);
+    }
+
     window.addEventListener('message', event => {
         const msg = event.data;
         switch (msg.command) {
             case 'syncState':
-                applyInspectorState(msg.mapping, msg.compareEnabled, msg.compareSplit, msg.hoverEnabled);
+                applyInspectorState(msg.mapping, msg.compareEnabled, msg.compareSplit, msg.hoverEnabled, msg.histogramEnabled, msg.histogramIntervalMs, msg.histogramSampleStride);
                 break;
             case 'updateVariable':
                 if (msg.variable) {
                     varNameEl.textContent = msg.variable;
                     varNameEl.classList.remove('empty');
+                    currentVariableType = msg.type || '';
                     let meta = `Line ${msg.line}`;
                     if (msg.type) meta += ` <span class="type-badge">${msg.type}</span>`;
                     varMetaEl.innerHTML = meta;
@@ -356,19 +758,38 @@
                     varNameEl.textContent = 'Select an expression in the editor';
                     varNameEl.classList.add('empty');
                     varMetaEl.innerHTML = '';
+                    currentVariableType = '';
                 }
+                resetPixelValueLabels();
+                if (lastHistogram) drawHistogram(lastHistogram);
                 break;
-
             case 'inspectorStatus':
                 applyStatus(msg.message || '', msg.status);
                 break;
-            case 'inspectorPixel':
-                applyPixel(msg.rgba, msg.position);
+            case 'pixelValue':
+                if (msg.rgba) {
+                    const r8 = Math.round(msg.rgba[0] * 255);
+                    const g8 = Math.round(msg.rgba[1] * 255);
+                    const b8 = Math.round(msg.rgba[2] * 255);
+                    colorSwatch.style.background = `rgba(${r8},${g8},${b8},${msg.rgba[3]})`;
+                    pixelValues.innerHTML = formatPixelValues(msg.rgba);
+                }
+                break;
+            case 'histogram':
+                if (msg.histogram) {
+                    drawHistogram(msg.histogram);
+                }
                 break;
         }
     });
 
-    applyInspectorState({ mode: 'linear', min: 0, max: 1, highlightOutOfRange: false }, false, 0.5, true);
+    setHoverUi(hoverToggle.checked);
+    setHistogramUi(histogramToggle.checked);
+    setHistogramIntervalUi(DEFAULT_HISTOGRAM_INTERVAL_MS);
+    setHistogramSampleStrideUi(DEFAULT_HISTOGRAM_SAMPLE_STRIDE);
+    setCompareUi(false);
+    setCompareSplitUi(0.5);
+    resetPixelValueLabels();
     if (vscode) {
         vscode.postMessage({ command: 'panelReady' });
     }
