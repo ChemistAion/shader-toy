@@ -236,6 +236,7 @@
             case 'inspectorOn':
             case 'inspectorOff':
             case 'setInspectorCompare':
+            case 'setInspectorCompareSplit':
             case 'setInspectorHover':
             case 'setInspectorHistogram':
             case 'setInspectorHistogramInterval':
@@ -432,7 +433,8 @@
 
         // Audio Update
 
-        for (let buffer of buffers) {
+        for (let index = 0; index < buffers.length; index++) {
+            const buffer = buffers[index];
             if (failedBufferNames.has(buffer.Name)) {
                 continue;
             }
@@ -448,6 +450,12 @@
             buffer.Shader.uniforms['resolution'].value = resolution;
             buffer.Shader.uniforms['time'].value = time;
             buffer.Shader.uniforms['mouse'].value = normalizedMouse;
+
+            if (window.ShaderToy && window.ShaderToy.inspector && window.ShaderToy.inspector.renderBuffer) {
+                if (window.ShaderToy.inspector.renderBuffer(buffer, index, buffers.length)) {
+                    continue;
+                }
+            }
 
             quad.material = buffer.Shader;
             renderer.setRenderTarget(buffer.Target);

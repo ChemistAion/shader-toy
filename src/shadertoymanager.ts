@@ -26,6 +26,7 @@ const DEFAULT_INSPECTOR_MAPPING: InspectorMapping = {
 };
 const DEFAULT_HISTOGRAM_INTERVAL_MS = 200;
 const DEFAULT_HISTOGRAM_SAMPLE_STRIDE = 8;
+const DEFAULT_COMPARE_SPLIT = 0.5;
 
 export class ShaderToyManager {
     context: Context;
@@ -41,6 +42,7 @@ export class ShaderToyManager {
     private _lastInspectorType = '';
     private _lastInspectorMapping: InspectorMapping = { ...DEFAULT_INSPECTOR_MAPPING };
     private _lastCompareEnabled = false;
+    private _lastCompareSplit = DEFAULT_COMPARE_SPLIT;
     private _lastHoverEnabled = true;
     private _lastHistogramEnabled = true;
     private _lastHistogramIntervalMs = DEFAULT_HISTOGRAM_INTERVAL_MS;
@@ -205,6 +207,16 @@ export class ShaderToyManager {
             }
         });
 
+        this.inspectPanel.setOnCompareSplitChanged((split: number) => {
+            this._lastCompareSplit = Math.max(0.1, Math.min(0.9, split));
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorCompareSplit',
+                    split: this._lastCompareSplit
+                });
+            }
+        });
+
         this.inspectPanel.setOnHoverChanged((enabled: boolean) => {
             this._lastHoverEnabled = enabled;
             if (this.webviewPanel !== undefined) {
@@ -314,6 +326,7 @@ export class ShaderToyManager {
         this.inspectPanel.postInspectorState(
             this._lastInspectorMapping,
             this._lastCompareEnabled,
+            this._lastCompareSplit,
             this._lastHoverEnabled,
             this._lastHistogramEnabled,
             this._lastHistogramIntervalMs,
@@ -334,6 +347,10 @@ export class ShaderToyManager {
         this.webviewPanel.Panel.webview.postMessage({
             command: 'setInspectorCompare',
             enabled: this._lastCompareEnabled
+        });
+        this.webviewPanel.Panel.webview.postMessage({
+            command: 'setInspectorCompareSplit',
+            split: this._lastCompareSplit
         });
         this.webviewPanel.Panel.webview.postMessage({
             command: 'setInspectorHover',

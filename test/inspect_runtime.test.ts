@@ -29,6 +29,10 @@ function loadInspectorHarness() {
     let nowMs = 0;
     let renderTargetReadPixelsCalls = 0;
     let lastRenderTargetReadSize = { width: 0, height: 0 };
+    let renderCalls = 0;
+    const scissorCalls: Array<{ x: number; y: number; width: number; height: number }> = [];
+    const viewportCalls: Array<{ x: number; y: number; width: number; height: number }> = [];
+    const scissorTestStates: boolean[] = [];
 
     const material = {
         fragmentShader: SIMPLE_SHADER,
@@ -43,6 +47,18 @@ function loadInspectorHarness() {
         addEventListener: () => undefined,
         getBoundingClientRect: () => ({ left: 0, top: 0, width: 2, height: 2 }),
     };
+
+    const overlayBody = {
+        appendChild: () => undefined,
+    };
+
+    function createElement() {
+        return {
+            style: {},
+            textContent: '',
+            appendChild: () => undefined,
+        };
+    }
 
     const gl = {
         RGBA: 0x1908,
@@ -65,7 +81,19 @@ function loadInspectorHarness() {
 
     const renderer = {
         setRenderTarget: () => undefined,
-        render: () => undefined,
+        render: () => {
+            renderCalls++;
+        },
+        domElement: canvas,
+        setScissorTest: (enabled: boolean) => {
+            scissorTestStates.push(enabled);
+        },
+        setScissor: (x: number, y: number, width: number, height: number) => {
+            scissorCalls.push({ x, y, width, height });
+        },
+        setViewport: (x: number, y: number, width: number, height: number) => {
+            viewportCalls.push({ x, y, width, height });
+        },
         readRenderTargetPixels: (_target: unknown, _x: number, _y: number, w: number, h: number, buffer: Float32Array) => {
             lastRenderTargetReadSize = { width: w, height: h };
             if (w === 2 && h === 2) {
@@ -105,6 +133,7 @@ function loadInspectorHarness() {
 
     const sandbox: Record<string, unknown> = {
         console,
+        addEventListener: () => undefined,
         setTimeout: (fn: () => void) => {
             fn();
             return 1;
@@ -135,6 +164,8 @@ function loadInspectorHarness() {
         document: {
             readyState: 'complete',
             addEventListener: () => undefined,
+            createElement: () => createElement(),
+            body: overlayBody,
             getElementById: (id: string) => id === 'canvas' ? canvas : null,
             querySelectorAll: (selector: string) => selector === 'script[type="x-shader/x-fragment"]'
                 ? [{ textContent: SIMPLE_SHADER }]
@@ -173,13 +204,15 @@ function loadInspectorHarness() {
             ShaderToy: {
                 inspector: {
                     handleMessage: (message: { command: string; [key: string]: unknown }) => void;
+                    getCompareSplit: () => number;
                     isHistogramEnabled: () => boolean;
                     getHistogramIntervalMs: () => number;
                     getHistogramSampleStride: () => number;
+                    renderBuffer: (buffer: { Shader: typeof material; Target: unknown }, index: number, totalBuffers: number) => boolean;
                     afterFrame: () => void;
                 }
             };
-            buffers: Array<{ Shader: typeof material }>;
+            buffers: Array<{ Shader: typeof material; Target: unknown }>;
             forceRenderOneFrame: boolean;
         },
         messages,
@@ -187,6 +220,10 @@ function loadInspectorHarness() {
         getRenderTargetReadPixelsCalls: () => renderTargetReadPixelsCalls,
         getLastRenderTargetReadSize: () => ({ ...lastRenderTargetReadSize }),
         getLastSetIntervalMs: () => lastSetIntervalMs,
+        getRenderCalls: () => renderCalls,
+        getScissorCalls: () => scissorCalls.map(call => ({ ...call })),
+        getViewportCalls: () => viewportCalls.map(call => ({ ...call })),
+        getScissorTestStates: () => [...scissorTestStates],
     };
 }
 
@@ -341,5 +378,40 @@ suite('Inspect runtime', () => {
         const statusMessage = messages.find(message => message.command === 'inspectorStatus' && message.status === 'ok');
         assert.strictEqual(statusMessage?.variable, 'uv');
         assert.strictEqual(statusMessage?.message, 'Inspecting: uv (vec2)');
+    });
+
+    test('renders compare mode as a split between original and inspected output', () => {
+        const {
+            material,
+            sandbox,
+            getRenderCalls,
+            getScissorCalls,
+            getViewportCalls,
+            getScissorTestStates,
+        } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompare', enabled: true });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompareSplit', split: 0.5 });
+
+        assert.ok(material.fragmentShader.includes('_inspMap('), 'Expected compare mode to keep the mapped inspector shader active');
+        assert.strictEqual(sandbox.ShaderToy.inspector.getCompareSplit(), 0.5);
+
+        const rendered = sandbox.ShaderToy.inspector.renderBuffer(sandbox.buffers[0], 0, 1);
+
+        assert.strictEqual(rendered, true, 'Expected compare mode to intercept the final render pass');
+        assert.strictEqual(getRenderCalls(), 2, 'Expected original and inspected halves to render separately');
+        assert.deepStrictEqual(getScissorTestStates(), [true, false]);
+        assert.deepStrictEqual(getScissorCalls(), [
+            { x: 0, y: 0, width: 1, height: 2 },
+            { x: 1, y: 0, width: 1, height: 2 },
+            { x: 0, y: 0, width: 2, height: 2 }
+        ]);
+        assert.deepStrictEqual(getViewportCalls(), [
+            { x: 0, y: 0, width: 1, height: 2 },
+            { x: 1, y: 0, width: 1, height: 2 },
+            { x: 0, y: 0, width: 2, height: 2 }
+        ]);
     });
 });

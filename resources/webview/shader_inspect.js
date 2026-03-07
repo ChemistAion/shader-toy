@@ -704,6 +704,7 @@ vec4 _inspMap(vec4 v) {${oor}
     let _line = 0;
     let _mapping = { ...DEFAULT_MAPPING };
     let _compareMode = false;
+    let _compareSplit = 0.5;
     let _hoverEnabled = true;
     let _histogramEnabled = true;
     let _histogramIntervalMs = 200;
@@ -729,6 +730,11 @@ vec4 _inspMap(vec4 v) {${oor}
     let _lastHistogramSource = '';
     let _inspectorMaterial = null;
     let _inspectorType = '';
+    let _compareOriginalMaterial = null;
+    let _compareOverlayRoot = null;
+    let _compareOverlayDivider = null;
+    let _compareOverlayLeft = null;
+    let _compareOverlayRight = null;
     let _originalMaterials = new Map();  // bufferIndex → original material
     let _originalFragmentShaders = new Map(); // bufferIndex → original fragment shader source
     let _lastRewrittenSource = '';
@@ -756,6 +762,12 @@ vec4 _inspMap(vec4 v) {${oor}
         return numericStride === 1 || numericStride === 8 || numericStride === 64
             ? numericStride
             : 8;
+    }
+
+    function normalizeCompareSplit(split) {
+        const numericSplit = Number(split);
+        if (!Number.isFinite(numericSplit)) return 0.5;
+        return Math.max(0.1, Math.min(0.9, numericSplit));
     }
 
     function getNowMs() {
@@ -851,6 +863,146 @@ vec4 _inspMap(vec4 v) {${oor}
             depthTest: false
         });
         _lastHistogramSource = preparedSource;
+    }
+
+    function disposeCompareOriginalMaterial() {
+        if (_compareOriginalMaterial && typeof _compareOriginalMaterial.dispose === 'function') {
+            _compareOriginalMaterial.dispose();
+        }
+        _compareOriginalMaterial = null;
+    }
+
+    function syncCompareOriginalMaterial(bufferIndex, origMat) {
+        if (typeof THREE === 'undefined') return;
+        const originalFragmentShader = _originalFragmentShaders.get(bufferIndex);
+        if (typeof originalFragmentShader !== 'string') {
+            disposeCompareOriginalMaterial();
+            return;
+        }
+
+        if (_compareOriginalMaterial &&
+            _compareOriginalMaterial.fragmentShader === originalFragmentShader &&
+            _compareOriginalMaterial.vertexShader === origMat.vertexShader &&
+            _compareOriginalMaterial.glslVersion === origMat.glslVersion) {
+            _compareOriginalMaterial.uniforms = origMat.uniforms;
+            return;
+        }
+
+        disposeCompareOriginalMaterial();
+        _compareOriginalMaterial = new THREE.ShaderMaterial({
+            glslVersion: origMat.glslVersion,
+            fragmentShader: originalFragmentShader,
+            vertexShader: origMat.vertexShader,
+            uniforms: origMat.uniforms,
+            depthWrite: false,
+            depthTest: false
+        });
+    }
+
+    function ensureCompareOverlay() {
+        if (_compareOverlayRoot || typeof document === 'undefined') return;
+        const root = document.createElement('div');
+        root.style.position = 'fixed';
+        root.style.pointerEvents = 'none';
+        root.style.zIndex = '30';
+        root.style.display = 'none';
+
+        const divider = document.createElement('div');
+        divider.style.position = 'absolute';
+        divider.style.top = '0';
+        divider.style.bottom = '0';
+        divider.style.width = '2px';
+        divider.style.background = 'rgba(255, 255, 255, 0.8)';
+        divider.style.boxShadow = '0 0 0 1px rgba(0, 0, 0, 0.35)';
+
+        const leftLabel = document.createElement('div');
+        leftLabel.textContent = 'Original';
+        leftLabel.style.position = 'absolute';
+        leftLabel.style.left = '8px';
+        leftLabel.style.top = '8px';
+        leftLabel.style.padding = '2px 6px';
+        leftLabel.style.borderRadius = '999px';
+        leftLabel.style.background = 'rgba(0, 0, 0, 0.55)';
+        leftLabel.style.color = '#ffffff';
+        leftLabel.style.font = '12px "Segoe UI", sans-serif';
+
+        const rightLabel = document.createElement('div');
+        rightLabel.textContent = 'Inspect';
+        rightLabel.style.position = 'absolute';
+        rightLabel.style.right = '8px';
+        rightLabel.style.top = '8px';
+        rightLabel.style.padding = '2px 6px';
+        rightLabel.style.borderRadius = '999px';
+        rightLabel.style.background = 'rgba(0, 0, 0, 0.55)';
+        rightLabel.style.color = '#ffffff';
+        rightLabel.style.font = '12px "Segoe UI", sans-serif';
+
+        root.appendChild(divider);
+        root.appendChild(leftLabel);
+        root.appendChild(rightLabel);
+        document.body.appendChild(root);
+
+        _compareOverlayRoot = root;
+        _compareOverlayDivider = divider;
+        _compareOverlayLeft = leftLabel;
+        _compareOverlayRight = rightLabel;
+    }
+
+    function updateCompareOverlay() {
+        ensureCompareOverlay();
+        if (!_compareOverlayRoot) return;
+
+        const canvas = document.getElementById('canvas');
+        const shouldShow = !!(_active && _compareMode && _inspectorMaterial && _compareOriginalMaterial && canvas);
+        _compareOverlayRoot.style.display = shouldShow ? 'block' : 'none';
+        if (!shouldShow) return;
+
+        const rect = canvas.getBoundingClientRect();
+        _compareOverlayRoot.style.left = rect.left + 'px';
+        _compareOverlayRoot.style.top = rect.top + 'px';
+        _compareOverlayRoot.style.width = rect.width + 'px';
+        _compareOverlayRoot.style.height = rect.height + 'px';
+        _compareOverlayDivider.style.left = Math.floor(rect.width * _compareSplit) + 'px';
+    }
+
+    function renderBuffer(buffer, bufferIndex, totalBuffers) {
+        if (!_active || !_compareMode || !_inspectorMaterial || !_compareOriginalMaterial) return false;
+        if (!buffer || bufferIndex !== totalBuffers - 1) return false;
+        if (typeof renderer === 'undefined' || !renderer || typeof renderer.render !== 'function') return false;
+        if (typeof quad === 'undefined' || !quad || typeof scene === 'undefined' || typeof camera === 'undefined') return false;
+
+        const canvas = renderer.domElement || document.getElementById('canvas');
+        const width = canvas && canvas.width ? canvas.width : 0;
+        const height = canvas && canvas.height ? canvas.height : 0;
+        if (width <= 0 || height <= 0) return false;
+
+        const splitX = Math.max(0, Math.min(width, Math.floor(width * _compareSplit)));
+        const rightWidth = Math.max(0, width - splitX);
+        const previousMaterial = quad.material;
+
+        renderer.setRenderTarget(buffer.Target);
+        if (typeof renderer.setScissorTest === 'function') renderer.setScissorTest(true);
+
+        if (splitX > 0) {
+            quad.material = _compareOriginalMaterial;
+            if (typeof renderer.setViewport === 'function') renderer.setViewport(0, 0, splitX, height);
+            if (typeof renderer.setScissor === 'function') renderer.setScissor(0, 0, splitX, height);
+            renderer.render(scene, camera);
+        }
+
+        if (rightWidth > 0) {
+            quad.material = _inspectorMaterial;
+            if (typeof renderer.setViewport === 'function') renderer.setViewport(splitX, 0, rightWidth, height);
+            if (typeof renderer.setScissor === 'function') renderer.setScissor(splitX, 0, rightWidth, height);
+            renderer.render(scene, camera);
+        }
+
+        if (typeof renderer.setScissorTest === 'function') renderer.setScissorTest(false);
+        if (typeof renderer.setViewport === 'function') renderer.setViewport(0, 0, width, height);
+        if (typeof renderer.setScissor === 'function') renderer.setScissor(0, 0, width, height);
+        quad.material = previousMaterial;
+        updateCompareOverlay();
+        return true;
     }
 
     function ensureHistogramTarget(width, height) {
@@ -1134,9 +1286,7 @@ vec4 _inspMap(vec4 v) {${oor}
             const type = inspectTarget.type;
             _inspectorType = type;
             const vec4Expr = coerceToVec4(inspectTarget.resolvedExpr, type);
-            const rewritten = _compareMode ?
-                buildCompareShader(source, inspectTarget.variable, vec4Expr, false, sourceLine) :
-                buildInspectorShader(source, inspectTarget.variable, vec4Expr, _mapping, false, sourceLine);
+            const rewritten = buildInspectorShader(source, inspectTarget.variable, vec4Expr, _mapping, false, sourceLine);
 
             if (!rewritten) {
                 postStatus('error', 'Could not find main() in shader');
@@ -1185,6 +1335,8 @@ vec4 _inspMap(vec4 v) {${oor}
                 finalBuffer.Shader = origMat;
                 _inspectorMaterial = origMat;
                 syncHistogramMaterial(origMat, histogramPrepared);
+                syncCompareOriginalMaterial(finalIdx, origMat);
+                updateCompareOverlay();
 
                 postStatus('ok', 'Inspecting: ' + _variable + ' (' + type + ')', _variable, type);
             }
@@ -1210,9 +1362,11 @@ vec4 _inspMap(vec4 v) {${oor}
         _originalMaterials.clear();
         _originalFragmentShaders.clear();
         disposeHistogramResources();
+        disposeCompareOriginalMaterial();
         _inspectorMaterial = null;
         _inspectorType = '';
         _lastRewrittenSource = '';
+        updateCompareOverlay();
     }
 
     /** Post status back to extension host */
@@ -1254,6 +1408,8 @@ vec4 _inspMap(vec4 v) {${oor}
     function afterFrame() {
         if (!_active) return;
         if (typeof gl === 'undefined') return;
+
+        updateCompareOverlay();
 
         // Hover pixel readback (single pixel — negligible cost)
         if (_hoverEnabled && _mouseInCanvas && _mouseX >= 0 && _mouseY >= 0) {
@@ -1438,10 +1594,20 @@ vec4 _inspMap(vec4 v) {${oor}
 
             case 'setInspectorCompare':
                 _compareMode = !!msg.enabled;
-                _lastRewrittenSource = ''; // force recompile
+                updateCompareOverlay();
                 if (_active && _variable) {
-                    updateInspection();
                     requestHistogramUpdate();
+                    if (typeof forceRenderOneFrame !== 'undefined') {
+                        forceRenderOneFrame = true;
+                    }
+                }
+                break;
+
+            case 'setInspectorCompareSplit':
+                _compareSplit = normalizeCompareSplit(msg.split);
+                updateCompareOverlay();
+                if (_active && _compareMode && typeof forceRenderOneFrame !== 'undefined') {
+                    forceRenderOneFrame = true;
                 }
                 break;
 
@@ -1483,10 +1649,12 @@ vec4 _inspMap(vec4 v) {${oor}
         isActive: function () { return _active; },
         getVariable: function () { return _variable; },
         getMapping: function () { return { ..._mapping }; },
+        getCompareSplit: function () { return _compareSplit; },
         isHoverEnabled: function () { return _hoverEnabled; },
         isHistogramEnabled: function () { return _histogramEnabled; },
         getHistogramIntervalMs: function () { return _histogramIntervalMs; },
         getHistogramSampleStride: function () { return _histogramSampleStride; },
+        renderBuffer: renderBuffer,
         afterFrame: afterFrame,
 
         // Called on hot-reload to clear stale material references
@@ -1494,8 +1662,10 @@ vec4 _inspMap(vec4 v) {${oor}
             _originalMaterials.clear();
             _originalFragmentShaders.clear();
             disposeHistogramResources();
+            disposeCompareOriginalMaterial();
             _inspectorMaterial = null;
             _lastRewrittenSource = '';
+            updateCompareOverlay();
             // Re-inspect with new materials if active
             if (_active && _variable) {
                 updateInspection();
@@ -1521,4 +1691,5 @@ vec4 _inspMap(vec4 v) {${oor}
     } else {
         setupHoverReadback();
     }
+    window.addEventListener('resize', updateCompareOverlay);
 })();

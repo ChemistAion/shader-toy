@@ -19,6 +19,7 @@ export class InspectPanel {
     private context: Context;
     private onMappingChanged: ((mapping: InspectorMapping) => void) | undefined;
     private onCompareChanged: ((enabled: boolean) => void) | undefined;
+    private onCompareSplitChanged: ((split: number) => void) | undefined;
     private onHoverChanged: ((enabled: boolean) => void) | undefined;
     private onHistogramChanged: ((enabled: boolean) => void) | undefined;
     private onHistogramIntervalChanged: ((intervalMs: number) => void) | undefined;
@@ -74,6 +75,14 @@ export class InspectPanel {
                         this.onCompareChanged(!!message.enabled);
                     }
                     break;
+                case 'setCompareSplit':
+                {
+                    const split = Number(message.split);
+                    if (this.onCompareSplitChanged && Number.isFinite(split)) {
+                        this.onCompareSplitChanged(split);
+                    }
+                    break;
+                }
                 case 'setHoverEnabled':
                     if (this.onHoverChanged) {
                         this.onHoverChanged(!!message.enabled);
@@ -145,6 +154,11 @@ export class InspectPanel {
         this.onCompareChanged = cb;
     }
 
+    /** Register callback for when compare split changes. */
+    public setOnCompareSplitChanged(cb: (split: number) => void): void {
+        this.onCompareSplitChanged = cb;
+    }
+
     /** Register callback for when hover toggle changes. */
     public setOnHoverChanged(cb: (enabled: boolean) => void): void {
         this.onHoverChanged = cb;
@@ -179,6 +193,7 @@ export class InspectPanel {
     public postInspectorState(
         mapping: InspectorMapping,
         compareEnabled: boolean,
+        compareSplit: number,
         hoverEnabled: boolean,
         histogramEnabled: boolean,
         histogramIntervalMs: number,
@@ -189,6 +204,7 @@ export class InspectPanel {
                 command: 'syncState',
                 mapping: { ...mapping },
                 compareEnabled,
+                compareSplit,
                 hoverEnabled,
                 histogramEnabled,
                 histogramIntervalMs,

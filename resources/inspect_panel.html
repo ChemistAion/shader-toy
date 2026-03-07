@@ -177,6 +177,30 @@
         gap: 4px;
     }
 
+    .compare-controls {
+        margin-top: 8px;
+        display: grid;
+        gap: 8px;
+    }
+    .compare-split-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--fg2);
+    }
+    .compare-split-row input[type="range"] {
+        flex: 1;
+    }
+    .compare-split-row.disabled {
+        opacity: 0.45;
+    }
+    .compare-split-value {
+        min-width: 44px;
+        text-align: right;
+        color: var(--fg);
+        font-variant-numeric: tabular-nums;
+    }
+
     /* ── Pixel Readback ─────────────── */
     .pixel-section {
         background: var(--bg2);
@@ -309,11 +333,18 @@
             Highlight out-of-range
         </label>
     </div>
-    <div class="checkbox-row">
-        <label>
-            <input type="checkbox" id="compareToggle" />
-            Compare mode (raw values)
-        </label>
+    <div class="compare-controls">
+        <div class="checkbox-row">
+            <label>
+                <input type="checkbox" id="compareToggle" />
+                Compare split view
+            </label>
+        </div>
+        <div class="compare-split-row" id="compareSplitRow">
+            <label for="compareSplit">Split</label>
+            <input type="range" id="compareSplit" min="0.1" max="0.9" step="0.01" value="0.5" />
+            <span class="compare-split-value" id="compareSplitValue">50%</span>
+        </div>
     </div>
 </div>
 
@@ -374,6 +405,9 @@
     const rangeMax = document.getElementById('rangeMax');
     const oorToggle = document.getElementById('oorToggle');
     const compareToggle = document.getElementById('compareToggle');
+    const compareSplit = document.getElementById('compareSplit');
+    const compareSplitRow = document.getElementById('compareSplitRow');
+    const compareSplitValue = document.getElementById('compareSplitValue');
     const modeButtons = document.querySelectorAll('.mode-btn');
     const hoverToggle = document.getElementById('hoverToggle');
     const pixelSection = document.getElementById('pixelSection');
@@ -391,6 +425,7 @@
     const DEFAULT_HISTOGRAM_SAMPLE_STRIDE = 8;
     let currentMode = 'linear';
     let currentVariableType = '';
+    let currentCompareSplit = 0.5;
     let currentHistogramIntervalMs = DEFAULT_HISTOGRAM_INTERVAL_MS;
     let currentHistogramSampleStride = DEFAULT_HISTOGRAM_SAMPLE_STRIDE;
     let lastHistogram = null;
@@ -469,7 +504,25 @@
         });
     }
 
-    function applyInspectorState(mapping, compareEnabled, hoverEnabled, histogramEnabled, histogramIntervalMs, histogramSampleStride) {
+    function normalizeCompareSplit(split) {
+        const numericSplit = Number(split);
+        if (!Number.isFinite(numericSplit)) return 0.5;
+        return Math.max(0.1, Math.min(0.9, numericSplit));
+    }
+
+    function setCompareSplitUi(split) {
+        currentCompareSplit = normalizeCompareSplit(split);
+        compareSplit.value = String(currentCompareSplit);
+        compareSplitValue.textContent = `${Math.round(currentCompareSplit * 100)}%`;
+    }
+
+    function setCompareUi(enabled) {
+        compareToggle.checked = !!enabled;
+        compareSplit.disabled = !enabled;
+        compareSplitRow.classList.toggle('disabled', !enabled);
+    }
+
+    function applyInspectorState(mapping, compareEnabled, compareSplitRaw, hoverEnabled, histogramEnabled, histogramIntervalMs, histogramSampleStride) {
         const nextMapping = mapping || {};
         const nextMode = nextMapping.mode || 'linear';
         currentMode = nextMode;
@@ -479,7 +532,8 @@
         rangeMin.value = String(typeof nextMapping.min === 'number' ? nextMapping.min : 0);
         rangeMax.value = String(typeof nextMapping.max === 'number' ? nextMapping.max : 1);
         oorToggle.checked = !!nextMapping.highlightOutOfRange;
-        compareToggle.checked = !!compareEnabled;
+        setCompareUi(compareEnabled);
+        setCompareSplitUi(compareSplitRaw);
         hoverToggle.checked = !!hoverEnabled;
         histogramToggle.checked = histogramEnabled !== false;
         setHoverUi(hoverToggle.checked);
@@ -537,8 +591,16 @@
 
     // Compare toggle
     compareToggle.addEventListener('change', () => {
+        setCompareUi(compareToggle.checked);
         if (vscode) {
             vscode.postMessage({ command: 'setCompare', enabled: compareToggle.checked });
+        }
+    });
+
+    compareSplit.addEventListener('input', () => {
+        setCompareSplitUi(compareSplit.value);
+        if (vscode) {
+            vscode.postMessage({ command: 'setCompareSplit', split: currentCompareSplit });
         }
     });
 
@@ -585,7 +647,7 @@
         const msg = event.data;
         switch (msg.command) {
             case 'syncState':
-                applyInspectorState(msg.mapping, msg.compareEnabled, msg.hoverEnabled, msg.histogramEnabled, msg.histogramIntervalMs, msg.histogramSampleStride);
+                applyInspectorState(msg.mapping, msg.compareEnabled, msg.compareSplit, msg.hoverEnabled, msg.histogramEnabled, msg.histogramIntervalMs, msg.histogramSampleStride);
                 break;
             case 'updateVariable':
                 if (msg.variable) {
@@ -630,6 +692,8 @@
     setHistogramUi(histogramToggle.checked);
     setHistogramIntervalUi(DEFAULT_HISTOGRAM_INTERVAL_MS);
     setHistogramSampleStrideUi(DEFAULT_HISTOGRAM_SAMPLE_STRIDE);
+    setCompareUi(false);
+    setCompareSplitUi(0.5);
     resetPixelValueLabels();
     if (vscode) {
         vscode.postMessage({ command: 'panelReady' });
