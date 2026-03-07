@@ -908,7 +908,7 @@ vec4 _inspMap(vec4 v) {${oor}
     }
 
     function ensureCompareOverlay() {
-        if (_compareOverlayRoot || typeof document === 'undefined' || typeof document.createElement !== 'function' || !document.body) return;
+        if (_compareOverlayRoot || typeof document === 'undefined') return;
         const root = document.createElement('div');
         root.style.position = 'fixed';
         root.style.pointerEvents = 'none';
@@ -1407,6 +1407,8 @@ vec4 _inspMap(vec4 v) {${oor}
         if (!_active) return;
         if (typeof gl === 'undefined') return;
 
+        updateCompareOverlay();
+
         if (_hoverEnabled && _mouseInCanvas && _mouseX >= 0 && _mouseY >= 0) {
             try {
                 const pixel = new Uint8Array(4);
@@ -1419,6 +1421,11 @@ vec4 _inspMap(vec4 v) {${oor}
                     });
                 }
             } catch (err) { /* ignore */ }
+        }
+
+        if (_histogramEnabled && _histogramDirty) {
+            _histogramDirty = false;
+            snapshotForHistogram();
         }
     }
 
