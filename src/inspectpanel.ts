@@ -20,6 +20,7 @@ export class InspectPanel {
     private onMappingChanged: ((mapping: InspectorMapping) => void) | undefined;
     private onCompareChanged: ((enabled: boolean) => void) | undefined;
     private onCompareSplitChanged: ((split: number) => void) | undefined;
+    private onHoverChanged: ((enabled: boolean) => void) | undefined;
     private onDidDisposeCallback: (() => void) | undefined;
     private onReadyCallback: (() => void) | undefined;
 
@@ -76,6 +77,11 @@ export class InspectPanel {
                         this.onCompareSplitChanged(Number(message.split));
                     }
                     break;
+                case 'setHover':
+                    if (this.onHoverChanged) {
+                        this.onHoverChanged(!!message.enabled);
+                    }
+                    break;
                 case 'panelReady':
                     if (this.onReadyCallback) {
                         this.onReadyCallback();
@@ -126,6 +132,11 @@ export class InspectPanel {
         this.onCompareSplitChanged = cb;
     }
 
+    /** Register callback for when the panel's hover readback setting changes. */
+    public setOnHoverChanged(cb: (enabled: boolean) => void): void {
+        this.onHoverChanged = cb;
+    }
+
     /** Register callback for when the panel is disposed. */
     public setOnDidDispose(cb: () => void): void {
         this.onDidDisposeCallback = cb;
@@ -140,14 +151,16 @@ export class InspectPanel {
     public postInspectorState(
         mapping: InspectorMapping,
         compareEnabled: boolean,
-        compareSplit: number
+        compareSplit: number,
+        hoverEnabled: boolean
     ): void {
         if (this.panel) {
             this.panel.webview.postMessage({
                 command: 'syncState',
                 mapping: { ...mapping },
                 compareEnabled,
-                compareSplit
+                compareSplit,
+                hoverEnabled
             });
         }
     }
@@ -168,6 +181,17 @@ export class InspectPanel {
             this.panel.webview.postMessage({
                 command: 'inspectorStatus',
                 status, message
+            });
+        }
+    }
+
+    /** Forward pixel hover readback from the preview. */
+    public postPixel(rgba: number[], position: { x: number; y: number }): void {
+        if (this.panel) {
+            this.panel.webview.postMessage({
+                command: 'inspectorPixel',
+                rgba,
+                position
             });
         }
     }
