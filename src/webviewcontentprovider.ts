@@ -375,10 +375,21 @@ export class WebviewContentProvider {
                 ].join('\n')
             };
             const inspectorFinalPass: WebviewExtension = {
-                generateContent: () => ''
+                generateContent: () => [
+                    'if (window.ShaderToy && window.ShaderToy.inspector &&',
+                    '    typeof window.ShaderToy.inspector.renderBuffer === \'function\' &&',
+                    '    window.ShaderToy.inspector.renderBuffer(buffer, index, buffers.length)) {',
+                    '    continue;',
+                    '}'
+                ].join('\n')
             };
             const inspectorAfterFrame: WebviewExtension = {
-                generateContent: () => ''
+                generateContent: () => [
+                    'if (window.ShaderToy && window.ShaderToy.inspector &&',
+                    '    typeof window.ShaderToy.inspector.afterFrame === \'function\') {',
+                    '    window.ShaderToy.inspector.afterFrame();',
+                    '}'
+                ].join('\n')
             };
             const omitInspectorContent: WebviewExtension = {
                 generateContent: () => ''
