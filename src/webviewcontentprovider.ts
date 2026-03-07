@@ -368,6 +368,8 @@ export class WebviewContentProvider {
                 generateContent: () => [
                     "case 'setInspectorVariable':",
                     "case 'setInspectorMapping':",
+                    "case 'setInspectorCompare':",
+                    "case 'setInspectorCompareSplit':",
                     "case 'inspectorOn':",
                     "case 'inspectorOff':",
                     '    if (window.ShaderToy && window.ShaderToy.inspector) {',

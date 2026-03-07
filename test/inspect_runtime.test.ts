@@ -347,4 +347,46 @@ suite('Inspect runtime', () => {
         assert.strictEqual(statusMessage?.variable, 'uv');
         assert.strictEqual(statusMessage?.message, 'Inspecting: uv (vec2)');
     });
+
+    test('renders compare mode as a split between original and inspected output', () => {
+        const { material, sandbox, getRenderCalls, getScissorCalls, getViewportCalls, getScissorTestStates } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompare', enabled: true });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompareSplit', split: 0.5 });
+
+        assert.ok(material.fragmentShader.includes('_inspMap('));
+        assert.strictEqual(sandbox.ShaderToy.inspector.getCompareSplit(), 0.5);
+        const rendered = sandbox.ShaderToy.inspector.renderBuffer(sandbox.buffers[0], 0, 1);
+        assert.strictEqual(rendered, true);
+        assert.strictEqual(getRenderCalls(), 2);
+        assert.deepStrictEqual(getScissorTestStates(), [true, false]);
+        assert.deepStrictEqual(getScissorCalls(), [
+            { x: 0, y: 0, width: 1, height: 2 },
+            { x: 1, y: 0, width: 1, height: 2 },
+            { x: 0, y: 0, width: 2, height: 2 }
+        ]);
+        assert.deepStrictEqual(getViewportCalls(), [
+            { x: 0, y: 0, width: 1, height: 2 },
+            { x: 1, y: 0, width: 1, height: 2 },
+            { x: 0, y: 0, width: 2, height: 2 }
+        ]);
+    });
+
+    test('requests a frozen redraw for compare split updates while paused', () => {
+        const { sandbox } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompare', enabled: true });
+        sandbox.forceRenderOneFrame = false;
+        sandbox.freezeSimulationOnNextForcedRender = false;
+        (sandbox as unknown as { paused: boolean }).paused = true;
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompareSplit', split: 0.25 });
+
+        assert.strictEqual(sandbox.forceRenderOneFrame, true);
+        assert.strictEqual(sandbox.freezeSimulationOnNextForcedRender, true);
+    });
 });
