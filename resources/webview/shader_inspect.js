@@ -724,6 +724,7 @@ vec4 _inspMap(vec4 v) {${oor}
     let _histogramQueuedDisplayMax = 1;
     let _histogramHasQueuedFrame = false;
     let _histogramProcessing = false;
+    let _histogramStalled = false;
     let _histogramGeneration = 0;
     let _histogramMaterial = null;
     let _histogramTarget = null;
@@ -1046,7 +1047,7 @@ vec4 _inspMap(vec4 v) {${oor}
         };
     }
 
-    function postHistogram(binsR, binsG, binsB, binsA, samples, domainMin, domainMax, timeMs, componentCount) {
+    function postHistogram(binsR, binsG, binsB, binsA, samples, domainMin, domainMax, timeMs, componentCount, stalled) {
         if (typeof vscode !== 'undefined' && vscode) {
             vscode.postMessage({
                 command: 'inspectorHistogram',
@@ -1060,36 +1061,17 @@ vec4 _inspMap(vec4 v) {${oor}
                     timeMs: timeMs,
                     autoMin: domainMin,
                     autoMax: domainMax,
-                    componentCount: componentCount
+                    componentCount: componentCount,
+                    stalled: !!stalled
                 }
             });
         }
     }
 
     function drainQueuedHistogram() {
-        if (!_histogramHasQueuedFrame) return;
-        const queuedPixels = _histogramQueuedPixelBuf;
-        const queuedFloatPixels = _histogramQueuedFloatBuf;
-        const queuedTotalPixels = _histogramQueuedTotalPixels;
-        const queuedGeneration = _histogramQueuedGeneration;
-        const queuedStartedAtMs = _histogramQueuedStartedAtMs;
-        const queuedValueMode = _histogramQueuedValueMode;
-        const queuedSampleStride = _histogramQueuedSampleStride;
-        const queuedDisplayMin = _histogramQueuedDisplayMin;
-        const queuedDisplayMax = _histogramQueuedDisplayMax;
         _histogramHasQueuedFrame = false;
         _histogramQueuedTotalPixels = 0;
         _histogramQueuedStartedAtMs = 0;
-        startHistogramProcessing(
-            queuedValueMode === 'float' ? queuedFloatPixels : queuedPixels,
-            queuedTotalPixels,
-            queuedGeneration,
-            queuedStartedAtMs,
-            queuedValueMode,
-            queuedSampleStride,
-            queuedDisplayMin,
-            queuedDisplayMax
-        );
     }
 
     function cancelHistogramWork() {
@@ -1103,12 +1085,14 @@ vec4 _inspMap(vec4 v) {${oor}
         _histogramQueuedDisplayMin = 0;
         _histogramQueuedDisplayMax = 1;
         _histogramProcessing = false;
+        _histogramStalled = false;
     }
 
     function startHistogramProcessing(pixels, totalPixels, generation, initialTimeMs, valueMode, sampleStride, displayMin, displayMax) {
         if (!pixels || totalPixels <= 0) return;
 
         _histogramProcessing = true;
+        _histogramStalled = false;
 
         const BINS = 128;
         const binsR = new Float32Array(BINS);
@@ -1149,6 +1133,7 @@ vec4 _inspMap(vec4 v) {${oor}
         function step(deadline) {
             if (generation !== _histogramGeneration || !_active || !_histogramEnabled) {
                 _histogramProcessing = false;
+                _histogramStalled = false;
                 drainQueuedHistogram();
                 return;
             }
@@ -1234,6 +1219,8 @@ vec4 _inspMap(vec4 v) {${oor}
             }
 
             _histogramProcessing = false;
+            const stalled = _histogramStalled;
+            _histogramStalled = false;
             postHistogram(
                 binsR,
                 binsG,
@@ -1243,7 +1230,8 @@ vec4 _inspMap(vec4 v) {${oor}
                 toDisplayValue(domainMinRaw),
                 toDisplayValue(domainMaxRaw),
                 initialTimeMs + activeProcessingMs,
-                componentCount
+                componentCount,
+                stalled
             );
             drainQueuedHistogram();
         }
@@ -1451,6 +1439,11 @@ vec4 _inspMap(vec4 v) {${oor}
             const w = canvas.width, h = canvas.height;
             if (w <= 0 || h <= 0) return;
 
+            if (_histogramProcessing) {
+                _histogramStalled = true;
+                return;
+            }
+
             const totalPixels = w * h;
             const generation = ++_histogramGeneration;
             const snapshotStartedAtMs = getNowMs();
@@ -1465,8 +1458,7 @@ vec4 _inspMap(vec4 v) {${oor}
             if (canUseRawHistogram() && _histogramMaterial) {
                 const target = ensureHistogramTarget(captureWidth, captureHeight);
                 if (target) {
-                    const useQueuedBuffer = _histogramProcessing;
-                    const floatBuf = ensureHistogramFloatBuffer(capturePixels, useQueuedBuffer);
+                    const floatBuf = ensureHistogramFloatBuffer(capturePixels, false);
                     const previousMaterial = (typeof quad !== 'undefined' && quad) ? quad.material : null;
 
                     renderer.setRenderTarget(target);
@@ -1481,42 +1473,17 @@ vec4 _inspMap(vec4 v) {${oor}
                     }
                     const captureTimeMs = getNowMs() - snapshotStartedAtMs;
 
-                    if (useQueuedBuffer) {
-                        _histogramQueuedTotalPixels = capturePixels;
-                        _histogramQueuedGeneration = generation;
-                        _histogramQueuedStartedAtMs = captureTimeMs;
-                        _histogramQueuedValueMode = 'float';
-                        _histogramQueuedSampleStride = effectiveSampleStride;
-                        _histogramQueuedDisplayMin = histogramMin;
-                        _histogramQueuedDisplayMax = histogramMax;
-                        _histogramHasQueuedFrame = true;
-                        return;
-                    }
-
                     startHistogramProcessing(floatBuf, capturePixels, generation, captureTimeMs, 'float', effectiveSampleStride, histogramMin, histogramMax);
                     return;
                 }
             }
 
             const needed = w * h * 4;
-            const useQueuedBuffer = _histogramProcessing;
-            const targetBuf = ensureHistogramByteBuffer(needed, useQueuedBuffer);
+            const targetBuf = ensureHistogramByteBuffer(needed, false);
 
             // Fallback path — histogram from mapped screen output when raw float capture is unavailable.
             gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, targetBuf);
             const captureTimeMs = getNowMs() - snapshotStartedAtMs;
-
-            if (useQueuedBuffer) {
-                _histogramQueuedTotalPixels = totalPixels;
-                _histogramQueuedGeneration = generation;
-                _histogramQueuedStartedAtMs = captureTimeMs;
-                _histogramQueuedValueMode = 'byte';
-                _histogramQueuedSampleStride = normalizeHistogramSampleStride(_histogramSampleStride);
-                _histogramQueuedDisplayMin = 0;
-                _histogramQueuedDisplayMax = 1;
-                _histogramHasQueuedFrame = true;
-                return;
-            }
 
             startHistogramProcessing(targetBuf, totalPixels, generation, captureTimeMs, 'byte', normalizeHistogramSampleStride(_histogramSampleStride), 0, 1);
         } catch (err) { /* ignore */ }
@@ -1528,7 +1495,9 @@ vec4 _inspMap(vec4 v) {${oor}
     }
 
     function requestHistogramUpdateNow() {
-        cancelHistogramWork();
+        if (!_histogramProcessing) {
+            cancelHistogramWork();
+        }
         _histogramDirty = true;
         requestPreviewFrame();
     }

@@ -13,17 +13,18 @@ const SIMPLE_SHADER = `void main() {
 }
 `;
 
-function loadInspectorHarness() {
+function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
     const repoRoot = path.resolve(__dirname, '../../');
     const inspectPath = path.join(repoRoot, 'resources', 'webview', 'shader_inspect.js');
     const source = fs.readFileSync(inspectPath, 'utf8');
+    const deferIdleCallbacks = !!options?.deferIdleCallbacks;
     let lastSetIntervalMs = 0;
     const messages: Array<{
         command: string;
         status?: string;
         message?: string;
         variable?: string;
-        histogram?: { samples: number; autoMin: number; autoMax: number; timeMs: number; componentCount?: number; binsA?: number[] };
+        histogram?: { samples: number; autoMin: number; autoMax: number; timeMs: number; componentCount?: number; binsA?: number[]; stalled?: boolean };
     }> = [];
     let fullReadPixelsCalls = 0;
     let nowMs = 0;
@@ -34,6 +35,7 @@ function loadInspectorHarness() {
     const viewportCalls: Array<{ x: number; y: number; width: number; height: number }> = [];
     const scissorTestStates: boolean[] = [];
     const canvasEventHandlers: Record<string, (event: { clientX: number; clientY: number }) => void> = {};
+    const idleCallbacks: Array<() => void> = [];
 
     const material = {
         fragmentShader: SIMPLE_SHADER,
@@ -147,8 +149,12 @@ function loadInspectorHarness() {
             return 1;
         },
         clearInterval: () => undefined,
-        requestIdleCallback: (fn: () => void) => {
-            fn();
+        requestIdleCallback: (fn: (deadline?: { didTimeout: boolean; timeRemaining: () => number }) => void) => {
+            if (deferIdleCallbacks) {
+                idleCallbacks.push(() => fn({ didTimeout: false, timeRemaining: () => 10 }));
+                return idleCallbacks.length;
+            }
+            fn({ didTimeout: false, timeRemaining: () => 10 });
             return 1;
         },
         performance: {
@@ -234,6 +240,14 @@ function loadInspectorHarness() {
             const handler = canvasEventHandlers[type];
             if (handler) {
                 handler(event);
+            }
+        },
+        flushIdleCallbacks: () => {
+            while (idleCallbacks.length > 0) {
+                const callback = idleCallbacks.shift();
+                if (callback) {
+                    callback();
+                }
             }
         },
     };
@@ -337,6 +351,22 @@ suite('Inspect runtime', () => {
         assert.ok(histogramMessage, 'Expected histogram payload to be posted');
         assert.deepStrictEqual(getLastRenderTargetReadSize(), { width: 1, height: 1 }, 'Expected raw histogram capture to downsample the render target');
         assert.strictEqual(histogramMessage?.histogram?.samples, 1, 'Expected stride sampling to reduce the analyzed pixel count');
+    });
+
+    test('finishes the active histogram and marks it stalled when newer updates are dropped', () => {
+        const { sandbox, messages, flushIdleCallbacks } = loadInspectorHarness({ deferIdleCallbacks: true });
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        sandbox.ShaderToy.inspector.afterFrame();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramSampleStride', sampleStride: 64 });
+        sandbox.ShaderToy.inspector.afterFrame();
+        flushIdleCallbacks();
+
+        const histogramMessages = messages.filter(message => message.command === 'inspectorHistogram');
+        assert.strictEqual(histogramMessages.length, 1, 'Expected overlapping updates to be dropped instead of queued');
+        assert.strictEqual(histogramMessages[0].histogram?.stalled, true, 'Expected the completed histogram to be marked as stalled');
     });
 
     test('ignores non-variable inspector targets and keeps the last valid inspection active', () => {

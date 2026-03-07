@@ -306,6 +306,10 @@
         font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
         margin-top: 3px;
     }
+    .histogram-stats .stall {
+        color: var(--error);
+        font-weight: 700;
+    }
 </style>
 </head>
 <body>
@@ -892,7 +896,8 @@
         // Stats labels
         histMinEl.textContent = domainMin.toFixed(2);
         histMaxEl.textContent = domainMax.toFixed(2);
-        histSamplesEl.textContent = `Samples: ${h.samples}px / Time: ${(Number(h.timeMs) || 0).toFixed(2)}ms`;
+        histSamplesEl.textContent = `Samples: ${h.samples}px / Time: ${(Number(h.timeMs) || 0).toFixed(2)}ms${h.stalled ? ' STALL' : ''}`;
+        histSamplesEl.classList.toggle('stall', !!h.stalled);
     }
 })();
 </script>
