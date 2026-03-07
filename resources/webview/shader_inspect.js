@@ -974,7 +974,43 @@ vec4 _inspMap(vec4 v) {${oor}
     }
 
     function renderBuffer(buffer, bufferIndex, totalBuffers) {
-        return false;
+        if (!_active || !_compareMode || !_inspectorMaterial || !_compareOriginalMaterial) return false;
+        if (!buffer || bufferIndex !== totalBuffers - 1) return false;
+        if (typeof renderer === 'undefined' || !renderer || typeof renderer.render !== 'function') return false;
+        if (typeof quad === 'undefined' || !quad || typeof scene === 'undefined' || typeof camera === 'undefined') return false;
+
+        const canvas = renderer.domElement || document.getElementById('canvas');
+        const width = canvas && canvas.width ? canvas.width : 0;
+        const height = canvas && canvas.height ? canvas.height : 0;
+        if (width <= 0 || height <= 0) return false;
+
+        const splitX = Math.max(0, Math.min(width, Math.floor(width * _compareSplit)));
+        const rightWidth = Math.max(0, width - splitX);
+        const previousMaterial = quad.material;
+
+        renderer.setRenderTarget(buffer.Target);
+        if (typeof renderer.setScissorTest === 'function') renderer.setScissorTest(true);
+
+        if (splitX > 0) {
+            quad.material = _compareOriginalMaterial;
+            if (typeof renderer.setViewport === 'function') renderer.setViewport(0, 0, splitX, height);
+            if (typeof renderer.setScissor === 'function') renderer.setScissor(0, 0, splitX, height);
+            renderer.render(scene, camera);
+        }
+
+        if (rightWidth > 0) {
+            quad.material = _inspectorMaterial;
+            if (typeof renderer.setViewport === 'function') renderer.setViewport(splitX, 0, rightWidth, height);
+            if (typeof renderer.setScissor === 'function') renderer.setScissor(splitX, 0, rightWidth, height);
+            renderer.render(scene, camera);
+        }
+
+        if (typeof renderer.setScissorTest === 'function') renderer.setScissorTest(false);
+        if (typeof renderer.setViewport === 'function') renderer.setViewport(0, 0, width, height);
+        if (typeof renderer.setScissor === 'function') renderer.setScissor(0, 0, width, height);
+        quad.material = previousMaterial;
+        updateCompareOverlay();
+        return true;
     }
 
     function ensureHistogramTarget(width, height) {

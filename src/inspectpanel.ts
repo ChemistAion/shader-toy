@@ -18,6 +18,8 @@ export class InspectPanel {
     private panel: vscode.WebviewPanel | undefined;
     private context: Context;
     private onMappingChanged: ((mapping: InspectorMapping) => void) | undefined;
+    private onCompareChanged: ((enabled: boolean) => void) | undefined;
+    private onCompareSplitChanged: ((split: number) => void) | undefined;
     private onDidDisposeCallback: (() => void) | undefined;
     private onReadyCallback: (() => void) | undefined;
 
@@ -64,6 +66,16 @@ export class InspectPanel {
                         this.onMappingChanged(message.mapping as InspectorMapping);
                     }
                     break;
+                case 'setCompare':
+                    if (this.onCompareChanged) {
+                        this.onCompareChanged(!!message.enabled);
+                    }
+                    break;
+                case 'setCompareSplit':
+                    if (this.onCompareSplitChanged) {
+                        this.onCompareSplitChanged(Number(message.split));
+                    }
+                    break;
                 case 'panelReady':
                     if (this.onReadyCallback) {
                         this.onReadyCallback();
@@ -104,6 +116,16 @@ export class InspectPanel {
         this.onMappingChanged = cb;
     }
 
+    /** Register callback for when the panel's compare mode changes. */
+    public setOnCompareChanged(cb: (enabled: boolean) => void): void {
+        this.onCompareChanged = cb;
+    }
+
+    /** Register callback for when the panel's compare split slider changes. */
+    public setOnCompareSplitChanged(cb: (split: number) => void): void {
+        this.onCompareSplitChanged = cb;
+    }
+
     /** Register callback for when the panel is disposed. */
     public setOnDidDispose(cb: () => void): void {
         this.onDidDisposeCallback = cb;
@@ -116,12 +138,16 @@ export class InspectPanel {
 
     /** Sync persisted panel controls into a freshly created webview. */
     public postInspectorState(
-        mapping: InspectorMapping
+        mapping: InspectorMapping,
+        compareEnabled: boolean,
+        compareSplit: number
     ): void {
         if (this.panel) {
             this.panel.webview.postMessage({
                 command: 'syncState',
-                mapping: { ...mapping }
+                mapping: { ...mapping },
+                compareEnabled,
+                compareSplit
             });
         }
     }
