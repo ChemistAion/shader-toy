@@ -38,6 +38,8 @@ export class ShaderToyManager {
     private _lastInspectorLine = 0;
     private _lastInspectorType = '';
     private _lastInspectorMapping: InspectorMapping = { ...DEFAULT_INSPECTOR_MAPPING };
+    private _lastInspectorCompareEnabled = false;
+    private _lastInspectorCompareSplit = 0.5;
 
     constructor(context: Context) {
         this.context = context;
@@ -188,6 +190,27 @@ export class ShaderToyManager {
             }
         });
 
+        this.inspectPanel.setOnCompareChanged((enabled: boolean) => {
+            this._lastInspectorCompareEnabled = enabled;
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorCompare',
+                    enabled: this._lastInspectorCompareEnabled
+                });
+            }
+        });
+
+        this.inspectPanel.setOnCompareSplitChanged((split: number) => {
+            const normalizedSplit = Number.isFinite(split) ? Math.max(0.1, Math.min(0.9, split)) : 0.5;
+            this._lastInspectorCompareSplit = normalizedSplit;
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorCompareSplit',
+                    split: this._lastInspectorCompareSplit
+                });
+            }
+        });
+
         this.inspectPanel.setOnDidDispose(() => {
             this.stopSelectionListener();
             if (this.webviewPanel !== undefined) {
@@ -255,7 +278,9 @@ export class ShaderToyManager {
     private resendInspectPanelState = () => {
         if (!this.inspectPanel.isActive) return;
         this.inspectPanel.postInspectorState(
-            this._lastInspectorMapping
+            this._lastInspectorMapping,
+            this._lastInspectorCompareEnabled,
+            this._lastInspectorCompareSplit
         );
         if (this._lastInspectorVariable) {
             this.inspectPanel.postVariableUpdate(this._lastInspectorVariable, this._lastInspectorLine, this._lastInspectorType);
@@ -268,6 +293,14 @@ export class ShaderToyManager {
         this.webviewPanel.Panel.webview.postMessage({
             command: 'setInspectorMapping',
             mapping: this._lastInspectorMapping
+        });
+        this.webviewPanel.Panel.webview.postMessage({
+            command: 'setInspectorCompare',
+            enabled: this._lastInspectorCompareEnabled
+        });
+        this.webviewPanel.Panel.webview.postMessage({
+            command: 'setInspectorCompareSplit',
+            split: this._lastInspectorCompareSplit
         });
         if (this._lastInspectorVariable) {
             this.webviewPanel.Panel.webview.postMessage({

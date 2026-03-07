@@ -30,6 +30,15 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
         glslVersion: 0,
         needsUpdate: false,
     };
+    const renderCalls: Array<{ material: unknown }> = [];
+    const scissorOps: Array<{ op: string; args: number[] | [boolean] }> = [];
+    const canvas = {
+        width: 320,
+        height: 180,
+        addEventListener: () => undefined,
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 320, height: 180 })
+    };
+    const quad = { material };
 
     const gl = {
         RGBA: 0x1908,
@@ -41,7 +50,13 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
 
     const renderer = {
         setRenderTarget: () => undefined,
-        render: () => undefined,
+        setScissorTest: (enabled: boolean) => scissorOps.push({ op: 'setScissorTest', args: [enabled] }),
+        setViewport: (x: number, y: number, width: number, height: number) => scissorOps.push({ op: 'setViewport', args: [x, y, width, height] }),
+        setScissor: (x: number, y: number, width: number, height: number) => scissorOps.push({ op: 'setScissor', args: [x, y, width, height] }),
+        render: () => {
+            renderCalls.push({ material: quad.material });
+        },
+        domElement: canvas,
     };
 
     const sandbox: Record<string, unknown> = {
@@ -62,15 +77,29 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
         window: {},
         gl,
         renderer,
+        quad,
+        scene: {},
+        camera: {},
         document: {
             readyState: 'complete',
             addEventListener: () => undefined,
-            getElementById: () => null,
+            body: { appendChild: () => undefined },
+            createElement: () => ({
+                style: {},
+                appendChild: () => undefined,
+                textContent: '',
+            }),
+            getElementById: (id: string) => id === 'canvas' ? canvas : null,
             querySelectorAll: (selector: string) => selector === 'script[type="x-shader/x-fragment"]'
                 ? [{ textContent: SIMPLE_SHADER }]
                 : [],
         },
-        THREE: { GLSL3: 'GLSL3' },
+        THREE: {
+            GLSL3: 'GLSL3',
+            ShaderMaterial: function(this: Record<string, unknown>, init: Record<string, unknown>) {
+                Object.assign(this, init);
+            }
+        },
         vscode: {
             postMessage: (message: { command: string }) => {
                 messages.push(message);
@@ -97,12 +126,16 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
             ShaderToy: {
                 inspector: {
                     handleMessage: (message: { command: string; [key: string]: unknown }) => void;
+                    renderBuffer: (buffer: { Target: unknown }, bufferIndex: number, totalBuffers: number) => boolean;
                 }
             };
             buffers: Array<{ Shader: typeof material; Target: unknown }>;
             forceRenderOneFrame: boolean;
         },
         messages,
+        renderCalls,
+        scissorOps,
+        quad,
     };
 }
 
@@ -181,5 +214,25 @@ suite('Inspect runtime', () => {
         const statusMessage = messages.find(message => message.command === 'inspectorStatus' && message.status === 'ok');
         assert.strictEqual(statusMessage?.variable, 'uv');
         assert.strictEqual(statusMessage?.message, 'Inspecting: uv (vec2)');
+    });
+
+    test('renders compare split via scissor on the final buffer only', () => {
+        const { sandbox, renderCalls, scissorOps, quad, material } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompare', enabled: true });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompareSplit', split: 0.25 });
+
+        const rendered = sandbox.ShaderToy.inspector.renderBuffer(sandbox.buffers[0], 0, 1);
+
+        assert.strictEqual(rendered, true, 'Expected compare rendering to take over the final pass');
+        assert.strictEqual(renderCalls.length, 2, 'Expected compare mode to render original and inspected views');
+        assert.notStrictEqual(renderCalls[0].material, material, 'Expected the left half to use the preserved original material');
+        assert.strictEqual(renderCalls[1].material, material, 'Expected the right half to use the live inspector material');
+        assert.strictEqual(scissorOps.some(entry => entry.op === 'setScissorTest' && entry.args[0] === true), true);
+        assert.strictEqual(scissorOps.some(entry => entry.op === 'setScissor' && entry.args[0] === 0 && entry.args[2] === 80), true);
+        assert.strictEqual(scissorOps.some(entry => entry.op === 'setScissor' && entry.args[0] === 80 && entry.args[2] === 240), true);
+        assert.strictEqual(quad.material, material, 'Expected the quad material to be restored after compare rendering');
     });
 });
