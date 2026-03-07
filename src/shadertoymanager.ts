@@ -8,6 +8,8 @@ import { WebviewContentProvider } from './webviewcontentprovider';
 import { Context } from './context';
 import { removeDuplicates } from './utility';
 import { FramesPanel } from './framespanel';
+import { InspectPanel, InspectorMapping } from './inspectpanel';
+import { resolveInspectableSelection } from './inspectselection';
 
 type Webview = {
     Panel: vscode.WebviewPanel,
@@ -15,6 +17,13 @@ type Webview = {
 };
 type StaticWebview = Webview & {
     Document: vscode.TextDocument
+};
+
+const DEFAULT_INSPECTOR_MAPPING: InspectorMapping = {
+    mode: 'linear',
+    min: 0,
+    max: 1,
+    highlightOutOfRange: false
 };
 
 export class ShaderToyManager {
@@ -26,6 +35,12 @@ export class ShaderToyManager {
     staticWebviews: StaticWebview[] = [];
     framesPanel: FramesPanel;
     private timingEnabled = false;
+    inspectPanel: InspectPanel;
+    private selectionListener: vscode.Disposable | undefined;
+    private _lastInspectorVariable = '';
+    private _lastInspectorLine = 0;
+    private _lastInspectorType = '';
+    private _lastInspectorMapping: InspectorMapping = { ...DEFAULT_INSPECTOR_MAPPING };
 
     constructor(context: Context) {
         this.context = context;
@@ -36,6 +51,8 @@ export class ShaderToyManager {
         this.framesPanel.onDidChangeVisibility((visible) => {
             this.postTimingCommand(visible);
         });
+        this.inspectPanel = new InspectPanel(context);
+        this.configureInspectPanel();
     }
 
     public migrateToNewContext = async (context: Context) => {
@@ -43,6 +60,7 @@ export class ShaderToyManager {
         this.framesPanel.updateContext(context);
         if (this.webviewPanel && this.context.activeEditor) {
             await this.updateWebview(this.webviewPanel, this.context.activeEditor.document);
+            this.resendInspectorState();
         }
         for (const staticWebview of this.staticWebviews) {
             await this.updateWebview(staticWebview, staticWebview.Document);
@@ -67,6 +85,7 @@ export class ShaderToyManager {
         newWebviewPanel.onDidDispose(this.webviewPanel.OnDidDispose);
         if (this.context.activeEditor !== undefined) {
             this.webviewPanel = await this.updateWebview(this.webviewPanel, this.context.activeEditor.document);
+            this.resendInspectorState();
         }
         else {
             vscode.window.showErrorMessage('Select a TextEditor to show GLSL Preview.');
@@ -127,6 +146,7 @@ export class ShaderToyManager {
             if (isActiveDocument || staticWebview !== undefined) {
                 if (this.webviewPanel !== undefined && this.context.activeEditor !== undefined) {
                     this.webviewPanel = await this.updateWebview(this.webviewPanel, this.context.activeEditor.document);
+                    this.resendInspectorState();
                 }
 
                 this.staticWebviews.map((staticWebview: StaticWebview) => this.updateWebview(staticWebview, staticWebview.Document));
@@ -147,6 +167,7 @@ export class ShaderToyManager {
                 }
                 if (this.webviewPanel !== undefined) {
                     this.webviewPanel = await this.updateWebview(this.webviewPanel, this.context.activeEditor.document);
+                    this.resendInspectorState();
                 }
             }
         }
@@ -171,6 +192,116 @@ export class ShaderToyManager {
             this.webviewPanel.Panel.webview.postMessage({ command });
         }
         this.framesPanel.postSetEnabled(enable);
+    };
+
+    public showInspectPanel = () => {
+        this.inspectPanel.show();
+        this.resendInspectPanelState();
+        this.resendInspectorState();
+        // Start listening for text selection changes
+        this.startSelectionListener();
+    };
+
+    private configureInspectPanel = () => {
+        this.inspectPanel.setOnMappingChanged((mapping: InspectorMapping) => {
+            this._lastInspectorMapping = { ...mapping };
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorMapping',
+                    mapping: this._lastInspectorMapping
+                });
+            }
+        });
+
+        this.inspectPanel.setOnDidDispose(() => {
+            this.stopSelectionListener();
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({ command: 'inspectorOff' });
+            }
+        });
+
+        this.inspectPanel.setOnReady(() => {
+            this.resendInspectPanelState();
+        });
+    };
+
+    private startSelectionListener = () => {
+        if (this.selectionListener) return;
+
+        this.selectionListener = vscode.window.onDidChangeTextEditorSelection((event) => {
+            if (!this.inspectPanel.isActive) return;
+            const editor = event.textEditor;
+            const doc = editor.document;
+
+            // Only act on shader-like files
+            const lang = doc.languageId;
+            if (lang !== 'glsl' && lang !== 'hlsl' && !doc.fileName.match(/\.(glsl|frag|vert|comp|vs|fs|shader)$/i)) {
+                return;
+            }
+
+            const selection = editor.selection;
+            let selectedText: string;
+            if (selection.isEmpty) {
+                const wordRange = doc.getWordRangeAtPosition(selection.active, /[a-zA-Z_]\w*(\.[xyzwrgba]+)?/);
+                selectedText = wordRange ? doc.getText(wordRange) : '';
+            } else {
+                selectedText = doc.getText(selection).trim();
+            }
+
+            const line = selection.start.line + 1; // 1-based for GLSL
+            const source = doc.getText();
+            const inspectableSelection = resolveInspectableSelection(source, selectedText, line);
+
+            if (inspectableSelection) {
+                this._lastInspectorVariable = inspectableSelection.variable;
+                this._lastInspectorLine = line;
+                this._lastInspectorType = inspectableSelection.type;
+                // Send to preview webview
+                if (this.webviewPanel !== undefined) {
+                    this.webviewPanel.Panel.webview.postMessage({
+                        command: 'setInspectorVariable',
+                        variable: inspectableSelection.variable,
+                        line: line
+                    });
+                }
+                // Send to inspect panel
+                this.inspectPanel.postVariableUpdate(inspectableSelection.variable, line, inspectableSelection.type);
+            }
+        }, undefined, this.context.getVscodeExtensionContext().subscriptions);
+    };
+
+    private stopSelectionListener = () => {
+        if (this.selectionListener !== undefined) {
+            this.selectionListener.dispose();
+            this.selectionListener = undefined;
+        }
+    };
+
+    private resendInspectPanelState = () => {
+        if (!this.inspectPanel.isActive) return;
+        this.inspectPanel.postInspectorState(
+            this._lastInspectorMapping
+        );
+        if (this._lastInspectorVariable) {
+            this.inspectPanel.postVariableUpdate(this._lastInspectorVariable, this._lastInspectorLine, this._lastInspectorType);
+        }
+    };
+
+    /** Re-send inspector state to the preview webview after it is rebuilt. */
+    private resendInspectorState = () => {
+        if (!this.inspectPanel.isActive || !this.webviewPanel) return;
+        this.webviewPanel.Panel.webview.postMessage({
+            command: 'setInspectorMapping',
+            mapping: this._lastInspectorMapping
+        });
+        if (this._lastInspectorVariable) {
+            this.webviewPanel.Panel.webview.postMessage({
+                command: 'setInspectorVariable',
+                variable: this._lastInspectorVariable,
+                line: this._lastInspectorLine
+            });
+        }
+        this.webviewPanel.Panel.webview.postMessage({ command: 'inspectorOn' });
     };
 
     private resetStartingData = () => {
@@ -220,6 +351,23 @@ export class ShaderToyManager {
                             gpuMs: clamp(gpuMs, 0, 60000),
                             frameNumber: Math.max(0, Math.floor(frameNumber))
                         });
+                    }
+                    return;
+                }
+                case 'inspectorStatus':
+                {
+                    const variable = typeof message.variable === 'string' && message.variable.length > 0
+                        ? message.variable
+                        : this._lastInspectorVariable;
+                    const type = typeof message.type === 'string' ? message.type : this._lastInspectorType;
+                    this._lastInspectorVariable = variable;
+                    this._lastInspectorType = type;
+
+                    if (this.inspectPanel.isActive) {
+                        this.inspectPanel.postStatus(message.status, message.message);
+                        if (variable) {
+                            this.inspectPanel.postVariableUpdate(variable, this._lastInspectorLine, type);
+                        }
                     }
                     return;
                 }
@@ -288,7 +436,9 @@ export class ShaderToyManager {
                 }
                 case 'reloadWebview':
                     if (this.webviewPanel !== undefined && this.webviewPanel.Panel === newWebviewPanel && this.context.activeEditor !== undefined) {
-                        this.updateWebview(this.webviewPanel, this.context.activeEditor.document);
+                        this.updateWebview(this.webviewPanel, this.context.activeEditor.document).then(() => {
+                            this.resendInspectorState();
+                        });
                     }
                     else {
                         this.staticWebviews.forEach((staticWebview: StaticWebview) => {
