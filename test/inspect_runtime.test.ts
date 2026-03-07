@@ -33,6 +33,7 @@ function loadInspectorHarness() {
     const scissorCalls: Array<{ x: number; y: number; width: number; height: number }> = [];
     const viewportCalls: Array<{ x: number; y: number; width: number; height: number }> = [];
     const scissorTestStates: boolean[] = [];
+    const canvasEventHandlers: Record<string, (event: { clientX: number; clientY: number }) => void> = {};
 
     const material = {
         fragmentShader: SIMPLE_SHADER,
@@ -44,7 +45,9 @@ function loadInspectorHarness() {
     const canvas = {
         width: 2,
         height: 2,
-        addEventListener: () => undefined,
+        addEventListener: (type: string, handler: (event: { clientX: number; clientY: number }) => void) => {
+            canvasEventHandlers[type] = handler;
+        },
         getBoundingClientRect: () => ({ left: 0, top: 0, width: 2, height: 2 }),
     };
 
@@ -157,6 +160,7 @@ function loadInspectorHarness() {
         window: {},
         gl,
         renderer,
+        paused: false,
         supportsFloatFramebuffer: true,
         quad: { material: null },
         scene: {},
@@ -191,6 +195,7 @@ function loadInspectorHarness() {
             Target: null,
         }],
         forceRenderOneFrame: false,
+        freezeSimulationOnNextForcedRender: false,
         currentShader: {},
     };
 
@@ -214,6 +219,7 @@ function loadInspectorHarness() {
             };
             buffers: Array<{ Shader: typeof material; Target: unknown }>;
             forceRenderOneFrame: boolean;
+            freezeSimulationOnNextForcedRender: boolean;
         },
         messages,
         getFullReadPixelsCalls: () => fullReadPixelsCalls,
@@ -224,6 +230,12 @@ function loadInspectorHarness() {
         getScissorCalls: () => scissorCalls.map(call => ({ ...call })),
         getViewportCalls: () => viewportCalls.map(call => ({ ...call })),
         getScissorTestStates: () => [...scissorTestStates],
+        triggerCanvasEvent: (type: string, event: { clientX: number; clientY: number }) => {
+            const handler = canvasEventHandlers[type];
+            if (handler) {
+                handler(event);
+            }
+        },
     };
 }
 
@@ -413,5 +425,35 @@ suite('Inspect runtime', () => {
             { x: 1, y: 0, width: 1, height: 2 },
             { x: 0, y: 0, width: 2, height: 2 }
         ]);
+    });
+
+    test('requests a redraw for hover updates while paused', () => {
+        const { sandbox, triggerCanvasEvent } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.forceRenderOneFrame = false;
+        sandbox.freezeSimulationOnNextForcedRender = false;
+        (sandbox as any).paused = true;
+
+        triggerCanvasEvent('mousemove', { clientX: 1, clientY: 1 });
+
+        assert.strictEqual(sandbox.forceRenderOneFrame, true, 'Expected paused hover movement to request a redraw');
+        assert.strictEqual(sandbox.freezeSimulationOnNextForcedRender, true, 'Expected paused hover movement to request a frozen redraw');
+    });
+
+    test('requests a frozen redraw for compare split updates while paused', () => {
+        const { sandbox } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompare', enabled: true });
+        sandbox.forceRenderOneFrame = false;
+        sandbox.freezeSimulationOnNextForcedRender = false;
+        (sandbox as any).paused = true;
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompareSplit', split: 0.25 });
+
+        assert.strictEqual(sandbox.forceRenderOneFrame, true, 'Expected paused split changes to request a redraw');
+        assert.strictEqual(sandbox.freezeSimulationOnNextForcedRender, true, 'Expected paused split changes to request a frozen redraw');
     });
 });

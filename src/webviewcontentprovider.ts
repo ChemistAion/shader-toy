@@ -54,7 +54,6 @@ import { IvertexErrorRewriteExtension } from './extensions/user_interface/error_
 import { GlslifyErrorsExtension } from './extensions/user_interface/error_display/glslify_errors_extension';
 
 import { PauseWholeRenderExtension } from './extensions/pause_whole_render_extension';
-import { AdvanceTimeExtension } from './extensions/advance_time_extension';
 import { AdvanceTimeIfNotPausedExtension } from './extensions/advance_time_if_not_paused_extension';
 
 import { BuffersInitExtension } from './extensions/buffers/buffers_init_extension';
@@ -483,14 +482,10 @@ export class WebviewContentProvider {
         if (this.context.getConfig<boolean>('pauseWholeRender')) {
             const pauseWholeRenderExtension = new PauseWholeRenderExtension();
             this.webviewAssembler.addWebviewModule(pauseWholeRenderExtension, '// Pause Whole Render');
+        }
 
-            const advanceTimeExtension = new AdvanceTimeExtension();
-            this.webviewAssembler.addWebviewModule(advanceTimeExtension, '// Advance Time');
-        }
-        else {
-            const advanceTimeExtension = new AdvanceTimeIfNotPausedExtension();
-            this.webviewAssembler.addWebviewModule(advanceTimeExtension, '// Advance Time');
-        }
+        const advanceTimeExtension = new AdvanceTimeIfNotPausedExtension();
+        this.webviewAssembler.addWebviewModule(advanceTimeExtension, '// Advance Time');
 
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Screenshot Logic

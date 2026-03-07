@@ -94,4 +94,51 @@ suite('Webview Split', () => {
             moduleWithLoad._load = originalLoad;
         }
     });
+
+    test('pauseWholeRender still emits paused-aware time advancement', async () => {
+        const repoRoot = path.resolve(__dirname, '..', '..');
+        const moduleWithLoad = Module as typeof Module & {
+            _load: (request: string, parent: NodeModule | null, isMain: boolean) => unknown;
+        };
+        const originalLoad = moduleWithLoad._load;
+        moduleWithLoad._load = function(request: string, parent: NodeModule | null, isMain: boolean) {
+            if (request === 'vscode') {
+                return {};
+            }
+            return originalLoad.call(this, request, parent, isMain);
+        };
+
+        const fakeContext = {
+            getResourceUri: (relativePath: string) => ({ fsPath: path.join(repoRoot, 'resources', relativePath) }),
+            getConfig: (key: string) => key === 'pauseWholeRender' ? true : undefined,
+            makeWebviewResource: () => ({ toString: () => 'unused' }),
+            getWebviewResourcePath: (_webview: unknown, relativePath: string) => relativePath,
+            makeUri: (file: string) => ({ fsPath: file }),
+            showErrorMessage: () => undefined,
+            mapUserPath: async (userPath: string) => ({ file: userPath, userPath })
+        };
+
+        const shader = `void main() {
+    gl_FragColor = vec4(1.0);
+}`;
+
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const { WebviewContentProvider } = require('../src/webviewcontentprovider');
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const { RenderStartingData } = require('../src/typenames');
+
+            const provider = new WebviewContentProvider(fakeContext as any, shader, path.join(repoRoot, 'demos', 'pause_test.glsl'));
+            await provider.parseShaderTree(false);
+            const html = await provider.generateWebviewContent(undefined, new RenderStartingData());
+
+            assert.ok(html.includes('if (paused == false) {'), 'Expected paused-aware time advancement guard');
+            assert.ok(html.includes('deltaTime = 0.0;'), 'Expected paused redraws to keep deltaTime at zero');
+            assert.ok(html.includes('let freezeSimulationOnNextForcedRender = false;'), 'Expected the preview runtime to track frozen paused redraw requests');
+            assert.ok(html.includes('const renderFrozenFrameOnly = paused && forceRenderOneFrame && freezeSimulationOnNextForcedRender;'), 'Expected paused inspector redraws to use the frozen-frame path');
+            assert.ok(html.includes('const firstBufferIndex = renderFrozenFrameOnly ? Math.max(0, buffers.length - 1) : 0;'), 'Expected frozen paused redraws to render only the final presentation pass');
+        } finally {
+            moduleWithLoad._load = originalLoad;
+        }
+    });
 });

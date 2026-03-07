@@ -740,14 +740,21 @@ vec4 _inspMap(vec4 v) {${oor}
     let _lastRewrittenSource = '';
     let _debounceTimer = null;
 
+    function requestPreviewFrame() {
+        if (typeof paused !== 'undefined' && paused && typeof freezeSimulationOnNextForcedRender !== 'undefined') {
+            freezeSimulationOnNextForcedRender = true;
+        }
+        if (typeof forceRenderOneFrame !== 'undefined') {
+            forceRenderOneFrame = true;
+        }
+    }
+
     function markShaderMaterialDirty(material) {
         material.needsUpdate = true;
         if (typeof quad !== 'undefined' && quad) {
             quad.material = material;
         }
-        if (typeof forceRenderOneFrame !== 'undefined') {
-            forceRenderOneFrame = true;
-        }
+        requestPreviewFrame();
     }
 
     function normalizeHistogramInterval(intervalMs) {
@@ -1397,6 +1404,9 @@ vec4 _inspMap(vec4 v) {${oor}
             _mouseX = Math.floor((e.clientX - rect.left) * (canvas.width / rect.width));
             _mouseY = canvas.height - Math.floor((e.clientY - rect.top) * (canvas.height / rect.height));
             _mouseInCanvas = true;
+            if (typeof paused !== 'undefined' && paused) {
+                requestPreviewFrame();
+            }
         });
 
         canvas.addEventListener('mouseleave', function () {
@@ -1520,9 +1530,7 @@ vec4 _inspMap(vec4 v) {${oor}
     function requestHistogramUpdateNow() {
         cancelHistogramWork();
         _histogramDirty = true;
-        if (typeof forceRenderOneFrame !== 'undefined') {
-            forceRenderOneFrame = true;
-        }
+        requestPreviewFrame();
     }
 
     /** Start / stop the periodic histogram refresh timer. */
@@ -1597,17 +1605,15 @@ vec4 _inspMap(vec4 v) {${oor}
                 updateCompareOverlay();
                 if (_active && _variable) {
                     requestHistogramUpdate();
-                    if (typeof forceRenderOneFrame !== 'undefined') {
-                        forceRenderOneFrame = true;
-                    }
+                    requestPreviewFrame();
                 }
                 break;
 
             case 'setInspectorCompareSplit':
                 _compareSplit = normalizeCompareSplit(msg.split);
                 updateCompareOverlay();
-                if (_active && _compareMode && typeof forceRenderOneFrame !== 'undefined') {
-                    forceRenderOneFrame = true;
+                if (_active && _compareMode) {
+                    requestPreviewFrame();
                 }
                 break;
 
