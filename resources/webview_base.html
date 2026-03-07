@@ -163,6 +163,7 @@
 
     let paused = <!-- Start Paused -->;
     let forceRenderOneFrame = paused;
+    let freezeSimulationOnNextForcedRender = false;
     let pauseButton = document.getElementById('pause-button');
     if (pauseButton) {
         pauseButton.checked = paused;
@@ -416,22 +417,27 @@
 
     function render() {
         requestAnimationFrame(render);
+        const renderFrozenFrameOnly = paused && forceRenderOneFrame && freezeSimulationOnNextForcedRender;
         if (!forceRenderOneFrame) {
             // Pause Whole Render
         }
         forceRenderOneFrame = false;
+        freezeSimulationOnNextForcedRender = false;
 
         // Advance Time
-        updateDate();
-        
-        if(flyControls)
-        {
-            flyControls.update(0.1);
+        if (!renderFrozenFrameOnly) {
+            updateDate();
+
+            if(flyControls)
+            {
+                flyControls.update(0.1);
+            }
+
+            // Audio Update
         }
 
-        // Audio Update
-
-        for (let index = 0; index < buffers.length; index++) {
+        const startBufferIndex = renderFrozenFrameOnly ? Math.max(0, buffers.length - 1) : 0;
+        for (let index = startBufferIndex; index < buffers.length; index++) {
             const buffer = buffers[index];
             if (failedBufferNames.has(buffer.Name)) {
                 continue;
@@ -458,33 +464,35 @@
 
         <!-- Inspector After Frame -->
         
-        // Uniforms Update
+        if (!renderFrozenFrameOnly) {
+            // Uniforms Update
 
-        // Keyboard Update
+            // Keyboard Update
 
-        if (mouse.w > 0.0) {
-            mouse.w = -mouse.w;
-            updateMouse();
-        }
+            if (mouse.w > 0.0) {
+                mouse.w = -mouse.w;
+                updateMouse();
+            }
 
-        for (let buffer of buffers) {
-            if (buffer.PingPongTarget) {
-                [buffer.PingPongTarget, buffer.Target] = [buffer.Target, buffer.PingPongTarget];
-                buffer.Shader.uniforms[`iChannel${buffer.PingPongChannel}`].value = buffer.PingPongTarget.texture;
-                for (let dependent of buffer.Dependents) {
-                    const dependentBuffer = buffers[dependent.Index];
-                    dependentBuffer.Shader.uniforms[`iChannel${dependent.Channel}`].value = buffer.Target.texture;
+            for (let buffer of buffers) {
+                if (buffer.PingPongTarget) {
+                    [buffer.PingPongTarget, buffer.Target] = [buffer.Target, buffer.PingPongTarget];
+                    buffer.Shader.uniforms[`iChannel${buffer.PingPongChannel}`].value = buffer.PingPongTarget.texture;
+                    for (let dependent of buffer.Dependents) {
+                        const dependentBuffer = buffers[dependent.Index];
+                        dependentBuffer.Shader.uniforms[`iChannel${dependent.Channel}`].value = buffer.Target.texture;
+                    }
                 }
             }
+
+            if (offlineRecording) {
+                recorder.capture(canvas);
+            }
+
+            // Frame Timing
+
+            frameCounter++;
         }
-
-        if (offlineRecording) {
-            recorder.capture(canvas);
-        }
-
-        // Frame Timing
-
-        frameCounter++;
     }
     function forceAspectRatio(width, height) {
         // Forced aspect ratio

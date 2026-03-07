@@ -908,7 +908,7 @@ vec4 _inspMap(vec4 v) {${oor}
     }
 
     function ensureCompareOverlay() {
-        if (_compareOverlayRoot || typeof document === 'undefined') return;
+        if (_compareOverlayRoot || typeof document === 'undefined' || typeof document.createElement !== 'function' || !document.body) return;
         const root = document.createElement('div');
         root.style.position = 'fixed';
         root.style.pointerEvents = 'none';
@@ -974,43 +974,7 @@ vec4 _inspMap(vec4 v) {${oor}
     }
 
     function renderBuffer(buffer, bufferIndex, totalBuffers) {
-        if (!_active || !_compareMode || !_inspectorMaterial || !_compareOriginalMaterial) return false;
-        if (!buffer || bufferIndex !== totalBuffers - 1) return false;
-        if (typeof renderer === 'undefined' || !renderer || typeof renderer.render !== 'function') return false;
-        if (typeof quad === 'undefined' || !quad || typeof scene === 'undefined' || typeof camera === 'undefined') return false;
-
-        const canvas = renderer.domElement || document.getElementById('canvas');
-        const width = canvas && canvas.width ? canvas.width : 0;
-        const height = canvas && canvas.height ? canvas.height : 0;
-        if (width <= 0 || height <= 0) return false;
-
-        const splitX = Math.max(0, Math.min(width, Math.floor(width * _compareSplit)));
-        const rightWidth = Math.max(0, width - splitX);
-        const previousMaterial = quad.material;
-
-        renderer.setRenderTarget(buffer.Target);
-        if (typeof renderer.setScissorTest === 'function') renderer.setScissorTest(true);
-
-        if (splitX > 0) {
-            quad.material = _compareOriginalMaterial;
-            if (typeof renderer.setViewport === 'function') renderer.setViewport(0, 0, splitX, height);
-            if (typeof renderer.setScissor === 'function') renderer.setScissor(0, 0, splitX, height);
-            renderer.render(scene, camera);
-        }
-
-        if (rightWidth > 0) {
-            quad.material = _inspectorMaterial;
-            if (typeof renderer.setViewport === 'function') renderer.setViewport(splitX, 0, rightWidth, height);
-            if (typeof renderer.setScissor === 'function') renderer.setScissor(splitX, 0, rightWidth, height);
-            renderer.render(scene, camera);
-        }
-
-        if (typeof renderer.setScissorTest === 'function') renderer.setScissorTest(false);
-        if (typeof renderer.setViewport === 'function') renderer.setViewport(0, 0, width, height);
-        if (typeof renderer.setScissor === 'function') renderer.setScissor(0, 0, width, height);
-        quad.material = previousMaterial;
-        updateCompareOverlay();
-        return true;
+        return false;
     }
 
     function ensureHistogramTarget(width, height) {
@@ -1404,29 +1368,7 @@ vec4 _inspMap(vec4 v) {${oor}
 
     /** Called after each render frame completes (GL state is valid). */
     function afterFrame() {
-        if (!_active) return;
-        if (typeof gl === 'undefined') return;
-
-        updateCompareOverlay();
-
-        if (_hoverEnabled && _mouseInCanvas && _mouseX >= 0 && _mouseY >= 0) {
-            try {
-                const pixel = new Uint8Array(4);
-                gl.readPixels(_mouseX, _mouseY, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
-                if (typeof vscode !== 'undefined' && vscode) {
-                    vscode.postMessage({
-                        command: 'inspectorPixel',
-                        rgba: [pixel[0] / 255, pixel[1] / 255, pixel[2] / 255, pixel[3] / 255],
-                        position: { x: _mouseX, y: _mouseY }
-                    });
-                }
-            } catch (err) { /* ignore */ }
-        }
-
-        if (_histogramEnabled && _histogramDirty) {
-            _histogramDirty = false;
-            snapshotForHistogram();
-        }
+        return;
     }
 
     /** One-shot full-framebuffer readPixels, then schedule CPU binning off the render path. */
