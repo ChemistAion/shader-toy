@@ -207,6 +207,23 @@
     </div>
 </div>
 
+<div class="section">
+    <div class="section-title">Hover Readback</div>
+    <div class="range-row">
+        <div class="checkbox-row" style="margin-left: 0;">
+            <label>
+                <input type="checkbox" id="hoverToggle" checked />
+                Read hovered pixel
+            </label>
+        </div>
+    </div>
+    <div class="variable-section" style="margin-bottom: 0; margin-top: 8px;">
+        <div class="variable-label">Hovered Pixel</div>
+        <div class="variable-name empty" id="pixelValue">Move over the preview</div>
+        <div class="variable-meta" id="pixelMeta"></div>
+    </div>
+</div>
+
 <script>
 (function () {
     const vscode = (typeof acquireVsCodeApi === 'function') ? acquireVsCodeApi() : null;
@@ -220,9 +237,12 @@
     const compareToggle = document.getElementById('compareToggle');
     const compareSplit = document.getElementById('compareSplit');
     const compareSplitValue = document.getElementById('compareSplitValue');
+    const hoverToggle = document.getElementById('hoverToggle');
+    const pixelValueEl = document.getElementById('pixelValue');
+    const pixelMetaEl = document.getElementById('pixelMeta');
     const modeButtons = document.querySelectorAll('.mode-btn');
     let currentMode = 'linear';
-    function applyInspectorState(mapping, compareEnabled, split) {
+    function applyInspectorState(mapping, compareEnabled, split, hoverEnabled) {
         const nextMapping = mapping || {};
         currentMode = nextMapping.mode || 'linear';
         modeButtons.forEach(btn => {
@@ -235,6 +255,7 @@
         const nextSplit = typeof split === 'number' ? split : 0.5;
         compareSplit.value = String(nextSplit);
         compareSplitValue.textContent = `${Math.round(nextSplit * 100)}%`;
+        hoverToggle.checked = hoverEnabled !== false;
     }
 
     function applyStatus(message, status) {
@@ -284,6 +305,26 @@
         });
     }
 
+    function broadcastHoverEnabled() {
+        if (!vscode) return;
+        vscode.postMessage({
+            command: 'setHover',
+            enabled: hoverToggle.checked
+        });
+    }
+
+    function applyPixel(rgba, position) {
+        if (!Array.isArray(rgba) || rgba.length < 4) return;
+        const formatted = rgba.map(channel => Number(channel).toFixed(3)).join(', ');
+        pixelValueEl.textContent = formatted;
+        pixelValueEl.classList.remove('empty');
+        if (position && typeof position.x === 'number' && typeof position.y === 'number') {
+            pixelMetaEl.textContent = `x=${position.x}, y=${position.y}`;
+        } else {
+            pixelMetaEl.textContent = '';
+        }
+    }
+
     modeButtons.forEach(btn => {
         btn.addEventListener('click', () => {
             modeButtons.forEach(b => b.classList.remove('active'));
@@ -297,11 +338,12 @@
     oorToggle.addEventListener('change', broadcastMapping);
     compareToggle.addEventListener('change', broadcastCompareEnabled);
     compareSplit.addEventListener('input', broadcastCompareSplit);
+    hoverToggle.addEventListener('change', broadcastHoverEnabled);
     window.addEventListener('message', event => {
         const msg = event.data;
         switch (msg.command) {
             case 'syncState':
-                applyInspectorState(msg.mapping, msg.compareEnabled, msg.compareSplit);
+                applyInspectorState(msg.mapping, msg.compareEnabled, msg.compareSplit, msg.hoverEnabled);
                 break;
             case 'updateVariable':
                 if (msg.variable) {
@@ -320,10 +362,13 @@
             case 'inspectorStatus':
                 applyStatus(msg.message || '', msg.status);
                 break;
+            case 'inspectorPixel':
+                applyPixel(msg.rgba, msg.position);
+                break;
         }
     });
 
-    applyInspectorState({ mode: 'linear', min: 0, max: 1, highlightOutOfRange: false }, false, 0.5);
+    applyInspectorState({ mode: 'linear', min: 0, max: 1, highlightOutOfRange: false }, false, 0.5, true);
     if (vscode) {
         vscode.postMessage({ command: 'panelReady' });
     }

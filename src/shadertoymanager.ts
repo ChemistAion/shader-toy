@@ -40,6 +40,7 @@ export class ShaderToyManager {
     private _lastInspectorMapping: InspectorMapping = { ...DEFAULT_INSPECTOR_MAPPING };
     private _lastInspectorCompareEnabled = false;
     private _lastInspectorCompareSplit = 0.5;
+    private _lastInspectorHoverEnabled = true;
 
     constructor(context: Context) {
         this.context = context;
@@ -211,6 +212,16 @@ export class ShaderToyManager {
             }
         });
 
+        this.inspectPanel.setOnHoverChanged((enabled: boolean) => {
+            this._lastInspectorHoverEnabled = enabled;
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorHover',
+                    enabled: this._lastInspectorHoverEnabled
+                });
+            }
+        });
+
         this.inspectPanel.setOnDidDispose(() => {
             this.stopSelectionListener();
             if (this.webviewPanel !== undefined) {
@@ -280,7 +291,8 @@ export class ShaderToyManager {
         this.inspectPanel.postInspectorState(
             this._lastInspectorMapping,
             this._lastInspectorCompareEnabled,
-            this._lastInspectorCompareSplit
+            this._lastInspectorCompareSplit,
+            this._lastInspectorHoverEnabled
         );
         if (this._lastInspectorVariable) {
             this.inspectPanel.postVariableUpdate(this._lastInspectorVariable, this._lastInspectorLine, this._lastInspectorType);
@@ -301,6 +313,10 @@ export class ShaderToyManager {
         this.webviewPanel.Panel.webview.postMessage({
             command: 'setInspectorCompareSplit',
             split: this._lastInspectorCompareSplit
+        });
+        this.webviewPanel.Panel.webview.postMessage({
+            command: 'setInspectorHover',
+            enabled: this._lastInspectorHoverEnabled
         });
         if (this._lastInspectorVariable) {
             this.webviewPanel.Panel.webview.postMessage({
@@ -357,6 +373,11 @@ export class ShaderToyManager {
                     }
                     return;
                 }
+                case 'inspectorPixel':
+                    if (this.inspectPanel.isActive && Array.isArray(message.rgba) && message.position) {
+                        this.inspectPanel.postPixel(message.rgba, message.position);
+                    }
+                    return;
                 case 'readDDSFile':
                 {
                     const requestId: number = message.requestId;

@@ -368,6 +368,7 @@ export class WebviewContentProvider {
                     "case 'setInspectorMapping':",
                     "case 'setInspectorCompare':",
                     "case 'setInspectorCompareSplit':",
+                    "case 'setInspectorHover':",
                     "case 'inspectorOn':",
                     "case 'inspectorOff':",
                     '    if (window.ShaderToy && window.ShaderToy.inspector) {',

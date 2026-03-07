@@ -1404,7 +1404,22 @@ vec4 _inspMap(vec4 v) {${oor}
 
     /** Called after each render frame completes (GL state is valid). */
     function afterFrame() {
-        return;
+        if (!_active) return;
+        if (typeof gl === 'undefined') return;
+
+        if (_hoverEnabled && _mouseInCanvas && _mouseX >= 0 && _mouseY >= 0) {
+            try {
+                const pixel = new Uint8Array(4);
+                gl.readPixels(_mouseX, _mouseY, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+                if (typeof vscode !== 'undefined' && vscode) {
+                    vscode.postMessage({
+                        command: 'inspectorPixel',
+                        rgba: [pixel[0] / 255, pixel[1] / 255, pixel[2] / 255, pixel[3] / 255],
+                        position: { x: _mouseX, y: _mouseY }
+                    });
+                }
+            } catch (err) { /* ignore */ }
+        }
     }
 
     /** One-shot full-framebuffer readPixels, then schedule CPU binning off the render path. */

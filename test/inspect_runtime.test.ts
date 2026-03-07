@@ -22,6 +22,8 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
         status?: string;
         message?: string;
         variable?: string;
+        rgba?: number[];
+        position?: { x: number; y: number };
     }> = [];
 
     const material = {
@@ -35,7 +37,10 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
     const canvas = {
         width: 320,
         height: 180,
-        addEventListener: () => undefined,
+        _listeners: new Map<string, (event?: { clientX: number; clientY: number }) => void>(),
+        addEventListener: function(type: string, handler: (event?: { clientX: number; clientY: number }) => void) {
+            this._listeners.set(type, handler);
+        },
         getBoundingClientRect: () => ({ left: 0, top: 0, width: 320, height: 180 })
     };
     const quad = { material };
@@ -127,6 +132,7 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
                 inspector: {
                     handleMessage: (message: { command: string; [key: string]: unknown }) => void;
                     renderBuffer: (buffer: { Target: unknown }, bufferIndex: number, totalBuffers: number) => boolean;
+                    afterFrame: () => void;
                 }
             };
             buffers: Array<{ Shader: typeof material; Target: unknown }>;
@@ -136,6 +142,7 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
         renderCalls,
         scissorOps,
         quad,
+        canvas,
     };
 }
 
@@ -234,5 +241,21 @@ suite('Inspect runtime', () => {
         assert.strictEqual(scissorOps.some(entry => entry.op === 'setScissor' && entry.args[0] === 0 && entry.args[2] === 80), true);
         assert.strictEqual(scissorOps.some(entry => entry.op === 'setScissor' && entry.args[0] === 80 && entry.args[2] === 240), true);
         assert.strictEqual(quad.material, material, 'Expected the quad material to be restored after compare rendering');
+    });
+
+    test('posts hovered pixel readback after a rendered frame', () => {
+        const { sandbox, messages, canvas } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        const mouseMove = canvas._listeners.get('mousemove');
+        assert.ok(mouseMove, 'Expected hover readback to register a mousemove handler');
+
+        mouseMove?.({ clientX: 16, clientY: 20 });
+        sandbox.ShaderToy.inspector.afterFrame();
+
+        const pixelMessage = messages.find(message => message.command === 'inspectorPixel');
+        assert.deepStrictEqual(Array.from(pixelMessage?.rgba || []), [0, 0, 0, 1]);
+        assert.strictEqual(typeof pixelMessage?.position?.x, 'number');
+        assert.strictEqual(typeof pixelMessage?.position?.y, 'number');
     });
 });
