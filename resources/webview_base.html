@@ -423,7 +423,7 @@
         freezeSimulationOnNextForcedRender = false;
 
         if (!renderFrozenFrameOnly && window.ShaderToy && window.ShaderToy.frameTiming) {
-            window.ShaderToy.frameTiming.beginFrame();
+            window.ShaderToy.frameTiming.beginFrame(vscode, frameCounter);
         }
 
         // Advance Time

@@ -488,4 +488,54 @@ suite('Inspect runtime', () => {
         assert.strictEqual(sandbox.forceRenderOneFrame, true);
         assert.strictEqual(sandbox.freezeSimulationOnNextForcedRender, true);
     });
+
+    test('continues to post inspector status when frame timing is present', () => {
+        const { sandbox, messages } = loadInspectorHarness();
+
+        (sandbox as unknown as {
+            ShaderToy: {
+                frameTiming: {
+                    beginExcludedSection: () => void;
+                    endExcludedSection: () => void;
+                };
+            };
+        }).ShaderToy.frameTiming = {
+            beginExcludedSection: () => undefined,
+            endExcludedSection: () => undefined,
+        };
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+
+        const statusMessage = messages.find(message => message.command === 'inspectorStatus');
+        assert.ok(statusMessage, 'Expected inspector status to be posted');
+        assert.strictEqual(statusMessage?.status, 'ok');
+        assert.strictEqual(statusMessage?.variable, 'x');
+    });
+
+    test('continues to post hover pixel values when frame timing is present', () => {
+        const { sandbox, messages, triggerCanvasEvent } = loadInspectorHarness();
+
+        (sandbox as unknown as {
+            ShaderToy: {
+                frameTiming: {
+                    beginExcludedSection: () => void;
+                    endExcludedSection: () => void;
+                };
+            };
+        }).ShaderToy.frameTiming = {
+            beginExcludedSection: () => undefined,
+            endExcludedSection: () => undefined,
+        };
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHover', enabled: true });
+        triggerCanvasEvent('mousemove', { clientX: 1, clientY: 1 });
+        sandbox.ShaderToy.inspector.afterFrame();
+
+        const pixelMessage = messages.find(message => message.command === 'inspectorPixel');
+        assert.ok(pixelMessage, 'Expected inspector pixel readback to be posted');
+        assert.deepStrictEqual(Array.from(pixelMessage?.rgba || []), [0, 0, 0, 1]);
+    });
 });

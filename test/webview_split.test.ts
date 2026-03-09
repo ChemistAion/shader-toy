@@ -228,7 +228,7 @@ suite('Webview Split', () => {
 
             assert.ok(html.includes('function setPausedState(nextPaused, notifyHost) {'));
             assert.ok(html.includes('window.ShaderToy.frameTiming.setPaused(paused);'));
-            assert.ok(html.includes('window.ShaderToy.frameTiming.beginFrame();'));
+            assert.ok(html.includes('window.ShaderToy.frameTiming.beginFrame(vscode, frameCounter);'));
             assert.ok(html.includes('window.ShaderToy.frameTiming.endFrame(vscode, frameCounter);'));
             assert.ok(html.includes('window.ShaderToy.frameTiming.resetSampleWindow();'));
             assert.ok(html.includes("vscode.postMessage({ command: 'previewReady' });"));
