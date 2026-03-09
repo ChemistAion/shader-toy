@@ -513,6 +513,34 @@ suite('Inspect runtime', () => {
         assert.strictEqual(statusMessage?.variable, 'x');
     });
 
+    test('skips the next frame timing sample when mapping changes rewrite the live inspector shader', () => {
+        const { sandbox } = loadInspectorHarness();
+        let skipCalls = 0;
+
+        (sandbox as unknown as {
+            ShaderToy: {
+                frameTiming: {
+                    skipNextFrameSample: () => void;
+                };
+            };
+        }).ShaderToy.frameTiming = {
+            skipNextFrameSample: () => {
+                skipCalls++;
+            },
+        };
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        skipCalls = 0;
+
+        sandbox.ShaderToy.inspector.handleMessage({
+            command: 'setInspectorMapping',
+            mapping: { mode: 'log', min: 0, max: 1, highlightOutOfRange: false }
+        });
+
+        assert.strictEqual(skipCalls, 1, 'Expected mapping rewrite to skip the next frame timing sample before redraw');
+    });
+
     test('continues to post hover pixel values when frame timing is present', () => {
         const { sandbox, messages, triggerCanvasEvent } = loadInspectorHarness();
 

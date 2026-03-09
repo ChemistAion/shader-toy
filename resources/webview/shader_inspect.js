@@ -769,8 +769,25 @@ vec4 _inspMap(vec4 v) {${oor}
         }
     }
 
+    function skipNextFrameTimingSample() {
+        const timing = window.ShaderToy && window.ShaderToy.frameTiming;
+        if (!timing) {
+            return;
+        }
+
+        if (typeof timing.skipNextFrameSample === 'function') {
+            timing.skipNextFrameSample();
+            return;
+        }
+
+        if (typeof timing.resetSampleWindow === 'function') {
+            timing.resetSampleWindow();
+        }
+    }
+
     function markShaderMaterialDirty(material) {
         material.needsUpdate = true;
+        skipNextFrameTimingSample();
         if (typeof quad !== 'undefined' && quad) {
             quad.material = material;
         }

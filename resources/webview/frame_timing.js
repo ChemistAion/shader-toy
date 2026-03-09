@@ -4,11 +4,11 @@
     const root = global.ShaderToy = global.ShaderToy || {};
     root.frameTiming = root.frameTiming || {};
 
-    let frameBoundaryTime = 0;
-    let pendingFrameNumber = 0;
+    let frameStartTime = 0;
     let activeFrame = false;
     let excludedTimeMs = 0;
     let excludedSectionStartTime = 0;
+    let skipNextFrameSample = false;
     let enabled = false;
     let lastPostTime = 0;
     const POST_INTERVAL = 16; // throttle to ~60Hz
@@ -20,48 +20,60 @@
     }
 
     function resetSampleWindow() {
-        frameBoundaryTime = 0;
-        pendingFrameNumber = 0;
+        frameStartTime = 0;
         activeFrame = false;
         excludedTimeMs = 0;
         excludedSectionStartTime = 0;
         lastPostTime = 0;
     }
 
+    function clearActiveSample() {
+        frameStartTime = 0;
+        activeFrame = false;
+        excludedTimeMs = 0;
+        excludedSectionStartTime = 0;
+    }
+
     /**
-     * Marks the start of a preview frame and posts the prior adjusted sample.
+     * Marks the start of the preview's core render span.
      */
     root.frameTiming.beginFrame = function (vscodeApi, frameNumber) {
         if (!enabled) return;
-        const now = performance.now();
-
         if (activeFrame) {
-            closeExcludedSection(now);
-
-            const cpuMs = Math.max(0, now - frameBoundaryTime - excludedTimeMs);
-            if (vscodeApi && cpuMs > 0 && now - lastPostTime >= POST_INTERVAL) {
-                lastPostTime = now;
-                vscodeApi.postMessage({
-                    command: 'frameData',
-                    cpuMs: cpuMs,
-                    gpuMs: 0,
-                    frameNumber: pendingFrameNumber || 0
-                });
-            }
+            resetSampleWindow();
         }
 
-        frameBoundaryTime = now;
-        pendingFrameNumber = frameNumber || 0;
+        frameStartTime = performance.now();
         excludedTimeMs = 0;
         activeFrame = true;
     };
 
     /**
-     * Ends the current render submission phase.
+     * Ends the preview's core render span and posts an adjusted sample.
      */
-    root.frameTiming.endFrame = function () {
-        if (!enabled || !activeFrame) return;
-        closeExcludedSection();
+    root.frameTiming.endFrame = function (vscodeApi, frameNumber) {
+        if (!enabled || !activeFrame || !vscodeApi || frameStartTime <= 0) return;
+
+        const now = performance.now();
+        closeExcludedSection(now);
+
+        const cpuMs = Math.max(0, now - frameStartTime - excludedTimeMs);
+        clearActiveSample();
+
+        if (skipNextFrameSample) {
+            skipNextFrameSample = false;
+            return;
+        }
+
+        if (cpuMs > 0 && now - lastPostTime >= POST_INTERVAL) {
+            lastPostTime = now;
+            vscodeApi.postMessage({
+                command: 'frameData',
+                cpuMs: cpuMs,
+                gpuMs: 0,
+                frameNumber: frameNumber || 0
+            });
+        }
     };
 
     root.frameTiming.beginExcludedSection = function () {
@@ -83,8 +95,14 @@
 
     root.frameTiming.resetSampleWindow = resetSampleWindow;
 
+    root.frameTiming.skipNextFrameSample = function () {
+        skipNextFrameSample = true;
+        clearActiveSample();
+    };
+
     root.frameTiming.setPaused = function (_value) {
         resetSampleWindow();
+        skipNextFrameSample = false;
     };
 
     root.frameTiming.isEnabled = function () {
