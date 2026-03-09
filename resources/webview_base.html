@@ -165,24 +165,35 @@
     let forceRenderOneFrame = paused;
     let freezeSimulationOnNextForcedRender = false;
     let pauseButton = document.getElementById('pause-button');
+    function setPausedState(nextPaused, notifyHost) {
+        paused = !!nextPaused;
+        if (pauseButton) {
+            pauseButton.checked = paused;
+        }
+
+        if (window.ShaderToy && window.ShaderToy.frameTiming && typeof window.ShaderToy.frameTiming.setPaused === 'function') {
+            window.ShaderToy.frameTiming.setPaused(paused);
+        }
+
+        if (!paused) {
+            // Audio Resume
+            pausedTime += clock.getDelta();
+        }
+        else {
+            // Audio Pause
+        }
+
+        if (notifyHost && vscode !== undefined) {
+            vscode.postMessage({
+                command: 'setPause',
+                paused: paused
+            });
+        }
+    }
     if (pauseButton) {
         pauseButton.checked = paused;
         pauseButton.onclick = function(){
-            paused = pauseButton.checked;
-            if (!paused) {
-                // Audio Resume
-                pausedTime += clock.getDelta();
-            }
-            else {
-                // Audio Pause
-            }
-
-            if (vscode !== undefined) {
-                vscode.postMessage({
-                    command: 'setPause',
-                    paused: paused
-                });
-            }
+            setPausedState(pauseButton.checked, true);
         };
     }
     
@@ -211,24 +222,7 @@
         const message = event.data; // The JSON data our extension sent
         switch (message.command) {
             case 'pause':
-                if (pauseButton) {
-                    pauseButton.checked = !pauseButton.checked;
-                }
-                paused = !paused;
-                if (!paused) {
-                    // Audio Resume
-                    pausedTime += clock.getDelta();
-                }
-                else {
-                    // Audio Pause
-                }
-
-                if (vscode !== undefined) {
-                    vscode.postMessage({
-                        command: 'setPause',
-                        paused: paused
-                    });
-                }
+                setPausedState(!paused, true);
                 break;
             case 'screenshot':
                 saveScreenshot();
@@ -246,6 +240,10 @@
             <!-- Inspector Message Routing -->
         }
     });
+
+    if (vscode !== undefined) {
+        vscode.postMessage({ command: 'previewReady' });
+    }
 
     // GLSL version selection
     // Values: 'Default' | 'WebGL2'
@@ -424,6 +422,10 @@
         forceRenderOneFrame = false;
         freezeSimulationOnNextForcedRender = false;
 
+        if (!renderFrozenFrameOnly && window.ShaderToy && window.ShaderToy.frameTiming) {
+            window.ShaderToy.frameTiming.beginFrame(vscode, frameCounter);
+        }
+
         // Advance Time
         if (!renderFrozenFrameOnly) {
             updateDate();
@@ -462,6 +464,8 @@
             renderer.render(scene, camera);
         }
 
+        // Frame Timing
+
         <!-- Inspector After Frame -->
         
         if (!renderFrozenFrameOnly) {
@@ -488,8 +492,6 @@
             if (offlineRecording) {
                 recorder.capture(canvas);
             }
-
-            // Frame Timing
 
             frameCounter++;
         }
@@ -544,6 +546,9 @@
 
         // Reset iFrame on resize for shaders that rely on first-frame setups
         frameCounter = 0;
+        if (window.ShaderToy && window.ShaderToy.frameTiming && typeof window.ShaderToy.frameTiming.resetSampleWindow === 'function') {
+            window.ShaderToy.frameTiming.resetSampleWindow();
+        }
     }
     function saveScreenshot() {
         let doSaveScreenshot = () => {

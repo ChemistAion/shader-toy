@@ -114,6 +114,15 @@ export class FramesPanel {
         }
     }
 
+    public postPreviewPaused(paused: boolean): void {
+        if (this.panel) {
+            this.panel.webview.postMessage({
+                command: 'setPreviewPaused',
+                paused: paused
+            });
+        }
+    }
+
     private getHtmlContent(): string {
         const htmlPath = this.context.getResourceUri('frames_panel.html').fsPath;
         return fs.readFileSync(htmlPath, 'utf8');
