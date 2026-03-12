@@ -369,7 +369,9 @@
     const modeButtons = document.querySelectorAll('.mode-btn');
 
     let currentMode = 'linear';
+    let currentVariableName = '';
     let currentVariableType = '';
+    let currentVariableLine = 0;
     let currentCompareSplit = 0.5;
     let currentHistogramIntervalMs = DEFAULT_HISTOGRAM_INTERVAL_MS;
     let currentHistogramSampleStride = DEFAULT_HISTOGRAM_SAMPLE_STRIDE;
@@ -413,6 +415,18 @@
 
     function setHistogramUi(enabled) {
         histogramSection.style.opacity = enabled ? '1' : '0.5';
+    }
+
+    function clearHistogram() {
+        lastHistogram = null;
+        if (histCanvas && histCtx) {
+            histCtx.setTransform(1, 0, 0, 1, 0, 0);
+            histCtx.clearRect(0, 0, histCanvas.width, histCanvas.height);
+        }
+        histMinEl.textContent = 'n/a';
+        histMaxEl.textContent = 'n/a';
+        histSamplesEl.textContent = 'No data yet';
+        histSamplesEl.classList.remove('stall');
     }
 
     function normalizeHistogramInterval(intervalMs) {
@@ -747,10 +761,18 @@
                 applyInspectorState(msg.mapping, msg.compareEnabled, msg.compareSplit, msg.hoverEnabled, msg.histogramEnabled, msg.histogramIntervalMs, msg.histogramSampleStride);
                 break;
             case 'updateVariable':
+                const nextVariable = msg.variable || '';
+                const nextType = msg.type || '';
+                const nextLine = Number(msg.line) || 0;
+                const targetChanged = nextVariable !== currentVariableName ||
+                    nextType !== currentVariableType ||
+                    nextLine !== currentVariableLine;
                 if (msg.variable) {
                     varNameEl.textContent = msg.variable;
                     varNameEl.classList.remove('empty');
-                    currentVariableType = msg.type || '';
+                    currentVariableName = nextVariable;
+                    currentVariableType = nextType;
+                    currentVariableLine = nextLine;
                     let meta = `Line ${msg.line}`;
                     if (msg.type) meta += ` <span class="type-badge">${msg.type}</span>`;
                     varMetaEl.innerHTML = meta;
@@ -758,10 +780,16 @@
                     varNameEl.textContent = 'Select an expression in the editor';
                     varNameEl.classList.add('empty');
                     varMetaEl.innerHTML = '';
+                    currentVariableName = '';
                     currentVariableType = '';
+                    currentVariableLine = 0;
                 }
                 resetPixelValueLabels();
-                if (lastHistogram) drawHistogram(lastHistogram);
+                if (targetChanged) {
+                    clearHistogram();
+                } else if (lastHistogram) {
+                    drawHistogram(lastHistogram);
+                }
                 break;
             case 'inspectorStatus':
                 applyStatus(msg.message || '', msg.status);
@@ -778,6 +806,8 @@
             case 'histogram':
                 if (msg.histogram) {
                     drawHistogram(msg.histogram);
+                } else {
+                    clearHistogram();
                 }
                 break;
         }
@@ -790,6 +820,7 @@
     setCompareUi(false);
     setCompareSplitUi(0.5);
     resetPixelValueLabels();
+    clearHistogram();
     if (vscode) {
         vscode.postMessage({ command: 'panelReady' });
     }

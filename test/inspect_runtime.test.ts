@@ -271,6 +271,37 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
     };
 }
 
+function getHistogramPayloads(messages: Array<{
+    command: string;
+    histogram?: {
+        samples: number;
+        autoMin: number;
+        autoMax: number;
+        timeMs: number;
+        componentCount?: number;
+        binsA?: number[];
+        stalled?: boolean;
+    };
+}>) {
+    return messages.filter(message => message.command === 'inspectorHistogram' && message.histogram);
+}
+
+function getLastHistogramPayload(messages: Array<{
+    command: string;
+    histogram?: {
+        samples: number;
+        autoMin: number;
+        autoMax: number;
+        timeMs: number;
+        componentCount?: number;
+        binsA?: number[];
+        stalled?: boolean;
+    };
+}>) {
+    const histogramMessages = getHistogramPayloads(messages);
+    return histogramMessages[histogramMessages.length - 1];
+}
+
 suite('Inspect runtime', () => {
     test('rewrites the original material in place and requests a frame', () => {
         const { material, sandbox } = loadInspectorHarness();
@@ -327,6 +358,19 @@ suite('Inspect runtime', () => {
         assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramSampleStride(), 8);
     });
 
+    test('does not capture or post histogram data before a valid inspect target exists', () => {
+        const { sandbox, messages, getFullReadPixelsCalls, getRenderTargetReadPixelsCalls } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.afterFrame();
+
+        const histogramMessages = messages.filter(message => message.command === 'inspectorHistogram');
+        assert.strictEqual(histogramMessages.length, 1);
+        assert.strictEqual(histogramMessages[0].histogram ?? null, null);
+        assert.strictEqual(getFullReadPixelsCalls(), 0);
+        assert.strictEqual(getRenderTargetReadPixelsCalls(), 0);
+    });
+
     test('histogram reports the observed raw domain with active histogram timing', () => {
         const { sandbox, messages, getFullReadPixelsCalls, getRenderTargetReadPixelsCalls } = loadInspectorHarness();
 
@@ -339,7 +383,7 @@ suite('Inspect runtime', () => {
         sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
         sandbox.ShaderToy.inspector.afterFrame();
 
-        const histogramMessage = messages.find(message => message.command === 'inspectorHistogram');
+        const histogramMessage = getLastHistogramPayload(messages);
         assert.ok(histogramMessage, 'Expected histogram payload to be posted');
         assert.strictEqual(getFullReadPixelsCalls(), 0, 'Expected raw histogram capture to avoid screen readPixels fallback');
         assert.strictEqual(getRenderTargetReadPixelsCalls(), 1, 'Expected one raw render-target readback');
@@ -358,7 +402,7 @@ suite('Inspect runtime', () => {
         sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
         sandbox.ShaderToy.inspector.afterFrame();
 
-        const histogramMessage = messages.find(message => message.command === 'inspectorHistogram');
+        const histogramMessage = getLastHistogramPayload(messages);
         assert.ok(histogramMessage, 'Expected histogram payload to be posted');
         assert.deepStrictEqual(getLastRenderTargetReadSize(), { width: 1, height: 1 });
         assert.strictEqual(histogramMessage?.histogram?.samples, 1);
@@ -375,7 +419,7 @@ suite('Inspect runtime', () => {
         sandbox.ShaderToy.inspector.afterFrame();
         flushIdleCallbacks();
 
-        const histogramMessages = messages.filter(message => message.command === 'inspectorHistogram');
+        const histogramMessages = getHistogramPayloads(messages);
         assert.strictEqual(histogramMessages.length, 1);
         assert.strictEqual(histogramMessages[0].histogram?.stalled, true);
     });

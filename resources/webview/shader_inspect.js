@@ -814,6 +814,10 @@ vec4 _inspMap(vec4 v) {${oor}
         return Math.max(0.1, Math.min(0.9, numericSplit));
     }
 
+    function hasHistogramTarget() {
+        return !!(_active && _variable && _inspectorMaterial);
+    }
+
     function getNowMs() {
         if (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') {
             return performance.now();
@@ -1106,6 +1110,15 @@ vec4 _inspMap(vec4 v) {${oor}
         }
     }
 
+    function clearHistogramDisplay() {
+        if (typeof vscode !== 'undefined' && vscode) {
+            vscode.postMessage({
+                command: 'inspectorHistogram',
+                histogram: null
+            });
+        }
+    }
+
     function drainQueuedHistogram() {
         _histogramHasQueuedFrame = false;
         _histogramQueuedTotalPixels = 0;
@@ -1371,6 +1384,10 @@ vec4 _inspMap(vec4 v) {${oor}
                 syncCompareOriginalMaterial(finalIdx, origMat);
                 updateCompareOverlay();
 
+                if (_histogramEnabled && _active) {
+                    requestHistogramUpdateNow();
+                }
+
                 postStatus('ok', 'Inspecting: ' + _variable + ' (' + type + ')', _variable, type);
             }
         } catch (err) {
@@ -1399,6 +1416,8 @@ vec4 _inspMap(vec4 v) {${oor}
         _inspectorMaterial = null;
         _inspectorType = '';
         _lastRewrittenSource = '';
+        cancelHistogramWork();
+        clearHistogramDisplay();
         updateCompareOverlay();
     }
 
@@ -1465,13 +1484,16 @@ vec4 _inspMap(vec4 v) {${oor}
 
         if (_histogramEnabled && _histogramDirty) {
             _histogramDirty = false;
-            withFrameTimingExcludedWork(snapshotForHistogram);
+            if (hasHistogramTarget()) {
+                withFrameTimingExcludedWork(snapshotForHistogram);
+            }
         }
     }
 
     /** One-shot full-framebuffer readPixels, then schedule CPU binning off the render path. */
     function snapshotForHistogram() {
         try {
+            if (!hasHistogramTarget()) return;
             const canvas = document.getElementById('canvas');
             if (!canvas) return;
             const w = canvas.width, h = canvas.height;
@@ -1529,10 +1551,19 @@ vec4 _inspMap(vec4 v) {${oor}
 
     /** Mark histogram as needing refresh (called after inspection changes, on a timer). */
     function requestHistogramUpdate() {
+        if (!_histogramEnabled || !hasHistogramTarget()) {
+            _histogramDirty = false;
+            return;
+        }
         _histogramDirty = true;
     }
 
     function requestHistogramUpdateNow() {
+        if (!_histogramEnabled || !hasHistogramTarget()) {
+            cancelHistogramWork();
+            _histogramDirty = false;
+            return;
+        }
         if (!_histogramProcessing) {
             cancelHistogramWork();
         }
@@ -1545,7 +1576,7 @@ vec4 _inspMap(vec4 v) {${oor}
         stopHistogramTimer();
         if (_histogramEnabled && _active) {
             // Initial snapshot after a short delay (let first frame render)
-            _histogramDirty = true;
+            _histogramDirty = hasHistogramTarget();
             _histogramTimer = setInterval(requestHistogramUpdate, _histogramIntervalMs);
         }
     }
@@ -1575,7 +1606,6 @@ vec4 _inspMap(vec4 v) {${oor}
                 _line = nextLine;
                 if (_active && _variable) {
                     updateInspection();
-                    requestHistogramUpdate();
                 }
                 break;
             }
@@ -1586,7 +1616,6 @@ vec4 _inspMap(vec4 v) {${oor}
                     _lastRewrittenSource = ''; // force recompile
                     if (_active && _variable) {
                         updateInspection();
-                        requestHistogramUpdate();
                     }
                 }
                 break;
@@ -1594,7 +1623,11 @@ vec4 _inspMap(vec4 v) {${oor}
             case 'inspectorOn':
                 if (!_active) {
                     _active = true;
-                    if (_variable) updateInspection();
+                    if (_variable) {
+                        updateInspection();
+                    } else {
+                        clearHistogramDisplay();
+                    }
                     startHistogramTimer();
                 }
                 break;
