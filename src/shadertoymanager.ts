@@ -572,6 +572,9 @@ export class ShaderToyManager {
                     if (this.webviewPanel !== undefined && this.webviewPanel.Panel === newWebviewPanel) {
                         this.dynamicPreviewReady = true;
                         this.framesPanel.postPreviewPaused(!!this.startingData.Paused);
+                        if (this.inspectPanel.isActive) {
+                            this.resendInspectorState();
+                        }
                         if (this.timingEnabled) {
                             this.webviewPanel.Panel.webview.postMessage({ command: 'enableFrameTiming' });
                         }

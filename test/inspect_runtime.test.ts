@@ -13,6 +13,14 @@ const SIMPLE_SHADER = `void main() {
 }
 `;
 
+const CRLF_DECLARATION_SHADER = "void mainImage(out vec4 fragColor, in vec2 fragCoord) {\r\n" +
+    "    float blobs = 1.0;\r\n" +
+    "    float x = smoothstep(3., 6., blobs);\r\n" +
+    "    float y = smoothstep(3., 5., blobs);\r\n" +
+    "    float z = smoothstep(3., 8., blobs);\r\n" +
+    "    fragColor = vec4(x + y + z);\r\n" +
+    "}\r\n";
+
 function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
     const repoRoot = path.resolve(__dirname, '../../');
     const inspectPath = path.join(repoRoot, 'resources', 'webview', 'shader_inspect.js');
@@ -239,6 +247,14 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
                     getHistogramSampleStride: () => number;
                     renderBuffer: (buffer: { Shader: typeof material; Target: unknown }, index: number, totalBuffers: number) => boolean;
                     afterFrame: () => void;
+                    rewrite: {
+                        rewriteForInspector: (source: string, variable: string, mapping: {
+                            mode: 'linear' | 'sigmoid' | 'log';
+                            min: number;
+                            max: number;
+                            highlightOutOfRange: boolean;
+                        }, inspectorLine?: number) => string | null;
+                    };
                 };
             };
             buffers: Array<{ Shader: typeof material; Target: unknown }>;
@@ -371,6 +387,18 @@ suite('Inspect runtime', () => {
         assert.strictEqual(getRenderTargetReadPixelsCalls(), 0);
     });
 
+    test('does not sample hover pixels before a valid inspect target exists', () => {
+        const { sandbox, messages, triggerCanvasEvent, getFullReadPixelsCalls } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        triggerCanvasEvent('mousemove', { clientX: 1, clientY: 1 });
+        sandbox.ShaderToy.inspector.afterFrame();
+
+        const pixelMessages = messages.filter(message => message.command === 'inspectorPixel');
+        assert.strictEqual(pixelMessages.length, 0);
+        assert.strictEqual(getFullReadPixelsCalls(), 0);
+    });
+
     test('histogram reports the observed raw domain with active histogram timing', () => {
         const { sandbox, messages, getFullReadPixelsCalls, getRenderTargetReadPixelsCalls } = loadInspectorHarness();
 
@@ -475,6 +503,21 @@ suite('Inspect runtime', () => {
         const statusMessage = messages.find(message => message.command === 'inspectorStatus' && message.status === 'ok');
         assert.strictEqual(statusMessage?.variable, 'uv');
         assert.strictEqual(statusMessage?.message, 'Inspecting: uv (vec2)');
+    });
+
+    test('keeps declaration-line inspector injection separate under CRLF line endings', () => {
+        const { sandbox } = loadInspectorHarness();
+
+        const rewritten = sandbox.ShaderToy.inspector.rewrite.rewriteForInspector(
+            CRLF_DECLARATION_SHADER,
+            'x',
+            { mode: 'linear', min: 0, max: 1, highlightOutOfRange: false },
+            3
+        );
+
+        assert.ok(rewritten);
+        assert.ok(!rewritten.includes('));    float y ='));
+        assert.ok(rewritten.includes('float x = smoothstep(3., 6., blobs);\r\n  fragColor = _inspMap(vec4(x, x, x, 1.0));\r\n    float y = smoothstep(3., 5., blobs);'));
     });
 
     test('renders compare mode as a split between original and inspected output', () => {

@@ -444,14 +444,31 @@ vec4 _inspMap(vec4 v) {${oor}
 
         const mainStartLine = lineAtOffset(source, bodyStart);
         const relativeLine = inspectorLine - mainStartLine;
-        const lines = body.split('\n');
+        const lineRanges = [];
+        let cursor = 0;
+        while (cursor <= body.length) {
+            const lineBreakMatch = /\r?\n/.exec(body.slice(cursor));
+            if (!lineBreakMatch) {
+                lineRanges.push({ start: cursor, end: body.length, line: body.slice(cursor) });
+                break;
+            }
 
-        if (relativeLine < 0 || relativeLine >= lines.length) return body.length;
+            const lineBreakIndex = cursor + lineBreakMatch.index;
+            const lineBreakLength = lineBreakMatch[0].length;
+            lineRanges.push({
+                start: cursor,
+                end: lineBreakIndex + lineBreakLength,
+                line: body.slice(cursor, lineBreakIndex)
+            });
+            cursor = lineBreakIndex + lineBreakLength;
+        }
 
-        // Compute offset to end of target line
-        let offset = 0;
-        for (let k = 0; k < relativeLine; k++) offset += lines[k].length + 1;
-        let endOfLine = offset + lines[relativeLine].length + 1;
+        if (relativeLine < 0 || relativeLine >= lineRanges.length) return body.length;
+
+        const targetLineRange = lineRanges[relativeLine];
+        const offset = targetLineRange.start;
+        let endOfLine = targetLineRange.end;
+
         endOfLine = Math.min(endOfLine, body.length);
 
         // Check for unclosed parens/brackets at endOfLine
@@ -483,7 +500,7 @@ vec4 _inspMap(vec4 v) {${oor}
         const varWord = variable.match(/^\w+/);
         if (varWord) {
             const escaped = escapeRegex(varWord[0]);
-            if (new RegExp(`\\b(?:float|int|uint|bool|vec[234]|ivec[234]|uvec[234]|mat[234])\\s+${escaped}\\b`).test(lines[relativeLine])) {
+            if (new RegExp(`\\b(?:float|int|uint|bool|vec[234]|ivec[234]|uvec[234]|mat[234])\\s+${escaped}\\b`).test(targetLineRange.line)) {
                 return endOfLine;
             }
         }
@@ -573,6 +590,14 @@ vec4 _inspMap(vec4 v) {${oor}
         return null;
     }
 
+    function buildInjectedStatement(before, after, statement, body) {
+        const lineEndingMatch = body.match(/\r?\n/);
+        const lineEnding = lineEndingMatch ? lineEndingMatch[0] : '\n';
+        const prefix = before.length > 0 && !/[\r\n]$/.test(before) ? lineEnding : '';
+        const suffix = after.length > 0 && !/^[\r\n]/.test(after) ? lineEnding : '';
+        return prefix + statement + suffix;
+    }
+
     /** Build inspector shader with mapping (port of vb) */
     function buildInspectorShader(source, variable, vec4Expr, mapping, isFunc, inspectorLine) {
         const inspMap = generateInspMap(mapping);
@@ -601,19 +626,21 @@ vec4 _inspMap(vec4 v) {${oor}
         const insertPt = findInsertionPoint(body, variable, source, bounds.bodyStart, inspectorLine);
         const before = body.slice(0, insertPt);
         const after = body.slice(insertPt);
+        const injectedStatement = buildInjectedStatement(before, after, `  fragColor = _inspMap(${mappedExpr});`, body);
 
         if (bounds.isMainImage) {
             return prefix + inspMap +
                 `void mainImage(out vec4 fragColor, in vec2 fragCoord) {\n` +
                 `vec4 ${INSP_FC} = vec4(0.0);\n` +
                 before +
-                `\n  fragColor = _inspMap(${mappedExpr});` + after +
+                injectedStatement + after +
                 `\n}\n` + suffix;
         }
+        const injectedMainStatement = buildInjectedStatement(before, after, `  gl_FragColor = _inspMap(${mappedExpr});`, body);
         return prefix + inspMap +
             `void main() {\nvec4 ${INSP_FC} = vec4(0.0);\n` +
             before +
-            `\n  gl_FragColor = _inspMap(${mappedExpr});` + after +
+            injectedMainStatement + after +
             `\n}\n`;
     }
 
@@ -643,19 +670,21 @@ vec4 _inspMap(vec4 v) {${oor}
         const insertPt = findInsertionPoint(body, variable, source, bounds.bodyStart, inspectorLine);
         const before = body.slice(0, insertPt);
         const after = body.slice(insertPt);
+        const injectedStatement = buildInjectedStatement(before, after, `  fragColor = ${mappedExpr};`, body);
 
         if (bounds.isMainImage) {
             return prefix +
                 `void mainImage(out vec4 fragColor, in vec2 fragCoord) {\n` +
                 `vec4 ${INSP_FC} = vec4(0.0);\n` +
                 before +
-                `\n  fragColor = ${mappedExpr};` + after +
+                injectedStatement + after +
                 `\n}\n` + suffix;
         }
+        const injectedMainStatement = buildInjectedStatement(before, after, `  gl_FragColor = ${mappedExpr};`, body);
         return prefix +
             `void main() {\nvec4 ${INSP_FC} = vec4(0.0);\n` +
             before +
-            `\n  gl_FragColor = ${mappedExpr};` + after +
+            injectedMainStatement + after +
             `\n}\n`;
     }
 
@@ -1466,7 +1495,7 @@ vec4 _inspMap(vec4 v) {${oor}
 
         withFrameTimingExcludedWork(updateCompareOverlay);
 
-        if (_hoverEnabled && _mouseInCanvas && _mouseX >= 0 && _mouseY >= 0) {
+        if (hasHistogramTarget() && _hoverEnabled && _mouseInCanvas && _mouseX >= 0 && _mouseY >= 0) {
             withFrameTimingExcludedWork(function () {
                 try {
                     const pixel = new Uint8Array(4);
