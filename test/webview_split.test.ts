@@ -48,7 +48,7 @@ suite('Webview Split', () => {
         assert.ok(updatedLine.includes('getVscodeApi'));
     });
 
-    test('Portable preview omits inspector runtime and hooks', async () => {
+    test('Portable preview omits inspector and frame timing runtime and hooks', async () => {
         const repoRoot = path.resolve(__dirname, '..', '..');
         const moduleWithLoad = Module as typeof Module & {
             _load: (request: string, parent: NodeModule | null, isMain: boolean) => unknown;
@@ -90,6 +90,9 @@ suite('Webview Split', () => {
             assert.ok(!html.includes('setInspectorVariable'), 'Expected standalone preview to omit inspector message routing');
             assert.ok(!html.includes('inspector.renderBuffer'), 'Expected standalone preview to omit inspector render hooks');
             assert.ok(!html.includes('inspector.afterFrame'), 'Expected standalone preview to omit inspector post-frame hooks');
+            assert.ok(!html.includes('frame_timing.js'), 'Expected standalone preview to omit the frame timing runtime module');
+            assert.ok(!html.includes('window.ShaderToy.frameTiming'), 'Expected standalone preview to omit frame timing state and hooks');
+            assert.ok(!html.includes('beginFrame(vscode, frameCounter)'), 'Expected standalone preview to omit frame timing begin-frame hooks');
         } finally {
             moduleWithLoad._load = originalLoad;
         }
@@ -180,6 +183,7 @@ suite('Webview Split', () => {
 
             assert.ok(html.includes("case 'setInspectorCompare':"));
             assert.ok(html.includes("case 'setInspectorCompareSplit':"));
+            assert.ok(html.includes("case 'setInspectorCompareFlip':"));
             assert.ok(html.includes("case 'setInspectorHover':"));
             assert.ok(html.includes("case 'setInspectorHistogram':"));
             assert.ok(html.includes("case 'setInspectorHistogramInterval':"));

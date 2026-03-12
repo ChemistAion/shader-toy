@@ -159,6 +159,7 @@
         display: flex;
         align-items: center;
         gap: 10px;
+        flex-wrap: wrap;
     }
     .compare-split-row {
         display: flex;
@@ -169,12 +170,6 @@
     }
     .compare-split-row input[type="range"] { flex: 1; }
     .compare-split-row.disabled { opacity: 0.45; }
-    .compare-split-value {
-        min-width: 44px;
-        text-align: right;
-        color: var(--fg);
-        font-variant-numeric: tabular-nums;
-    }
     .pixel-section,
     .histogram-section {
         transition: opacity 0.15s;
@@ -293,9 +288,14 @@
                 Compare split view
             </label>
         </div>
+        <div class="checkbox-row">
+            <label>
+                <input type="checkbox" id="compareFlipToggle" />
+                L/R Flip
+            </label>
+        </div>
         <div class="compare-split-row" id="compareSplitRow">
             <input type="range" id="compareSplit" min="0.1" max="0.9" step="0.01" value="0.5" />
-            <span class="compare-split-value" id="compareSplitValue">50%</span>
         </div>
     </div>
 </div>
@@ -352,9 +352,9 @@
     const rangeMax = document.getElementById('rangeMax');
     const oorToggle = document.getElementById('oorToggle');
     const compareToggle = document.getElementById('compareToggle');
+    const compareFlipToggle = document.getElementById('compareFlipToggle');
     const compareSplit = document.getElementById('compareSplit');
     const compareSplitRow = document.getElementById('compareSplitRow');
-    const compareSplitValue = document.getElementById('compareSplitValue');
     const hoverToggle = document.getElementById('hoverToggle');
     const pixelSection = document.getElementById('pixelSection');
     const histogramToggle = document.getElementById('histogramToggle');
@@ -373,6 +373,7 @@
     let currentVariableType = '';
     let currentVariableLine = 0;
     let currentCompareSplit = 0.5;
+    let currentCompareFlipEnabled = false;
     let currentHistogramIntervalMs = DEFAULT_HISTOGRAM_INTERVAL_MS;
     let currentHistogramSampleStride = DEFAULT_HISTOGRAM_SAMPLE_STRIDE;
     let lastHistogram = null;
@@ -466,16 +467,21 @@
     function setCompareSplitUi(split) {
         currentCompareSplit = normalizeCompareSplit(split);
         compareSplit.value = String(currentCompareSplit);
-        compareSplitValue.textContent = `${Math.round(currentCompareSplit * 100)}%`;
+    }
+
+    function setCompareFlipUi(enabled) {
+        currentCompareFlipEnabled = !!enabled;
+        compareFlipToggle.checked = currentCompareFlipEnabled;
     }
 
     function setCompareUi(enabled) {
         compareToggle.checked = !!enabled;
+        compareFlipToggle.disabled = !enabled;
         compareSplit.disabled = !enabled;
         compareSplitRow.classList.toggle('disabled', !enabled);
     }
 
-    function applyInspectorState(mapping, compareEnabled, compareSplitRaw, hoverEnabled, histogramEnabled, histogramIntervalMs, histogramSampleStride) {
+    function applyInspectorState(mapping, compareEnabled, compareSplitRaw, compareFlipEnabled, hoverEnabled, histogramEnabled, histogramIntervalMs, histogramSampleStride) {
         const nextMapping = mapping || {};
         currentMode = nextMapping.mode || 'linear';
         modeButtons.forEach(btn => {
@@ -486,6 +492,7 @@
         oorToggle.checked = !!nextMapping.highlightOutOfRange;
         setCompareUi(compareEnabled);
         setCompareSplitUi(compareSplitRaw);
+        setCompareFlipUi(compareFlipEnabled);
         hoverToggle.checked = hoverEnabled !== false;
         histogramToggle.checked = histogramEnabled !== false;
         setHoverUi(hoverToggle.checked);
@@ -547,6 +554,13 @@
         setCompareSplitUi(compareSplit.value);
         if (vscode) {
             vscode.postMessage({ command: 'setCompareSplit', split: currentCompareSplit });
+        }
+    });
+
+    compareFlipToggle.addEventListener('change', () => {
+        setCompareFlipUi(compareFlipToggle.checked);
+        if (vscode) {
+            vscode.postMessage({ command: 'setCompareFlip', enabled: currentCompareFlipEnabled });
         }
     });
 
@@ -758,7 +772,7 @@
         const msg = event.data;
         switch (msg.command) {
             case 'syncState':
-                applyInspectorState(msg.mapping, msg.compareEnabled, msg.compareSplit, msg.hoverEnabled, msg.histogramEnabled, msg.histogramIntervalMs, msg.histogramSampleStride);
+                applyInspectorState(msg.mapping, msg.compareEnabled, msg.compareSplit, msg.compareFlipEnabled, msg.hoverEnabled, msg.histogramEnabled, msg.histogramIntervalMs, msg.histogramSampleStride);
                 break;
             case 'updateVariable':
                 const nextVariable = msg.variable || '';
@@ -819,6 +833,7 @@
     setHistogramSampleStrideUi(DEFAULT_HISTOGRAM_SAMPLE_STRIDE);
     setCompareUi(false);
     setCompareSplitUi(0.5);
+    setCompareFlipUi(false);
     resetPixelValueLabels();
     clearHistogram();
     if (vscode) {

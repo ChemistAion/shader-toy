@@ -32,6 +32,7 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
     let renderTargetReadPixelsCalls = 0;
     let lastRenderTargetReadSize = { width: 0, height: 0 };
     let renderCalls = 0;
+    const renderedFragmentShaders: string[] = [];
     const scissorCalls: Array<{ x: number; y: number; width: number; height: number }> = [];
     const viewportCalls: Array<{ x: number; y: number; width: number; height: number }> = [];
     const scissorTestStates: boolean[] = [];
@@ -107,6 +108,8 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
         setRenderTarget: () => undefined,
         render: () => {
             renderCalls++;
+            const currentMaterial = (sandbox.quad as { material?: { fragmentShader?: string } }).material;
+            renderedFragmentShaders.push(currentMaterial?.fragmentShader || '');
         },
         domElement: canvas,
         setScissorTest: (enabled: boolean) => {
@@ -242,6 +245,7 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
                 inspector: {
                     handleMessage: (message: { command: string; [key: string]: unknown }) => void;
                     getCompareSplit: () => number;
+                    isCompareFlipEnabled: () => boolean;
                     isHistogramEnabled: () => boolean;
                     getHistogramIntervalMs: () => number;
                     getHistogramSampleStride: () => number;
@@ -267,6 +271,7 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
         getLastRenderTargetReadSize: () => ({ ...lastRenderTargetReadSize }),
         getLastSetIntervalMs: () => lastSetIntervalMs,
         getRenderCalls: () => renderCalls,
+        getRenderedFragmentShaders: () => [...renderedFragmentShaders],
         getScissorCalls: () => scissorCalls.map(call => ({ ...call })),
         getViewportCalls: () => viewportCalls.map(call => ({ ...call })),
         getScissorTestStates: () => [...scissorTestStates],
@@ -521,7 +526,7 @@ suite('Inspect runtime', () => {
     });
 
     test('renders compare mode as a split between original and inspected output', () => {
-        const { material, sandbox, getRenderCalls, getScissorCalls, getViewportCalls, getScissorTestStates } = loadInspectorHarness();
+        const { material, sandbox, getRenderCalls, getRenderedFragmentShaders, getScissorCalls, getViewportCalls, getScissorTestStates } = loadInspectorHarness();
 
         sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
         sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
@@ -533,7 +538,39 @@ suite('Inspect runtime', () => {
         const rendered = sandbox.ShaderToy.inspector.renderBuffer(sandbox.buffers[0], 0, 1);
         assert.strictEqual(rendered, true);
         assert.strictEqual(getRenderCalls(), 2);
+        const renderedShaders = getRenderedFragmentShaders();
+        assert.strictEqual(renderedShaders[0].includes('_inspMap('), false);
+        assert.strictEqual(renderedShaders[1].includes('_inspMap('), true);
         assert.deepStrictEqual(getScissorTestStates(), [true, false]);
+        assert.deepStrictEqual(getScissorCalls(), [
+            { x: 0, y: 0, width: 1, height: 2 },
+            { x: 1, y: 0, width: 1, height: 2 },
+            { x: 0, y: 0, width: 2, height: 2 }
+        ]);
+        assert.deepStrictEqual(getViewportCalls(), [
+            { x: 0, y: 0, width: 1, height: 2 },
+            { x: 1, y: 0, width: 1, height: 2 },
+            { x: 0, y: 0, width: 2, height: 2 }
+        ]);
+    });
+
+    test('flips compare mode sides without changing the split position', () => {
+        const { sandbox, getRenderedFragmentShaders, getScissorCalls, getViewportCalls } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompare', enabled: true });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompareSplit', split: 0.5 });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompareFlip', enabled: true });
+
+        assert.strictEqual(sandbox.ShaderToy.inspector.getCompareSplit(), 0.5);
+        assert.strictEqual(sandbox.ShaderToy.inspector.isCompareFlipEnabled(), true);
+
+        const rendered = sandbox.ShaderToy.inspector.renderBuffer(sandbox.buffers[0], 0, 1);
+        assert.strictEqual(rendered, true);
+        const renderedShaders = getRenderedFragmentShaders();
+        assert.strictEqual(renderedShaders[0].includes('_inspMap('), true);
+        assert.strictEqual(renderedShaders[1].includes('_inspMap('), false);
         assert.deepStrictEqual(getScissorCalls(), [
             { x: 0, y: 0, width: 1, height: 2 },
             { x: 1, y: 0, width: 1, height: 2 },

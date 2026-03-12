@@ -46,6 +46,7 @@ export class ShaderToyManager {
     private _lastInspectorMapping: InspectorMapping = { ...DEFAULT_INSPECTOR_MAPPING };
     private _lastInspectorCompareEnabled = false;
     private _lastInspectorCompareSplit = 0.5;
+    private _lastInspectorCompareFlipEnabled = false;
     private _lastInspectorHoverEnabled = true;
     private _lastInspectorHistogramEnabled = true;
     private _lastInspectorHistogramIntervalMs = DEFAULT_INSPECTOR_HISTOGRAM_INTERVAL_MS;
@@ -246,6 +247,16 @@ export class ShaderToyManager {
             }
         });
 
+        this.inspectPanel.setOnCompareFlipChanged((enabled: boolean) => {
+            this._lastInspectorCompareFlipEnabled = enabled;
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorCompareFlip',
+                    enabled: this._lastInspectorCompareFlipEnabled
+                });
+            }
+        });
+
         this.inspectPanel.setOnHoverChanged((enabled: boolean) => {
             this._lastInspectorHoverEnabled = enabled;
             if (this.webviewPanel !== undefined) {
@@ -362,6 +373,7 @@ export class ShaderToyManager {
             this._lastInspectorMapping,
             this._lastInspectorCompareEnabled,
             this._lastInspectorCompareSplit,
+            this._lastInspectorCompareFlipEnabled,
             this._lastInspectorHoverEnabled,
             this._lastInspectorHistogramEnabled,
             this._lastInspectorHistogramIntervalMs,
@@ -386,6 +398,10 @@ export class ShaderToyManager {
         this.webviewPanel.Panel.webview.postMessage({
             command: 'setInspectorCompareSplit',
             split: this._lastInspectorCompareSplit
+        });
+        this.webviewPanel.Panel.webview.postMessage({
+            command: 'setInspectorCompareFlip',
+            enabled: this._lastInspectorCompareFlipEnabled
         });
         this.webviewPanel.Panel.webview.postMessage({
             command: 'setInspectorHover',

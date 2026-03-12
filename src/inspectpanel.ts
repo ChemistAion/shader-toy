@@ -20,6 +20,7 @@ export class InspectPanel {
     private onMappingChanged: ((mapping: InspectorMapping) => void) | undefined;
     private onCompareChanged: ((enabled: boolean) => void) | undefined;
     private onCompareSplitChanged: ((split: number) => void) | undefined;
+    private onCompareFlipChanged: ((enabled: boolean) => void) | undefined;
     private onHoverChanged: ((enabled: boolean) => void) | undefined;
     private onHistogramChanged: ((enabled: boolean) => void) | undefined;
     private onHistogramIntervalChanged: ((intervalMs: number) => void) | undefined;
@@ -78,6 +79,11 @@ export class InspectPanel {
                 case 'setCompareSplit':
                     if (this.onCompareSplitChanged) {
                         this.onCompareSplitChanged(Number(message.split));
+                    }
+                    break;
+                case 'setCompareFlip':
+                    if (this.onCompareFlipChanged) {
+                        this.onCompareFlipChanged(!!message.enabled);
                     }
                     break;
                 case 'setHoverEnabled':
@@ -150,6 +156,11 @@ export class InspectPanel {
         this.onCompareSplitChanged = cb;
     }
 
+    /** Register callback for when the panel's compare side flip changes. */
+    public setOnCompareFlipChanged(cb: (enabled: boolean) => void): void {
+        this.onCompareFlipChanged = cb;
+    }
+
     /** Register callback for when the panel's hover readback setting changes. */
     public setOnHoverChanged(cb: (enabled: boolean) => void): void {
         this.onHoverChanged = cb;
@@ -185,6 +196,7 @@ export class InspectPanel {
         mapping: InspectorMapping,
         compareEnabled: boolean,
         compareSplit: number,
+        compareFlipEnabled: boolean,
         hoverEnabled: boolean,
         histogramEnabled: boolean,
         histogramIntervalMs: number,
@@ -196,6 +208,7 @@ export class InspectPanel {
                 mapping: { ...mapping },
                 compareEnabled,
                 compareSplit,
+                compareFlipEnabled,
                 hoverEnabled,
                 histogramEnabled,
                 histogramIntervalMs,

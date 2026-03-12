@@ -734,6 +734,7 @@ vec4 _inspMap(vec4 v) {${oor}
     let _mapping = { ...DEFAULT_MAPPING };
     let _compareMode = false;
     let _compareSplit = 0.5;
+    let _compareFlipEnabled = false;
     let _hoverEnabled = true;
     let _histogramEnabled = true;
     let _histogramIntervalMs = 200;
@@ -1040,6 +1041,8 @@ vec4 _inspMap(vec4 v) {${oor}
         _compareOverlayRoot.style.width = rect.width + 'px';
         _compareOverlayRoot.style.height = rect.height + 'px';
         _compareOverlayDivider.style.left = Math.floor(rect.width * _compareSplit) + 'px';
+        _compareOverlayLeft.textContent = _compareFlipEnabled ? 'Inspect' : 'Original';
+        _compareOverlayRight.textContent = _compareFlipEnabled ? 'Original' : 'Inspect';
     }
 
     function renderBuffer(buffer, bufferIndex, totalBuffers) {
@@ -1061,15 +1064,18 @@ vec4 _inspMap(vec4 v) {${oor}
             renderer.setRenderTarget(buffer.Target);
             if (typeof renderer.setScissorTest === 'function') renderer.setScissorTest(true);
 
+            const leftMaterial = _compareFlipEnabled ? _inspectorMaterial : _compareOriginalMaterial;
+            const rightMaterial = _compareFlipEnabled ? _compareOriginalMaterial : _inspectorMaterial;
+
             if (splitX > 0) {
-                quad.material = _compareOriginalMaterial;
+                quad.material = leftMaterial;
                 if (typeof renderer.setViewport === 'function') renderer.setViewport(0, 0, splitX, height);
                 if (typeof renderer.setScissor === 'function') renderer.setScissor(0, 0, splitX, height);
                 renderer.render(scene, camera);
             }
 
             if (rightWidth > 0) {
-                quad.material = _inspectorMaterial;
+                quad.material = rightMaterial;
                 if (typeof renderer.setViewport === 'function') renderer.setViewport(splitX, 0, rightWidth, height);
                 if (typeof renderer.setScissor === 'function') renderer.setScissor(splitX, 0, rightWidth, height);
                 renderer.render(scene, camera);
@@ -1686,6 +1692,14 @@ vec4 _inspMap(vec4 v) {${oor}
                 }
                 break;
 
+            case 'setInspectorCompareFlip':
+                _compareFlipEnabled = !!msg.enabled;
+                updateCompareOverlay();
+                if (_active && _compareMode) {
+                    requestPreviewFrame();
+                }
+                break;
+
             case 'setInspectorHover':
                 _hoverEnabled = !!msg.enabled;
                 break;
@@ -1725,6 +1739,7 @@ vec4 _inspMap(vec4 v) {${oor}
         getVariable: function () { return _variable; },
         getMapping: function () { return { ..._mapping }; },
         getCompareSplit: function () { return _compareSplit; },
+        isCompareFlipEnabled: function () { return _compareFlipEnabled; },
         isHoverEnabled: function () { return _hoverEnabled; },
         isHistogramEnabled: function () { return _histogramEnabled; },
         getHistogramIntervalMs: function () { return _histogramIntervalMs; },
