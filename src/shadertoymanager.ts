@@ -78,8 +78,12 @@ export class ShaderToyManager {
     };
 
     public showDynamicPreview = async () => {
+        const previousEditor = this.context.activeEditor;
         if (this.context.getConfig<boolean>('reloadOnChangeEditor') !== true) {
             this.context.activeEditor = vscode.window.activeTextEditor;
+            if (this.context.activeEditor?.document !== previousEditor?.document) {
+                this.clearInspectorTarget();
+            }
         }
 
         if (this.webviewPanel) {
@@ -168,7 +172,12 @@ export class ShaderToyManager {
 
     public onEditorChanged = async (newEditor: vscode.TextEditor | undefined) => {
         if (newEditor !== undefined && newEditor.document.getText() !== '' && newEditor !== this.context.activeEditor) {
+            const previousDocument = this.context.activeEditor?.document;
             this.context.activeEditor = newEditor;
+
+            if (previousDocument !== undefined && previousDocument !== newEditor.document) {
+                this.clearInspectorTarget();
+            }
 
             if (this.context.getConfig<boolean>('reloadAutomatically') && this.context.getConfig<boolean>('reloadOnChangeEditor')) {
                 if (this.context.getConfig<boolean>('resetStateOnChangeEditor')) {
@@ -367,6 +376,25 @@ export class ShaderToyManager {
         }
     };
 
+    private clearInspectorTarget = () => {
+        this._lastInspectorVariable = '';
+        this._lastInspectorLine = 0;
+        this._lastInspectorType = '';
+
+        if (this.inspectPanel.isActive) {
+            this.inspectPanel.postVariableUpdate('', 0, '');
+            this.inspectPanel.postStatus('', '');
+        }
+
+        if (this.webviewPanel) {
+            this.webviewPanel.Panel.webview.postMessage({
+                command: 'setInspectorVariable',
+                variable: '',
+                line: 0
+            });
+        }
+    };
+
     private resendInspectPanelState = () => {
         if (!this.inspectPanel.isActive) return;
         this.inspectPanel.postInspectorState(
@@ -482,17 +510,25 @@ export class ShaderToyManager {
                 }
                 case 'inspectorStatus':
                 {
-                    const variable = typeof message.variable === 'string' && message.variable.length > 0
-                        ? message.variable
-                        : this._lastInspectorVariable;
-                    const type = typeof message.type === 'string' ? message.type : this._lastInspectorType;
-                    this._lastInspectorVariable = variable;
-                    this._lastInspectorType = type;
+                    const hasVariable = typeof message.variable === 'string';
+                    const hasType = typeof message.type === 'string';
+
+                    if (hasVariable) {
+                        this._lastInspectorVariable = message.variable;
+                        if (message.variable.length === 0) {
+                            this._lastInspectorLine = 0;
+                        }
+                    }
+                    if (hasType) {
+                        this._lastInspectorType = message.type;
+                    }
 
                     if (this.inspectPanel.isActive) {
                         this.inspectPanel.postStatus(message.status, message.message);
-                        if (variable) {
-                            this.inspectPanel.postVariableUpdate(variable, this._lastInspectorLine, type);
+                        if (hasVariable) {
+                            this.inspectPanel.postVariableUpdate(this._lastInspectorVariable, this._lastInspectorLine, this._lastInspectorType);
+                        } else if (this._lastInspectorVariable) {
+                            this.inspectPanel.postVariableUpdate(this._lastInspectorVariable, this._lastInspectorLine, this._lastInspectorType);
                         }
                     }
                     return;

@@ -438,6 +438,37 @@ vec4 _inspMap(vec4 v) {${oor}
         return lineAtOffset(source, m.index + (m[1].length || 0));
     }
 
+    /** Map an editor/source line to the physical line in the transformed shader, honoring #line remapping. */
+    function mapSourceLineForInspection(source, requestedLine) {
+        if (!(requestedLine > 0)) return requestedLine;
+
+        const lines = source.split(/\r?\n/);
+        let sawDirective = false;
+        let logicalLine = 1;
+        let sourceId = 0;
+
+        for (let index = 0; index < lines.length; index++) {
+            const line = lines[index];
+            const directiveMatch = line.match(/^\s*#line\s+(\d+)(?:\s+(\d+))?\s*$/);
+            if (directiveMatch) {
+                sawDirective = true;
+                logicalLine = Number(directiveMatch[1]) || 1;
+                if (directiveMatch[2] !== undefined) {
+                    sourceId = Number(directiveMatch[2]) || 0;
+                }
+                continue;
+            }
+
+            if (sawDirective && sourceId === 0 && logicalLine === requestedLine) {
+                return index + 1;
+            }
+
+            logicalLine++;
+        }
+
+        return requestedLine + getPreambleOffset(source);
+    }
+
     /** Compute insertion point in main body (port of q8) */
     function findInsertionPoint(body, variable, source, bodyStart, inspectorLine) {
         if (inspectorLine === undefined) return body.length;
@@ -1356,7 +1387,7 @@ vec4 _inspMap(vec4 v) {${oor}
             }
 
             // Adjust VS Code editor line → source line (account for preamble)
-            const sourceLine = _line > 0 ? _line + getPreambleOffset(source) : _line;
+            const sourceLine = mapSourceLineForInspection(source, _line);
             const inspectTarget = tryResolveInspectableVariable(source, _variable, sourceLine);
             if (!inspectTarget) {
                 return;
@@ -1454,6 +1485,19 @@ vec4 _inspMap(vec4 v) {${oor}
         cancelHistogramWork();
         clearHistogramDisplay();
         updateCompareOverlay();
+    }
+
+    function clearInspectionTarget() {
+        const hadInspection = !!(_variable || _inspectorMaterial);
+        restoreOriginal();
+        _variable = '';
+        _line = 0;
+        _inspectorType = '';
+        _lastRewrittenSource = '';
+        if (hadInspection) {
+            requestPreviewFrame();
+        }
+        postStatus('', '', '', '');
     }
 
     /** Post status back to extension host */
@@ -1628,10 +1672,14 @@ vec4 _inspMap(vec4 v) {${oor}
         switch (msg.command) {
             case 'setInspectorVariable':
             {
-                const nextVariable = msg.variable || '';
+                const nextVariable = (msg.variable || '').trim();
                 const nextLine = msg.line || 0;
+                if (!nextVariable) {
+                    clearInspectionTarget();
+                    break;
+                }
                 const source = getShaderSource();
-                const sourceLine = nextLine > 0 ? nextLine + getPreambleOffset(source) : nextLine;
+                const sourceLine = mapSourceLineForInspection(source, nextLine);
                 const inspectTarget = tryResolveInspectableVariable(source, nextVariable, sourceLine);
                 if (!inspectTarget) {
                     break;

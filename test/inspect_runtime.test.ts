@@ -21,11 +21,31 @@ const CRLF_DECLARATION_SHADER = "void mainImage(out vec4 fragColor, in vec2 frag
     "    fragColor = vec4(x + y + z);\r\n" +
     "}\r\n";
 
-function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
+const INCLUDE_MAPPED_DECLARATION_SHADER = `#ifdef GL_ES
+precision mediump float;
+#endif
+#line 1 1
+float blob(vec2 pos, vec2 center, float power)
+{
+    vec2 d = pos - center;
+    return 1. / abs(d.x + d.y);
+}
+#line 11 0
+void mainImage(out vec4 fragColor, in vec2 fragCoord)
+{
+    float blobs = 1.0;
+    float x = smoothstep(3., 6., blobs);
+    float y = smoothstep(3., 5., blobs);
+    fragColor = vec4(x + y, 0.0, 0.0, 1.0);
+}
+`;
+
+function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean; shaderSource?: string }) {
     const repoRoot = path.resolve(__dirname, '../../');
     const inspectPath = path.join(repoRoot, 'resources', 'webview', 'shader_inspect.js');
     const source = fs.readFileSync(inspectPath, 'utf8');
     const deferIdleCallbacks = !!options?.deferIdleCallbacks;
+    const shaderSource = options?.shaderSource || SIMPLE_SHADER;
     let lastSetIntervalMs = 0;
     let fullReadPixelsCalls = 0;
     let nowMs = 0;
@@ -57,7 +77,7 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
     }> = [];
 
     const material = {
-        fragmentShader: SIMPLE_SHADER,
+        fragmentShader: shaderSource,
         uniforms: {},
         glslVersion: 0,
         needsUpdate: false,
@@ -199,7 +219,7 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
             body: overlayBody,
             getElementById: (id: string) => id === 'canvas' ? canvas : null,
             querySelectorAll: (selector: string) => selector === 'script[type="x-shader/x-fragment"]'
-                ? [{ textContent: SIMPLE_SHADER }]
+                ? [{ textContent: shaderSource }]
                 : [],
         },
         THREE: {
@@ -244,6 +264,7 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
             ShaderToy: {
                 inspector: {
                     handleMessage: (message: { command: string; [key: string]: unknown }) => void;
+                    getVariable: () => string;
                     getCompareSplit: () => number;
                     isCompareFlipEnabled: () => boolean;
                     isHistogramEnabled: () => boolean;
@@ -345,6 +366,25 @@ suite('Inspect runtime', () => {
 
         assert.strictEqual(material.fragmentShader, SIMPLE_SHADER);
         assert.strictEqual(sandbox.buffers[0].Shader, material);
+    });
+
+    test('clears the active inspection when the target variable is reset', () => {
+        const { material, sandbox, messages } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        sandbox.forceRenderOneFrame = false;
+        sandbox.freezeSimulationOnNextForcedRender = false;
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: '', line: 0 });
+
+        assert.strictEqual(material.fragmentShader, SIMPLE_SHADER);
+        assert.strictEqual(sandbox.ShaderToy.inspector.getVariable(), '');
+        assert.strictEqual(sandbox.forceRenderOneFrame, true);
+        assert.strictEqual(sandbox.freezeSimulationOnNextForcedRender, false);
+        const lastStatusMessage = messages.filter(message => message.command === 'inspectorStatus').pop();
+        assert.strictEqual(lastStatusMessage?.status, '');
+        assert.strictEqual(lastStatusMessage?.message, '');
     });
 
     test('toggles histogram capture through inspector messages', () => {
@@ -523,6 +563,20 @@ suite('Inspect runtime', () => {
         assert.ok(rewritten);
         assert.ok(!rewritten.includes('));    float y ='));
         assert.ok(rewritten.includes('float x = smoothstep(3., 6., blobs);\r\n  fragColor = _inspMap(vec4(x, x, x, 1.0));\r\n    float y = smoothstep(3., 5., blobs);'));
+    });
+
+    test('maps declaration-line inspection through include #line remapping', () => {
+        const { material, sandbox, messages } = loadInspectorHarness({ shaderSource: INCLUDE_MAPPED_DECLARATION_SHADER });
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 14 });
+
+        assert.ok(material.fragmentShader.includes('float x = smoothstep(3., 6., blobs);'));
+        assert.ok(material.fragmentShader.includes('fragColor = _inspMap(vec4(x, x, x, 1.0));'));
+        assert.ok(!material.fragmentShader.includes('vec4(d.x, d.x, d.x, 1.0)'));
+        const statusMessage = messages.find(message => message.command === 'inspectorStatus' && message.status === 'ok');
+        assert.strictEqual(statusMessage?.variable, 'x');
+        assert.strictEqual(statusMessage?.message, 'Inspecting: x (float)');
     });
 
     test('renders compare mode as a split between original and inspected output', () => {
