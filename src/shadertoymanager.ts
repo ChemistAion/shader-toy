@@ -38,6 +38,7 @@ export class ShaderToyManager {
     framesPanel: FramesPanel;
     private timingEnabled = false;
     private dynamicPreviewReady = false;
+    private dynamicPreviewDocument: vscode.TextDocument | undefined;
     inspectPanel: InspectPanel;
     private selectionListener: vscode.Disposable | undefined;
     private _lastInspectorVariable = '';
@@ -68,8 +69,8 @@ export class ShaderToyManager {
     public migrateToNewContext = async (context: Context) => {
         this.context = context;
         this.framesPanel.updateContext(context);
-        if (this.webviewPanel && this.context.activeEditor) {
-            await this.updateWebview(this.webviewPanel, this.context.activeEditor.document);
+        if (this.webviewPanel && this.dynamicPreviewDocument) {
+            await this.updateWebview(this.webviewPanel, this.dynamicPreviewDocument);
             this.resendInspectorState();
         }
         for (const staticWebview of this.staticWebviews) {
@@ -78,12 +79,10 @@ export class ShaderToyManager {
     };
 
     public showDynamicPreview = async () => {
-        const previousEditor = this.context.activeEditor;
-        if (this.context.getConfig<boolean>('reloadOnChangeEditor') !== true) {
-            this.context.activeEditor = vscode.window.activeTextEditor;
-            if (this.context.activeEditor?.document !== previousEditor?.document) {
-                this.clearInspectorTarget();
-            }
+        this.context.activeEditor = vscode.window.activeTextEditor;
+        const nextDocument = this.context.activeEditor?.document;
+        if (nextDocument !== this.dynamicPreviewDocument) {
+            this.clearInspectorTarget();
         }
 
         if (this.webviewPanel) {
@@ -95,12 +94,13 @@ export class ShaderToyManager {
             Panel: newWebviewPanel,
             OnDidDispose: () => {
                 this.dynamicPreviewReady = false;
+                this.dynamicPreviewDocument = undefined;
                 this.webviewPanel = undefined;
             }
         };
         newWebviewPanel.onDidDispose(this.webviewPanel.OnDidDispose);
-        if (this.context.activeEditor !== undefined) {
-            this.webviewPanel = await this.updateWebview(this.webviewPanel, this.context.activeEditor.document);
+        if (nextDocument !== undefined) {
+            this.webviewPanel = await this.updateWebview(this.webviewPanel, nextDocument);
             this.resendInspectorState();
         }
         else {
@@ -158,10 +158,10 @@ export class ShaderToyManager {
     public onDocumentEvent = async (document: vscode.TextDocument) => {
         if (this.context.getConfig<boolean>('reloadAutomatically')) {
             const staticWebview = this.staticWebviews.find((webview: StaticWebview) => { return webview.Document === document; });
-            const isActiveDocument = this.context.activeEditor !== undefined && document === this.context.activeEditor.document;
-            if (isActiveDocument || staticWebview !== undefined) {
-                if (this.webviewPanel !== undefined && this.context.activeEditor !== undefined) {
-                    this.webviewPanel = await this.updateWebview(this.webviewPanel, this.context.activeEditor.document);
+            const isDynamicPreviewDocument = this.dynamicPreviewDocument !== undefined && document === this.dynamicPreviewDocument;
+            if (isDynamicPreviewDocument || staticWebview !== undefined) {
+                if (this.webviewPanel !== undefined && this.dynamicPreviewDocument !== undefined) {
+                    this.webviewPanel = await this.updateWebview(this.webviewPanel, this.dynamicPreviewDocument);
                     this.resendInspectorState();
                 }
 
@@ -172,14 +172,12 @@ export class ShaderToyManager {
 
     public onEditorChanged = async (newEditor: vscode.TextEditor | undefined) => {
         if (newEditor !== undefined && newEditor.document.getText() !== '' && newEditor !== this.context.activeEditor) {
-            const previousDocument = this.context.activeEditor?.document;
             this.context.activeEditor = newEditor;
 
-            if (previousDocument !== undefined && previousDocument !== newEditor.document) {
-                this.clearInspectorTarget();
-            }
-
             if (this.context.getConfig<boolean>('reloadAutomatically') && this.context.getConfig<boolean>('reloadOnChangeEditor')) {
+                if (this.dynamicPreviewDocument !== newEditor.document) {
+                    this.clearInspectorTarget();
+                }
                 if (this.context.getConfig<boolean>('resetStateOnChangeEditor')) {
                     this.resetStartingData();
                 }
@@ -189,7 +187,10 @@ export class ShaderToyManager {
                 if (this.webviewPanel !== undefined) {
                     this.webviewPanel = await this.updateWebview(this.webviewPanel, this.context.activeEditor.document);
                     this.resendInspectorState();
+                    this.syncInspectorSelectionFromEditor(newEditor, true);
                 }
+            } else if (this.dynamicPreviewDocument !== undefined && this.dynamicPreviewDocument !== newEditor.document) {
+                this.clearInspectorTarget();
             }
         }
     };
@@ -332,40 +333,11 @@ export class ShaderToyManager {
             const editor = event.textEditor;
             const doc = editor.document;
 
-            // Only act on shader-like files
-            const lang = doc.languageId;
-            if (lang !== 'glsl' && lang !== 'hlsl' && !doc.fileName.match(/\.(glsl|frag|vert|comp|vs|fs|shader)$/i)) {
+            if (this.dynamicPreviewDocument === undefined || doc !== this.dynamicPreviewDocument) {
                 return;
             }
 
-            const selection = editor.selection;
-            let selectedText: string;
-            if (selection.isEmpty) {
-                const wordRange = doc.getWordRangeAtPosition(selection.active, /[a-zA-Z_]\w*(\.[xyzwrgba]+)?/);
-                selectedText = wordRange ? doc.getText(wordRange) : '';
-            } else {
-                selectedText = doc.getText(selection).trim();
-            }
-
-            const line = selection.start.line + 1; // 1-based for GLSL
-            const source = doc.getText();
-            const inspectableSelection = resolveInspectableSelection(source, selectedText, line);
-
-            if (inspectableSelection) {
-                this._lastInspectorVariable = inspectableSelection.variable;
-                this._lastInspectorLine = line;
-                this._lastInspectorType = inspectableSelection.type;
-                // Send to preview webview
-                if (this.webviewPanel !== undefined) {
-                    this.webviewPanel.Panel.webview.postMessage({
-                        command: 'setInspectorVariable',
-                        variable: inspectableSelection.variable,
-                        line: line
-                    });
-                }
-                // Send to inspect panel
-                this.inspectPanel.postVariableUpdate(inspectableSelection.variable, line, inspectableSelection.type);
-            }
+            this.syncInspectorSelectionFromEditor(editor, false);
         }, undefined, this.context.getVscodeExtensionContext().subscriptions);
     };
 
@@ -393,6 +365,54 @@ export class ShaderToyManager {
                 line: 0
             });
         }
+    };
+
+    private syncInspectorSelectionFromEditor = (editor: vscode.TextEditor, clearOnMiss: boolean) => {
+        if (!this.inspectPanel.isActive) {
+            return;
+        }
+
+        const doc = editor.document;
+        const lang = doc.languageId;
+        if (lang !== 'glsl' && lang !== 'hlsl' && !doc.fileName.match(/\.(glsl|frag|vert|comp|vs|fs|shader)$/i)) {
+            if (clearOnMiss) {
+                this.clearInspectorTarget();
+            }
+            return;
+        }
+
+        const selection = editor.selection;
+        let selectedText: string;
+        if (selection.isEmpty) {
+            const wordRange = doc.getWordRangeAtPosition(selection.active, /[a-zA-Z_]\w*(\.[xyzwrgba]+)?/);
+            selectedText = wordRange ? doc.getText(wordRange) : '';
+        } else {
+            selectedText = doc.getText(selection).trim();
+        }
+
+        const line = selection.start.line + 1;
+        const source = doc.getText();
+        const inspectableSelection = resolveInspectableSelection(source, selectedText, line);
+
+        if (!inspectableSelection) {
+            if (clearOnMiss) {
+                this.clearInspectorTarget();
+            }
+            return;
+        }
+
+        this._lastInspectorVariable = inspectableSelection.variable;
+        this._lastInspectorLine = line;
+        this._lastInspectorType = inspectableSelection.type;
+
+        if (this.webviewPanel !== undefined) {
+            this.webviewPanel.Panel.webview.postMessage({
+                command: 'setInspectorVariable',
+                variable: inspectableSelection.variable,
+                line: line
+            });
+        }
+        this.inspectPanel.postVariableUpdate(inspectableSelection.variable, line, inspectableSelection.type);
     };
 
     private resendInspectPanelState = () => {
@@ -607,8 +627,8 @@ export class ShaderToyManager {
                     return;
                 }
                 case 'reloadWebview':
-                    if (this.webviewPanel !== undefined && this.webviewPanel.Panel === newWebviewPanel && this.context.activeEditor !== undefined) {
-                        this.updateWebview(this.webviewPanel, this.context.activeEditor.document).then(() => {
+                    if (this.webviewPanel !== undefined && this.webviewPanel.Panel === newWebviewPanel && this.dynamicPreviewDocument !== undefined) {
+                        this.updateWebview(this.webviewPanel, this.dynamicPreviewDocument).then(() => {
                             this.resendInspectorState();
                         });
                     }
@@ -707,6 +727,7 @@ export class ShaderToyManager {
         const isDynamicPreview = this.webviewPanel !== undefined && webviewPanel.Panel === this.webviewPanel.Panel;
         if (isDynamicPreview) {
             this.dynamicPreviewReady = false;
+            this.dynamicPreviewDocument = document;
         }
 
         let localResourceRoots: string[] = [];
