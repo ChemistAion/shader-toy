@@ -48,7 +48,7 @@ suite('Webview Split', () => {
         assert.ok(updatedLine.includes('getVscodeApi'));
     });
 
-    test('Portable preview omits inspector runtime and hooks', async () => {
+    test('Portable preview omits inspector and frame timing runtime and hooks', async () => {
         const repoRoot = path.resolve(__dirname, '..', '..');
         const moduleWithLoad = Module as typeof Module & {
             _load: (request: string, parent: NodeModule | null, isMain: boolean) => unknown;
@@ -90,6 +90,9 @@ suite('Webview Split', () => {
             assert.ok(!html.includes('setInspectorVariable'), 'Expected standalone preview to omit inspector message routing');
             assert.ok(!html.includes('inspector.renderBuffer'), 'Expected standalone preview to omit inspector render hooks');
             assert.ok(!html.includes('inspector.afterFrame'), 'Expected standalone preview to omit inspector post-frame hooks');
+            assert.ok(!html.includes('frame_timing.js'), 'Expected standalone preview to omit the frame timing runtime module');
+            assert.ok(!html.includes('window.ShaderToy.frameTiming'), 'Expected standalone preview to omit frame timing state and hooks');
+            assert.ok(!html.includes('beginFrame(vscode, frameCounter)'), 'Expected standalone preview to omit frame timing begin-frame hooks');
         } finally {
             moduleWithLoad._load = originalLoad;
         }
@@ -136,6 +139,55 @@ suite('Webview Split', () => {
             assert.ok(html.includes('const renderFrozenFrameOnly = paused && forceRenderOneFrame && freezeSimulationOnNextForcedRender;'));
             assert.ok(html.includes('if (paused == false) {'));
             assert.ok(html.includes('deltaTime = 0.0;'));
+        } finally {
+            moduleWithLoad._load = originalLoad;
+        }
+    });
+
+    test('Inspector routing includes compare commands in interactive preview mode', async () => {
+        const repoRoot = path.resolve(__dirname, '..', '..');
+        const moduleWithLoad = Module as typeof Module & {
+            _load: (request: string, parent: NodeModule | null, isMain: boolean) => unknown;
+        };
+        const originalLoad = moduleWithLoad._load;
+        moduleWithLoad._load = function(request: string, parent: NodeModule | null, isMain: boolean) {
+            if (request === 'vscode') {
+                return {};
+            }
+            return originalLoad.call(this, request, parent, isMain);
+        };
+
+        const fakeContext = {
+            getResourceUri: (relativePath: string) => ({ fsPath: path.join(repoRoot, 'resources', relativePath) }),
+            getConfig: () => undefined,
+            makeWebviewResource: () => ({ toString: () => 'unused' }),
+            getWebviewResourcePath: (_webview: unknown, relativePath: string) => relativePath,
+            makeUri: (file: string) => ({ fsPath: file }),
+            showErrorMessage: () => undefined,
+            mapUserPath: async (userPath: string) => ({ file: userPath, userPath })
+        };
+
+        const shader = `void main() {
+    gl_FragColor = vec4(1.0);
+}`;
+
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const { WebviewContentProvider } = require('../src/webviewcontentprovider');
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const { RenderStartingData } = require('../src/typenames');
+
+            const provider = new WebviewContentProvider(fakeContext as any, shader, path.join(repoRoot, 'demos', 'interactive_test.glsl'));
+            await provider.parseShaderTree(false);
+            const html = await provider.generateWebviewContent({} as any, new RenderStartingData());
+
+            assert.ok(html.includes("case 'setInspectorCompare':"));
+            assert.ok(html.includes("case 'setInspectorCompareSplit':"));
+            assert.ok(html.includes("case 'setInspectorCompareFlip':"));
+            assert.ok(html.includes("case 'setInspectorHover':"));
+            assert.ok(html.includes("case 'setInspectorHistogram':"));
+            assert.ok(html.includes("case 'setInspectorHistogramInterval':"));
+            assert.ok(html.includes("case 'setInspectorHistogramSampleStride':"));
         } finally {
             moduleWithLoad._load = originalLoad;
         }

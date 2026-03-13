@@ -13,6 +13,14 @@ const SIMPLE_SHADER = `void main() {
 }
 `;
 
+const CRLF_DECLARATION_SHADER = "void mainImage(out vec4 fragColor, in vec2 fragCoord) {\r\n" +
+    "    float blobs = 1.0;\r\n" +
+    "    float x = smoothstep(3., 6., blobs);\r\n" +
+    "    float y = smoothstep(3., 5., blobs);\r\n" +
+    "    float z = smoothstep(3., 8., blobs);\r\n" +
+    "    fragColor = vec4(x + y + z);\r\n" +
+    "}\r\n";
+
 function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
     const repoRoot = path.resolve(__dirname, '../../');
     const inspectPath = path.join(repoRoot, 'resources', 'webview', 'shader_inspect.js');
@@ -24,6 +32,7 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
     let renderTargetReadPixelsCalls = 0;
     let lastRenderTargetReadSize = { width: 0, height: 0 };
     let renderCalls = 0;
+    const renderedFragmentShaders: string[] = [];
     const scissorCalls: Array<{ x: number; y: number; width: number; height: number }> = [];
     const viewportCalls: Array<{ x: number; y: number; width: number; height: number }> = [];
     const scissorTestStates: boolean[] = [];
@@ -99,6 +108,8 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
         setRenderTarget: () => undefined,
         render: () => {
             renderCalls++;
+            const currentMaterial = (sandbox.quad as { material?: { fragmentShader?: string } }).material;
+            renderedFragmentShaders.push(currentMaterial?.fragmentShader || '');
         },
         domElement: canvas,
         setScissorTest: (enabled: boolean) => {
@@ -234,11 +245,20 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
                 inspector: {
                     handleMessage: (message: { command: string; [key: string]: unknown }) => void;
                     getCompareSplit: () => number;
+                    isCompareFlipEnabled: () => boolean;
                     isHistogramEnabled: () => boolean;
                     getHistogramIntervalMs: () => number;
                     getHistogramSampleStride: () => number;
                     renderBuffer: (buffer: { Shader: typeof material; Target: unknown }, index: number, totalBuffers: number) => boolean;
                     afterFrame: () => void;
+                    rewrite: {
+                        rewriteForInspector: (source: string, variable: string, mapping: {
+                            mode: 'linear' | 'sigmoid' | 'log';
+                            min: number;
+                            max: number;
+                            highlightOutOfRange: boolean;
+                        }, inspectorLine?: number) => string | null;
+                    };
                 };
             };
             buffers: Array<{ Shader: typeof material; Target: unknown }>;
@@ -251,6 +271,7 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
         getLastRenderTargetReadSize: () => ({ ...lastRenderTargetReadSize }),
         getLastSetIntervalMs: () => lastSetIntervalMs,
         getRenderCalls: () => renderCalls,
+        getRenderedFragmentShaders: () => [...renderedFragmentShaders],
         getScissorCalls: () => scissorCalls.map(call => ({ ...call })),
         getViewportCalls: () => viewportCalls.map(call => ({ ...call })),
         getScissorTestStates: () => [...scissorTestStates],
@@ -269,6 +290,37 @@ function loadInspectorHarness(options?: { deferIdleCallbacks?: boolean }) {
             }
         },
     };
+}
+
+function getHistogramPayloads(messages: Array<{
+    command: string;
+    histogram?: {
+        samples: number;
+        autoMin: number;
+        autoMax: number;
+        timeMs: number;
+        componentCount?: number;
+        binsA?: number[];
+        stalled?: boolean;
+    };
+}>) {
+    return messages.filter(message => message.command === 'inspectorHistogram' && message.histogram);
+}
+
+function getLastHistogramPayload(messages: Array<{
+    command: string;
+    histogram?: {
+        samples: number;
+        autoMin: number;
+        autoMax: number;
+        timeMs: number;
+        componentCount?: number;
+        binsA?: number[];
+        stalled?: boolean;
+    };
+}>) {
+    const histogramMessages = getHistogramPayloads(messages);
+    return histogramMessages[histogramMessages.length - 1];
 }
 
 suite('Inspect runtime', () => {
@@ -293,6 +345,116 @@ suite('Inspect runtime', () => {
 
         assert.strictEqual(material.fragmentShader, SIMPLE_SHADER);
         assert.strictEqual(sandbox.buffers[0].Shader, material);
+    });
+
+    test('toggles histogram capture through inspector messages', () => {
+        const { sandbox } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogram', enabled: false });
+        assert.strictEqual(sandbox.ShaderToy.inspector.isHistogramEnabled(), false);
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogram', enabled: true });
+        assert.strictEqual(sandbox.ShaderToy.inspector.isHistogramEnabled(), true);
+    });
+
+    test('defaults histogram refresh to 5Hz and switches to preset intervals', () => {
+        const { sandbox, getLastSetIntervalMs } = loadInspectorHarness();
+
+        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramIntervalMs(), 200);
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        assert.strictEqual(getLastSetIntervalMs(), 200);
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramInterval', intervalMs: 100 });
+        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramIntervalMs(), 100);
+        assert.strictEqual(getLastSetIntervalMs(), 100);
+    });
+
+    test('defaults histogram sample stride to 1:8 and switches to preset strides', () => {
+        const { sandbox } = loadInspectorHarness();
+
+        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramSampleStride(), 8);
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramSampleStride', sampleStride: 64 });
+        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramSampleStride(), 64);
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramSampleStride', sampleStride: 256 });
+        assert.strictEqual(sandbox.ShaderToy.inspector.getHistogramSampleStride(), 8);
+    });
+
+    test('does not capture or post histogram data before a valid inspect target exists', () => {
+        const { sandbox, messages, getFullReadPixelsCalls, getRenderTargetReadPixelsCalls } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.afterFrame();
+
+        const histogramMessages = messages.filter(message => message.command === 'inspectorHistogram');
+        assert.strictEqual(histogramMessages.length, 1);
+        assert.strictEqual(histogramMessages[0].histogram ?? null, null);
+        assert.strictEqual(getFullReadPixelsCalls(), 0);
+        assert.strictEqual(getRenderTargetReadPixelsCalls(), 0);
+    });
+
+    test('does not sample hover pixels before a valid inspect target exists', () => {
+        const { sandbox, messages, triggerCanvasEvent, getFullReadPixelsCalls } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        triggerCanvasEvent('mousemove', { clientX: 1, clientY: 1 });
+        sandbox.ShaderToy.inspector.afterFrame();
+
+        const pixelMessages = messages.filter(message => message.command === 'inspectorPixel');
+        assert.strictEqual(pixelMessages.length, 0);
+        assert.strictEqual(getFullReadPixelsCalls(), 0);
+    });
+
+    test('histogram reports the observed raw domain with active histogram timing', () => {
+        const { sandbox, messages, getFullReadPixelsCalls, getRenderTargetReadPixelsCalls } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({
+            command: 'setInspectorMapping',
+            mapping: { mode: 'linear', min: -1, max: 1, highlightOutOfRange: false }
+        });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramSampleStride', sampleStride: 1 });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        sandbox.ShaderToy.inspector.afterFrame();
+
+        const histogramMessage = getLastHistogramPayload(messages);
+        assert.ok(histogramMessage, 'Expected histogram payload to be posted');
+        assert.strictEqual(getFullReadPixelsCalls(), 0, 'Expected raw histogram capture to avoid screen readPixels fallback');
+        assert.strictEqual(getRenderTargetReadPixelsCalls(), 1, 'Expected one raw render-target readback');
+        assert.strictEqual(histogramMessage?.histogram?.samples, 4);
+        assert.strictEqual(histogramMessage?.histogram?.autoMin, -1);
+        assert.strictEqual(histogramMessage?.histogram?.autoMax, 1);
+        assert.strictEqual(histogramMessage?.histogram?.componentCount, 1);
+        assert.strictEqual(histogramMessage?.histogram?.timeMs, 3.75);
+    });
+
+    test('histogram sample stride reduces the analyzed sample count', () => {
+        const { sandbox, messages, getLastRenderTargetReadSize } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramSampleStride', sampleStride: 8 });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        sandbox.ShaderToy.inspector.afterFrame();
+
+        const histogramMessage = getLastHistogramPayload(messages);
+        assert.ok(histogramMessage, 'Expected histogram payload to be posted');
+        assert.deepStrictEqual(getLastRenderTargetReadSize(), { width: 1, height: 1 });
+        assert.strictEqual(histogramMessage?.histogram?.samples, 1);
+    });
+
+    test('finishes the active histogram and marks it stalled when newer updates are dropped', () => {
+        const { sandbox, messages, flushIdleCallbacks } = loadInspectorHarness({ deferIdleCallbacks: true });
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        sandbox.ShaderToy.inspector.afterFrame();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorHistogramSampleStride', sampleStride: 64 });
+        sandbox.ShaderToy.inspector.afterFrame();
+        flushIdleCallbacks();
+
+        const histogramMessages = getHistogramPayloads(messages);
+        assert.strictEqual(histogramMessages.length, 1);
+        assert.strictEqual(histogramMessages[0].histogram?.stalled, true);
     });
 
     test('ignores non-variable inspector targets and keeps the last valid inspection active', () => {
@@ -346,5 +508,108 @@ suite('Inspect runtime', () => {
         const statusMessage = messages.find(message => message.command === 'inspectorStatus' && message.status === 'ok');
         assert.strictEqual(statusMessage?.variable, 'uv');
         assert.strictEqual(statusMessage?.message, 'Inspecting: uv (vec2)');
+    });
+
+    test('keeps declaration-line inspector injection separate under CRLF line endings', () => {
+        const { sandbox } = loadInspectorHarness();
+
+        const rewritten = sandbox.ShaderToy.inspector.rewrite.rewriteForInspector(
+            CRLF_DECLARATION_SHADER,
+            'x',
+            { mode: 'linear', min: 0, max: 1, highlightOutOfRange: false },
+            3
+        );
+
+        assert.ok(rewritten);
+        assert.ok(!rewritten.includes('));    float y ='));
+        assert.ok(rewritten.includes('float x = smoothstep(3., 6., blobs);\r\n  fragColor = _inspMap(vec4(x, x, x, 1.0));\r\n    float y = smoothstep(3., 5., blobs);'));
+    });
+
+    test('renders compare mode as a split between original and inspected output', () => {
+        const { material, sandbox, getRenderCalls, getRenderedFragmentShaders, getScissorCalls, getViewportCalls, getScissorTestStates } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompare', enabled: true });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompareSplit', split: 0.5 });
+
+        assert.ok(material.fragmentShader.includes('_inspMap('));
+        assert.strictEqual(sandbox.ShaderToy.inspector.getCompareSplit(), 0.5);
+        const rendered = sandbox.ShaderToy.inspector.renderBuffer(sandbox.buffers[0], 0, 1);
+        assert.strictEqual(rendered, true);
+        assert.strictEqual(getRenderCalls(), 2);
+        const renderedShaders = getRenderedFragmentShaders();
+        assert.strictEqual(renderedShaders[0].includes('_inspMap('), false);
+        assert.strictEqual(renderedShaders[1].includes('_inspMap('), true);
+        assert.deepStrictEqual(getScissorTestStates(), [true, false]);
+        assert.deepStrictEqual(getScissorCalls(), [
+            { x: 0, y: 0, width: 1, height: 2 },
+            { x: 1, y: 0, width: 1, height: 2 },
+            { x: 0, y: 0, width: 2, height: 2 }
+        ]);
+        assert.deepStrictEqual(getViewportCalls(), [
+            { x: 0, y: 0, width: 1, height: 2 },
+            { x: 1, y: 0, width: 1, height: 2 },
+            { x: 0, y: 0, width: 2, height: 2 }
+        ]);
+    });
+
+    test('flips compare mode sides without changing the split position', () => {
+        const { sandbox, getRenderedFragmentShaders, getScissorCalls, getViewportCalls } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompare', enabled: true });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompareSplit', split: 0.5 });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompareFlip', enabled: true });
+
+        assert.strictEqual(sandbox.ShaderToy.inspector.getCompareSplit(), 0.5);
+        assert.strictEqual(sandbox.ShaderToy.inspector.isCompareFlipEnabled(), true);
+
+        const rendered = sandbox.ShaderToy.inspector.renderBuffer(sandbox.buffers[0], 0, 1);
+        assert.strictEqual(rendered, true);
+        const renderedShaders = getRenderedFragmentShaders();
+        assert.strictEqual(renderedShaders[0].includes('_inspMap('), true);
+        assert.strictEqual(renderedShaders[1].includes('_inspMap('), false);
+        assert.deepStrictEqual(getScissorCalls(), [
+            { x: 0, y: 0, width: 1, height: 2 },
+            { x: 1, y: 0, width: 1, height: 2 },
+            { x: 0, y: 0, width: 2, height: 2 }
+        ]);
+        assert.deepStrictEqual(getViewportCalls(), [
+            { x: 0, y: 0, width: 1, height: 2 },
+            { x: 1, y: 0, width: 1, height: 2 },
+            { x: 0, y: 0, width: 2, height: 2 }
+        ]);
+    });
+
+    test('requests a redraw for hover updates while paused', () => {
+        const { sandbox, triggerCanvasEvent } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.forceRenderOneFrame = false;
+        sandbox.freezeSimulationOnNextForcedRender = false;
+        (sandbox as unknown as { paused: boolean }).paused = true;
+
+        triggerCanvasEvent('mousemove', { clientX: 1, clientY: 1 });
+
+        assert.strictEqual(sandbox.forceRenderOneFrame, true);
+        assert.strictEqual(sandbox.freezeSimulationOnNextForcedRender, true);
+    });
+
+    test('requests a frozen redraw for compare split updates while paused', () => {
+        const { sandbox } = loadInspectorHarness();
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'inspectorOn' });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorVariable', variable: 'x', line: 2 });
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompare', enabled: true });
+        sandbox.forceRenderOneFrame = false;
+        sandbox.freezeSimulationOnNextForcedRender = false;
+        (sandbox as unknown as { paused: boolean }).paused = true;
+
+        sandbox.ShaderToy.inspector.handleMessage({ command: 'setInspectorCompareSplit', split: 0.25 });
+
+        assert.strictEqual(sandbox.forceRenderOneFrame, true);
+        assert.strictEqual(sandbox.freezeSimulationOnNextForcedRender, true);
     });
 });

@@ -368,6 +368,13 @@ export class WebviewContentProvider {
                 generateContent: () => [
                     "case 'setInspectorVariable':",
                     "case 'setInspectorMapping':",
+                    "case 'setInspectorCompare':",
+                    "case 'setInspectorCompareSplit':",
+                    "case 'setInspectorCompareFlip':",
+                    "case 'setInspectorHover':",
+                    "case 'setInspectorHistogram':",
+                    "case 'setInspectorHistogramInterval':",
+                    "case 'setInspectorHistogramSampleStride':",
                     "case 'inspectorOn':",
                     "case 'inspectorOff':",
                     '    if (window.ShaderToy && window.ShaderToy.inspector) {',
@@ -396,6 +403,9 @@ export class WebviewContentProvider {
             const omitInspectorContent: WebviewExtension = {
                 generateContent: () => ''
             };
+            const omitFrameTimingContent: WebviewExtension = {
+                generateContent: () => ''
+            };
 
             this.webviewAssembler.addReplaceModule(
                 generateStandalone ? omitInspectorContent : inspectorMessageRouting,
@@ -412,6 +422,64 @@ export class WebviewContentProvider {
                 '<!-- Inspector After Frame -->',
                 '<!-- Inspector After Frame -->'
             );
+
+            if (generateStandalone) {
+                this.webviewAssembler.addReplaceModule(
+                    omitFrameTimingContent,
+                    'if (window.ShaderToy && window.ShaderToy.frameTiming && typeof window.ShaderToy.frameTiming.setPaused === \'function\') {',
+                    'if (window.ShaderToy && window.ShaderToy.frameTiming && typeof window.ShaderToy.frameTiming.setPaused === \'function\') {'
+                );
+                this.webviewAssembler.addReplaceModule(
+                    omitFrameTimingContent,
+                    'window.ShaderToy.frameTiming.setPaused(paused);',
+                    'window.ShaderToy.frameTiming.setPaused(paused);'
+                );
+                this.webviewAssembler.addReplaceModule(
+                    omitFrameTimingContent,
+                    'case \'enableFrameTiming\':',
+                    'case \'enableFrameTiming\':'
+                );
+                this.webviewAssembler.addReplaceModule(
+                    omitFrameTimingContent,
+                    'window.ShaderToy.frameTiming.setEnabled(true);',
+                    'window.ShaderToy.frameTiming.setEnabled(true);'
+                );
+                this.webviewAssembler.addReplaceModule(
+                    omitFrameTimingContent,
+                    'if (window.ShaderToy && window.ShaderToy.frameTiming) {',
+                    'if (window.ShaderToy && window.ShaderToy.frameTiming) {'
+                );
+                this.webviewAssembler.addReplaceModule(
+                    omitFrameTimingContent,
+                    'case \'disableFrameTiming\':',
+                    'case \'disableFrameTiming\':'
+                );
+                this.webviewAssembler.addReplaceModule(
+                    omitFrameTimingContent,
+                    'window.ShaderToy.frameTiming.setEnabled(false);',
+                    'window.ShaderToy.frameTiming.setEnabled(false);'
+                );
+                this.webviewAssembler.addReplaceModule(
+                    omitFrameTimingContent,
+                    'if (!renderFrozenFrameOnly && window.ShaderToy && window.ShaderToy.frameTiming) {',
+                    'if (!renderFrozenFrameOnly && window.ShaderToy && window.ShaderToy.frameTiming) {'
+                );
+                this.webviewAssembler.addReplaceModule(
+                    omitFrameTimingContent,
+                    'window.ShaderToy.frameTiming.beginFrame(vscode, frameCounter);',
+                    'window.ShaderToy.frameTiming.beginFrame(vscode, frameCounter);'
+                );
+                this.webviewAssembler.addReplaceModule(
+                    omitFrameTimingContent,
+                    'if (window.ShaderToy && window.ShaderToy.frameTiming && typeof window.ShaderToy.frameTiming.resetSampleWindow === \'function\') {',
+                    'if (window.ShaderToy && window.ShaderToy.frameTiming && typeof window.ShaderToy.frameTiming.resetSampleWindow === \'function\') {'
+                );
+                this.webviewAssembler.addReplaceModule(
+                    omitFrameTimingContent,
+                    'window.ShaderToy.frameTiming.resetSampleWindow();',
+                    'window.ShaderToy.frameTiming.resetSampleWindow();'
+                );
+            }
 
             const jqueryExtension = new JQueryExtension(getWebviewResourcePath, generateStandalone);
             this.webviewAssembler.addReplaceModule(jqueryExtension, '<script src="<!-- JQuery.js -->"></script>', '<!-- JQuery.js -->');
@@ -443,8 +511,12 @@ export class WebviewContentProvider {
             const webviewRenderLoop = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/render_loop.js', getResourceText);
             this.webviewAssembler.addReplaceModule(webviewRenderLoop, '<!-- Webview render_loop.js -->', '<!-- Webview render_loop.js -->');
 
-            const webviewFrameTiming = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/frame_timing.js', getResourceText);
-            this.webviewAssembler.addReplaceModule(webviewFrameTiming, '<!-- Webview frame_timing.js -->', '<!-- Webview frame_timing.js -->');
+            if (generateStandalone) {
+                this.webviewAssembler.addReplaceModule(omitInspectorContent, '<!-- Webview frame_timing.js -->', '<!-- Webview frame_timing.js -->');
+            } else {
+                const webviewFrameTiming = new WebviewModuleScriptExtension(getWebviewResourcePath, generateStandalone, 'webview/frame_timing.js', getResourceText);
+                this.webviewAssembler.addReplaceModule(webviewFrameTiming, '<!-- Webview frame_timing.js -->', '<!-- Webview frame_timing.js -->');
+            }
 
             if (generateStandalone) {
                 this.webviewAssembler.addReplaceModule(omitInspectorContent, '<!-- Webview shader_inspect.js -->', '<!-- Webview shader_inspect.js -->');
@@ -455,8 +527,10 @@ export class WebviewContentProvider {
         }
 
         // Frame Timing — inject render loop hook
-        const frameTimingInitExtension = new FrameTimingInitExtension();
-        this.webviewAssembler.addWebviewModule(frameTimingInitExtension, '// Frame Timing');
+        if (!generateStandalone) {
+            const frameTimingInitExtension = new FrameTimingInitExtension();
+            this.webviewAssembler.addWebviewModule(frameTimingInitExtension, '// Frame Timing');
+        }
 
         // Keep the GLSL #line "self" sentinel source-id consistent between extension and webview.
         const selfSourceIdExtension = new SelfSourceIdExtension(SELF_SOURCE_ID);

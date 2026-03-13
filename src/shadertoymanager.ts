@@ -25,6 +25,8 @@ const DEFAULT_INSPECTOR_MAPPING: InspectorMapping = {
     max: 1,
     highlightOutOfRange: false
 };
+const DEFAULT_INSPECTOR_HISTOGRAM_INTERVAL_MS = 200;
+const DEFAULT_INSPECTOR_HISTOGRAM_SAMPLE_STRIDE = 8;
 
 export class ShaderToyManager {
     context: Context;
@@ -42,6 +44,13 @@ export class ShaderToyManager {
     private _lastInspectorLine = 0;
     private _lastInspectorType = '';
     private _lastInspectorMapping: InspectorMapping = { ...DEFAULT_INSPECTOR_MAPPING };
+    private _lastInspectorCompareEnabled = false;
+    private _lastInspectorCompareSplit = 0.5;
+    private _lastInspectorCompareFlipEnabled = false;
+    private _lastInspectorHoverEnabled = true;
+    private _lastInspectorHistogramEnabled = true;
+    private _lastInspectorHistogramIntervalMs = DEFAULT_INSPECTOR_HISTOGRAM_INTERVAL_MS;
+    private _lastInspectorHistogramSampleStride = DEFAULT_INSPECTOR_HISTOGRAM_SAMPLE_STRIDE;
 
     constructor(context: Context) {
         this.context = context;
@@ -217,6 +226,83 @@ export class ShaderToyManager {
             }
         });
 
+        this.inspectPanel.setOnCompareChanged((enabled: boolean) => {
+            this._lastInspectorCompareEnabled = enabled;
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorCompare',
+                    enabled: this._lastInspectorCompareEnabled
+                });
+            }
+        });
+
+        this.inspectPanel.setOnCompareSplitChanged((split: number) => {
+            const normalizedSplit = Number.isFinite(split) ? Math.max(0.1, Math.min(0.9, split)) : 0.5;
+            this._lastInspectorCompareSplit = normalizedSplit;
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorCompareSplit',
+                    split: this._lastInspectorCompareSplit
+                });
+            }
+        });
+
+        this.inspectPanel.setOnCompareFlipChanged((enabled: boolean) => {
+            this._lastInspectorCompareFlipEnabled = enabled;
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorCompareFlip',
+                    enabled: this._lastInspectorCompareFlipEnabled
+                });
+            }
+        });
+
+        this.inspectPanel.setOnHoverChanged((enabled: boolean) => {
+            this._lastInspectorHoverEnabled = enabled;
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorHover',
+                    enabled: this._lastInspectorHoverEnabled
+                });
+            }
+        });
+
+        this.inspectPanel.setOnHistogramChanged((enabled: boolean) => {
+            this._lastInspectorHistogramEnabled = enabled;
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorHistogram',
+                    enabled: this._lastInspectorHistogramEnabled
+                });
+            }
+        });
+
+        this.inspectPanel.setOnHistogramIntervalChanged((intervalMs: number) => {
+            const normalizedInterval = intervalMs === 100 || intervalMs === 200 || intervalMs === 1000
+                ? intervalMs
+                : DEFAULT_INSPECTOR_HISTOGRAM_INTERVAL_MS;
+            this._lastInspectorHistogramIntervalMs = normalizedInterval;
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorHistogramInterval',
+                    intervalMs: this._lastInspectorHistogramIntervalMs
+                });
+            }
+        });
+
+        this.inspectPanel.setOnHistogramSampleStrideChanged((sampleStride: number) => {
+            const normalizedStride = sampleStride === 1 || sampleStride === 8 || sampleStride === 64
+                ? sampleStride
+                : DEFAULT_INSPECTOR_HISTOGRAM_SAMPLE_STRIDE;
+            this._lastInspectorHistogramSampleStride = normalizedStride;
+            if (this.webviewPanel !== undefined) {
+                this.webviewPanel.Panel.webview.postMessage({
+                    command: 'setInspectorHistogramSampleStride',
+                    sampleStride: this._lastInspectorHistogramSampleStride
+                });
+            }
+        });
+
         this.inspectPanel.setOnDidDispose(() => {
             this.stopSelectionListener();
             if (this.webviewPanel !== undefined) {
@@ -284,7 +370,14 @@ export class ShaderToyManager {
     private resendInspectPanelState = () => {
         if (!this.inspectPanel.isActive) return;
         this.inspectPanel.postInspectorState(
-            this._lastInspectorMapping
+            this._lastInspectorMapping,
+            this._lastInspectorCompareEnabled,
+            this._lastInspectorCompareSplit,
+            this._lastInspectorCompareFlipEnabled,
+            this._lastInspectorHoverEnabled,
+            this._lastInspectorHistogramEnabled,
+            this._lastInspectorHistogramIntervalMs,
+            this._lastInspectorHistogramSampleStride
         );
         if (this._lastInspectorVariable) {
             this.inspectPanel.postVariableUpdate(this._lastInspectorVariable, this._lastInspectorLine, this._lastInspectorType);
@@ -297,6 +390,34 @@ export class ShaderToyManager {
         this.webviewPanel.Panel.webview.postMessage({
             command: 'setInspectorMapping',
             mapping: this._lastInspectorMapping
+        });
+        this.webviewPanel.Panel.webview.postMessage({
+            command: 'setInspectorCompare',
+            enabled: this._lastInspectorCompareEnabled
+        });
+        this.webviewPanel.Panel.webview.postMessage({
+            command: 'setInspectorCompareSplit',
+            split: this._lastInspectorCompareSplit
+        });
+        this.webviewPanel.Panel.webview.postMessage({
+            command: 'setInspectorCompareFlip',
+            enabled: this._lastInspectorCompareFlipEnabled
+        });
+        this.webviewPanel.Panel.webview.postMessage({
+            command: 'setInspectorHover',
+            enabled: this._lastInspectorHoverEnabled
+        });
+        this.webviewPanel.Panel.webview.postMessage({
+            command: 'setInspectorHistogram',
+            enabled: this._lastInspectorHistogramEnabled
+        });
+        this.webviewPanel.Panel.webview.postMessage({
+            command: 'setInspectorHistogramInterval',
+            intervalMs: this._lastInspectorHistogramIntervalMs
+        });
+        this.webviewPanel.Panel.webview.postMessage({
+            command: 'setInspectorHistogramSampleStride',
+            sampleStride: this._lastInspectorHistogramSampleStride
         });
         if (this._lastInspectorVariable) {
             this.webviewPanel.Panel.webview.postMessage({
@@ -376,6 +497,16 @@ export class ShaderToyManager {
                     }
                     return;
                 }
+                case 'inspectorPixel':
+                    if (this.inspectPanel.isActive && Array.isArray(message.rgba) && message.position) {
+                        this.inspectPanel.postPixel(message.rgba, message.position);
+                    }
+                    return;
+                case 'inspectorHistogram':
+                    if (this.inspectPanel.isActive) {
+                        this.inspectPanel.postHistogram(message.histogram);
+                    }
+                    return;
                 case 'readDDSFile':
                 {
                     const requestId: number = message.requestId;
@@ -457,6 +588,9 @@ export class ShaderToyManager {
                     if (this.webviewPanel !== undefined && this.webviewPanel.Panel === newWebviewPanel) {
                         this.dynamicPreviewReady = true;
                         this.framesPanel.postPreviewPaused(!!this.startingData.Paused);
+                        if (this.inspectPanel.isActive) {
+                            this.resendInspectorState();
+                        }
                         if (this.timingEnabled) {
                             this.webviewPanel.Panel.webview.postMessage({ command: 'enableFrameTiming' });
                         }
