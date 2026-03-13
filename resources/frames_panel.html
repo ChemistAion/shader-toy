@@ -257,6 +257,7 @@ html, body {
         gpuBuf: new RingBuffer(CAPACITY),
         realDtBuf: new RingBuffer(CAPACITY),
         paused: false,
+        previewPaused: false,
         hoverIndex: null,
         visibleFrames: DEFAULT_VISIBLE,
         statsUnit: 'ms',
@@ -545,11 +546,11 @@ html, body {
         ctx.fillText(totalFrames + ' frames', w - marginRight - 2, headerY);
 
         // ── Layer 8: PAUSED label ───────────────────────────────────────
-        if (state.paused) {
+        if (state.paused || state.previewPaused) {
             ctx.font = 'bold 11px ' + FONT_MONO;
             ctx.fillStyle = theme.paused;
             ctx.textAlign = 'center';
-            ctx.fillText('PAUSED', w / 2, headerY);
+            ctx.fillText(state.previewPaused ? 'PREVIEW PAUSED' : 'PAUSED', w / 2, headerY);
         }
 
         // ── Layer 9: Visible frames count ───────────────────────────────
@@ -669,7 +670,7 @@ html, body {
         var msg = event.data;
         if (!msg) return;
 
-        if (msg.command === 'frameData' && !state.paused) {
+        if (msg.command === 'frameData' && !state.paused && !state.previewPaused) {
             state.cpuBuf.push(msg.cpuMs);
             if (msg.gpuMs > 0) state.gpuBuf.push(msg.gpuMs);
 
@@ -694,6 +695,12 @@ html, body {
                 _lastP99 = 0;
                 requestRedraw();
             }
+        }
+
+        if (msg.command === 'setPreviewPaused') {
+            state.previewPaused = !!msg.paused;
+            if (!state.previewPaused) lastRealTime = 0;
+            requestRedraw();
         }
     });
 

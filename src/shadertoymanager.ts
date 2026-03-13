@@ -35,6 +35,7 @@ export class ShaderToyManager {
     staticWebviews: StaticWebview[] = [];
     framesPanel: FramesPanel;
     private timingEnabled = false;
+    private dynamicPreviewReady = false;
     inspectPanel: InspectPanel;
     private selectionListener: vscode.Disposable | undefined;
     private _lastInspectorVariable = '';
@@ -73,12 +74,14 @@ export class ShaderToyManager {
         }
 
         if (this.webviewPanel) {
+            this.dynamicPreviewReady = false;
             this.webviewPanel.Panel.dispose();
         }
         const newWebviewPanel = this.createWebview('GLSL Preview', undefined);
         this.webviewPanel = {
             Panel: newWebviewPanel,
             OnDidDispose: () => {
+                this.dynamicPreviewReady = false;
                 this.webviewPanel = undefined;
             }
         };
@@ -182,13 +185,14 @@ export class ShaderToyManager {
 
     public showFrameTimePanel = () => {
         this.framesPanel.show();
+        this.framesPanel.postPreviewPaused(!!this.startingData.Paused);
         this.postTimingCommand(true);
     };
 
     private postTimingCommand = (enable: boolean) => {
         this.timingEnabled = enable;
         const command = enable ? 'enableFrameTiming' : 'disableFrameTiming';
-        if (this.webviewPanel !== undefined) {
+        if (this.webviewPanel !== undefined && (!enable || this.dynamicPreviewReady)) {
             this.webviewPanel.Panel.webview.postMessage({ command });
         }
         this.framesPanel.postSetEnabled(enable);
@@ -311,6 +315,7 @@ export class ShaderToyManager {
     };
     private resetPauseState = () => {
         this.startingData.Paused = false;
+        this.framesPanel.postPreviewPaused(false);
     };
 
     private createWebview = (title: string, localResourceRoots: vscode.Uri[] | undefined) => {
@@ -448,11 +453,21 @@ export class ShaderToyManager {
                         });
                     }
                     return;
+                case 'previewReady':
+                    if (this.webviewPanel !== undefined && this.webviewPanel.Panel === newWebviewPanel) {
+                        this.dynamicPreviewReady = true;
+                        this.framesPanel.postPreviewPaused(!!this.startingData.Paused);
+                        if (this.timingEnabled) {
+                            this.webviewPanel.Panel.webview.postMessage({ command: 'enableFrameTiming' });
+                        }
+                    }
+                    return;
                 case 'updateTime':
                     this.startingData.Time = message.time;
                     return;
                 case 'setPause':
                     this.startingData.Paused = message.paused;
+                    this.framesPanel.postPreviewPaused(!!message.paused);
                     return;
                 case 'updateMouse':
                     this.startingData.Mouse = message.mouse;
@@ -519,6 +534,11 @@ export class ShaderToyManager {
         const webviewContentProvider = new WebviewContentProvider(this.context, document.getText(), document.fileName);
         const localResources = await webviewContentProvider.parseShaderTree(false);
 
+        const isDynamicPreview = this.webviewPanel !== undefined && webviewPanel.Panel === this.webviewPanel.Panel;
+        if (isDynamicPreview) {
+            this.dynamicPreviewReady = false;
+        }
+
         let localResourceRoots: string[] = [];
         for (const localResource of localResources) {
             const localResourceRoot = path.dirname(localResource);
@@ -543,9 +563,8 @@ export class ShaderToyManager {
 
         webviewPanel.Panel.webview.html = await webviewContentProvider.generateWebviewContent(webviewPanel.Panel.webview, this.startingData);
 
-        // Re-send timing state after webview (re)load so FRAMES panel keeps receiving data
-        if (this.timingEnabled && this.webviewPanel && webviewPanel.Panel === this.webviewPanel.Panel) {
-            this.webviewPanel.Panel.webview.postMessage({ command: 'enableFrameTiming' });
+        if (isDynamicPreview) {
+            this.framesPanel.postPreviewPaused(!!this.startingData.Paused);
         }
 
         return webviewPanel;
