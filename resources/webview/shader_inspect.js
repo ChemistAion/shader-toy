@@ -438,20 +438,68 @@ vec4 _inspMap(vec4 v) {${oor}
         return lineAtOffset(source, m.index + (m[1].length || 0));
     }
 
+    /** Map an editor/source line to the physical line in the transformed shader, honoring #line remapping. */
+    function mapSourceLineForInspection(source, requestedLine) {
+        if (!(requestedLine > 0)) return requestedLine;
+
+        const lines = source.split(/\r?\n/);
+        let sawDirective = false;
+        let logicalLine = 1;
+        let sourceId = 0;
+
+        for (let index = 0; index < lines.length; index++) {
+            const line = lines[index];
+            const directiveMatch = line.match(/^\s*#line\s+(\d+)(?:\s+(\d+))?\s*$/);
+            if (directiveMatch) {
+                sawDirective = true;
+                logicalLine = Number(directiveMatch[1]) || 1;
+                if (directiveMatch[2] !== undefined) {
+                    sourceId = Number(directiveMatch[2]) || 0;
+                }
+                continue;
+            }
+
+            if (sawDirective && sourceId === 0 && logicalLine === requestedLine) {
+                return index + 1;
+            }
+
+            logicalLine++;
+        }
+
+        return requestedLine + getPreambleOffset(source);
+    }
+
     /** Compute insertion point in main body (port of q8) */
     function findInsertionPoint(body, variable, source, bodyStart, inspectorLine) {
         if (inspectorLine === undefined) return body.length;
 
         const mainStartLine = lineAtOffset(source, bodyStart);
         const relativeLine = inspectorLine - mainStartLine;
-        const lines = body.split('\n');
+        const lineRanges = [];
+        let cursor = 0;
+        while (cursor <= body.length) {
+            const lineBreakMatch = /\r?\n/.exec(body.slice(cursor));
+            if (!lineBreakMatch) {
+                lineRanges.push({ start: cursor, end: body.length, line: body.slice(cursor) });
+                break;
+            }
 
-        if (relativeLine < 0 || relativeLine >= lines.length) return body.length;
+            const lineBreakIndex = cursor + lineBreakMatch.index;
+            const lineBreakLength = lineBreakMatch[0].length;
+            lineRanges.push({
+                start: cursor,
+                end: lineBreakIndex + lineBreakLength,
+                line: body.slice(cursor, lineBreakIndex)
+            });
+            cursor = lineBreakIndex + lineBreakLength;
+        }
 
-        // Compute offset to end of target line
-        let offset = 0;
-        for (let k = 0; k < relativeLine; k++) offset += lines[k].length + 1;
-        let endOfLine = offset + lines[relativeLine].length + 1;
+        if (relativeLine < 0 || relativeLine >= lineRanges.length) return body.length;
+
+        const targetLineRange = lineRanges[relativeLine];
+        const offset = targetLineRange.start;
+        let endOfLine = targetLineRange.end;
+
         endOfLine = Math.min(endOfLine, body.length);
 
         // Check for unclosed parens/brackets at endOfLine
@@ -483,7 +531,7 @@ vec4 _inspMap(vec4 v) {${oor}
         const varWord = variable.match(/^\w+/);
         if (varWord) {
             const escaped = escapeRegex(varWord[0]);
-            if (new RegExp(`\\b(?:float|int|uint|bool|vec[234]|ivec[234]|uvec[234]|mat[234])\\s+${escaped}\\b`).test(lines[relativeLine])) {
+            if (new RegExp(`\\b(?:float|int|uint|bool|vec[234]|ivec[234]|uvec[234]|mat[234])\\s+${escaped}\\b`).test(targetLineRange.line)) {
                 return endOfLine;
             }
         }
@@ -573,6 +621,14 @@ vec4 _inspMap(vec4 v) {${oor}
         return null;
     }
 
+    function buildInjectedStatement(before, after, statement, body) {
+        const lineEndingMatch = body.match(/\r?\n/);
+        const lineEnding = lineEndingMatch ? lineEndingMatch[0] : '\n';
+        const prefix = before.length > 0 && !/[\r\n]$/.test(before) ? lineEnding : '';
+        const suffix = after.length > 0 && !/^[\r\n]/.test(after) ? lineEnding : '';
+        return prefix + statement + suffix;
+    }
+
     /** Build inspector shader with mapping (port of vb) */
     function buildInspectorShader(source, variable, vec4Expr, mapping, isFunc, inspectorLine) {
         const inspMap = generateInspMap(mapping);
@@ -601,19 +657,21 @@ vec4 _inspMap(vec4 v) {${oor}
         const insertPt = findInsertionPoint(body, variable, source, bounds.bodyStart, inspectorLine);
         const before = body.slice(0, insertPt);
         const after = body.slice(insertPt);
+        const injectedStatement = buildInjectedStatement(before, after, `  fragColor = _inspMap(${mappedExpr});`, body);
 
         if (bounds.isMainImage) {
             return prefix + inspMap +
                 `void mainImage(out vec4 fragColor, in vec2 fragCoord) {\n` +
                 `vec4 ${INSP_FC} = vec4(0.0);\n` +
                 before +
-                `\n  fragColor = _inspMap(${mappedExpr});` + after +
+                injectedStatement + after +
                 `\n}\n` + suffix;
         }
+        const injectedMainStatement = buildInjectedStatement(before, after, `  gl_FragColor = _inspMap(${mappedExpr});`, body);
         return prefix + inspMap +
             `void main() {\nvec4 ${INSP_FC} = vec4(0.0);\n` +
             before +
-            `\n  gl_FragColor = _inspMap(${mappedExpr});` + after +
+            injectedMainStatement + after +
             `\n}\n`;
     }
 
@@ -643,19 +701,21 @@ vec4 _inspMap(vec4 v) {${oor}
         const insertPt = findInsertionPoint(body, variable, source, bounds.bodyStart, inspectorLine);
         const before = body.slice(0, insertPt);
         const after = body.slice(insertPt);
+        const injectedStatement = buildInjectedStatement(before, after, `  fragColor = ${mappedExpr};`, body);
 
         if (bounds.isMainImage) {
             return prefix +
                 `void mainImage(out vec4 fragColor, in vec2 fragCoord) {\n` +
                 `vec4 ${INSP_FC} = vec4(0.0);\n` +
                 before +
-                `\n  fragColor = ${mappedExpr};` + after +
+                injectedStatement + after +
                 `\n}\n` + suffix;
         }
+        const injectedMainStatement = buildInjectedStatement(before, after, `  gl_FragColor = ${mappedExpr};`, body);
         return prefix +
             `void main() {\nvec4 ${INSP_FC} = vec4(0.0);\n` +
             before +
-            `\n  gl_FragColor = ${mappedExpr};` + after +
+            injectedMainStatement + after +
             `\n}\n`;
     }
 
@@ -815,6 +875,10 @@ vec4 _inspMap(vec4 v) {${oor}
         return Math.max(0.1, Math.min(0.9, numericSplit));
     }
 
+    function hasHistogramTarget() {
+        return !!(_active && _variable && _inspectorMaterial);
+    }
+
     function getNowMs() {
         if (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') {
             return performance.now();
@@ -945,7 +1009,7 @@ vec4 _inspMap(vec4 v) {${oor}
     }
 
     function ensureCompareOverlay() {
-        if (_compareOverlayRoot || typeof document === 'undefined' || typeof document.createElement !== 'function' || !document.body) return;
+        if (_compareOverlayRoot || typeof document === 'undefined') return;
         const root = document.createElement('div');
         root.style.position = 'fixed';
         root.style.pointerEvents = 'none';
@@ -1108,6 +1172,15 @@ vec4 _inspMap(vec4 v) {${oor}
                     componentCount: componentCount,
                     stalled: !!stalled
                 }
+            });
+        }
+    }
+
+    function clearHistogramDisplay() {
+        if (typeof vscode !== 'undefined' && vscode) {
+            vscode.postMessage({
+                command: 'inspectorHistogram',
+                histogram: null
             });
         }
     }
@@ -1314,7 +1387,7 @@ vec4 _inspMap(vec4 v) {${oor}
             }
 
             // Adjust VS Code editor line → source line (account for preamble)
-            const sourceLine = _line > 0 ? _line + getPreambleOffset(source) : _line;
+            const sourceLine = mapSourceLineForInspection(source, _line);
             const inspectTarget = tryResolveInspectableVariable(source, _variable, sourceLine);
             if (!inspectTarget) {
                 return;
@@ -1377,6 +1450,10 @@ vec4 _inspMap(vec4 v) {${oor}
                 syncCompareOriginalMaterial(finalIdx, origMat);
                 updateCompareOverlay();
 
+                if (_histogramEnabled && _active) {
+                    requestHistogramUpdateNow();
+                }
+
                 postStatus('ok', 'Inspecting: ' + _variable + ' (' + type + ')', _variable, type);
             }
         } catch (err) {
@@ -1405,7 +1482,22 @@ vec4 _inspMap(vec4 v) {${oor}
         _inspectorMaterial = null;
         _inspectorType = '';
         _lastRewrittenSource = '';
+        cancelHistogramWork();
+        clearHistogramDisplay();
         updateCompareOverlay();
+    }
+
+    function clearInspectionTarget() {
+        const hadInspection = !!(_variable || _inspectorMaterial);
+        restoreOriginal();
+        _variable = '';
+        _line = 0;
+        _inspectorType = '';
+        _lastRewrittenSource = '';
+        if (hadInspection) {
+            requestPreviewFrame();
+        }
+        postStatus('', '', '', '');
     }
 
     /** Post status back to extension host */
@@ -1453,7 +1545,7 @@ vec4 _inspMap(vec4 v) {${oor}
 
         withFrameTimingExcludedWork(updateCompareOverlay);
 
-        if (_hoverEnabled && _mouseInCanvas && _mouseX >= 0 && _mouseY >= 0) {
+        if (hasHistogramTarget() && _hoverEnabled && _mouseInCanvas && _mouseX >= 0 && _mouseY >= 0) {
             withFrameTimingExcludedWork(function () {
                 try {
                     const pixel = new Uint8Array(4);
@@ -1471,13 +1563,16 @@ vec4 _inspMap(vec4 v) {${oor}
 
         if (_histogramEnabled && _histogramDirty) {
             _histogramDirty = false;
-            withFrameTimingExcludedWork(snapshotForHistogram);
+            if (hasHistogramTarget()) {
+                withFrameTimingExcludedWork(snapshotForHistogram);
+            }
         }
     }
 
     /** One-shot full-framebuffer readPixels, then schedule CPU binning off the render path. */
     function snapshotForHistogram() {
         try {
+            if (!hasHistogramTarget()) return;
             const canvas = document.getElementById('canvas');
             if (!canvas) return;
             const w = canvas.width, h = canvas.height;
@@ -1535,10 +1630,19 @@ vec4 _inspMap(vec4 v) {${oor}
 
     /** Mark histogram as needing refresh (called after inspection changes, on a timer). */
     function requestHistogramUpdate() {
+        if (!_histogramEnabled || !hasHistogramTarget()) {
+            _histogramDirty = false;
+            return;
+        }
         _histogramDirty = true;
     }
 
     function requestHistogramUpdateNow() {
+        if (!_histogramEnabled || !hasHistogramTarget()) {
+            cancelHistogramWork();
+            _histogramDirty = false;
+            return;
+        }
         if (!_histogramProcessing) {
             cancelHistogramWork();
         }
@@ -1551,7 +1655,7 @@ vec4 _inspMap(vec4 v) {${oor}
         stopHistogramTimer();
         if (_histogramEnabled && _active) {
             // Initial snapshot after a short delay (let first frame render)
-            _histogramDirty = true;
+            _histogramDirty = hasHistogramTarget();
             _histogramTimer = setInterval(requestHistogramUpdate, _histogramIntervalMs);
         }
     }
@@ -1568,10 +1672,14 @@ vec4 _inspMap(vec4 v) {${oor}
         switch (msg.command) {
             case 'setInspectorVariable':
             {
-                const nextVariable = msg.variable || '';
+                const nextVariable = (msg.variable || '').trim();
                 const nextLine = msg.line || 0;
+                if (!nextVariable) {
+                    clearInspectionTarget();
+                    break;
+                }
                 const source = getShaderSource();
-                const sourceLine = nextLine > 0 ? nextLine + getPreambleOffset(source) : nextLine;
+                const sourceLine = mapSourceLineForInspection(source, nextLine);
                 const inspectTarget = tryResolveInspectableVariable(source, nextVariable, sourceLine);
                 if (!inspectTarget) {
                     break;
@@ -1581,7 +1689,6 @@ vec4 _inspMap(vec4 v) {${oor}
                 _line = nextLine;
                 if (_active && _variable) {
                     updateInspection();
-                    requestHistogramUpdate();
                 }
                 break;
             }
@@ -1592,7 +1699,6 @@ vec4 _inspMap(vec4 v) {${oor}
                     _lastRewrittenSource = ''; // force recompile
                     if (_active && _variable) {
                         updateInspection();
-                        requestHistogramUpdate();
                     }
                 }
                 break;
@@ -1600,7 +1706,11 @@ vec4 _inspMap(vec4 v) {${oor}
             case 'inspectorOn':
                 if (!_active) {
                     _active = true;
-                    if (_variable) updateInspection();
+                    if (_variable) {
+                        updateInspection();
+                    } else {
+                        clearHistogramDisplay();
+                    }
                     startHistogramTimer();
                 }
                 break;
