@@ -1,0 +1,15 @@
+[submodule "references/ShaderBoy"]
+	path = references/ShaderBoy
+	url = https://github.com/iY0Yi/ShaderBoy.git
+[submodule "references/Bonzomatic"]
+	path = references/Bonzomatic
+	url = https://github.com/Gargaj/Bonzomatic.git
+[submodule "references/twigl"]
+	path = references/twigl
+	url = https://github.com/doxas/twigl.git
+[submodule "references/vscode-shadertoy-sound"]
+	path = references/vscode-shadertoy-sound
+	url = https://github.com/hatoo/vscode-shadertoy-sound.git
+[submodule "references/vscode-audio-preview"]
+	path = references/vscode-audio-preview
+	url = https://github.com/sukumo28/vscode-audio-preview.git

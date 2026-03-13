@@ -13,6 +13,11 @@ This `.github` directory is a local documentation and agent-workspace overlay fo
 
 - `docs/architecture/overview.md` — pass2 architecture overview for the `shader-toy` VS Code extension. This is the primary deep-dive reference for the current `.github` workspace: corrected metrics, hot-reload coverage, CI/tooling risks, test-surface analysis, extension inventory, and gap assessment.
 
+### Research notes
+
+- `docs/research/README.md` — lightweight index for external shader/audio-tool references selected for later investigation.
+- `docs/research/*.md` — short placeholder notes for qualifying external references that appear relevant to GPU/audio shader workflows.
+
 ### Skills
 
 - `skills/shader-toy/SKILL.md` — refined reference skill for the `shader-toy` extension, aligned with the latest architecture report and intended for agent use during implementation, debugging, and feature planning.
@@ -31,4 +36,5 @@ This `.github` directory is a local documentation and agent-workspace overlay fo
 - Internal references in this `.github` workspace should target the local files present in this branch/worktree.
 - The main authoritative deep-dive documents are `docs/architecture/overview.md` and `skills/shader-toy/SKILL.md`; they were refreshed in the latest pass2 review and should stay aligned.
 - `overview.md` is the renamed architecture document that replaced the earlier `shadertoy-report.md` path.
+- `docs/research/` is intentionally shallow for now: it is a reconnaissance staging area, not yet a deep analysis set.
 - Agent-specific overlays should remain additive where possible so the shared source material is preserved for comparison.
